@@ -1,0 +1,65 @@
+{
+  "hints": {
+    "ok": true, 
+    "result": {
+      "gateway_node_count": 40, 
+      "gateway_roots": [
+        "system"
+      ], 
+      "project_has_spikelib": false, 
+      "project_node_count": 40, 
+      "project_roots": [
+        "system"
+      ], 
+      "roots_differ": false, 
+      "sample_spikelib": {
+        "found": false, 
+        "missing_at": "spikelib"
+      }, 
+      "sample_system_tag": {
+        "all_method_names": [
+          "browse", 
+          "browseHistoricalTags", 
+          "configure", 
+          "copy", 
+          "deleteAnnotations", 
+          "deleteTags", 
+          "exists", 
+          "exportTags", 
+          "getConfiguration", 
+          "importTags", 
+          "move", 
+          "query", 
+          "queryAnnotations", 
+          "queryTagCalculations", 
+          "queryTagDensity", 
+          "queryTagHistory", 
+          "readAsync", 
+          "readBlocking", 
+          "rename", 
+          "requestGroupExecution", 
+          "restartProvider", 
+          "storeAnnotations", 
+          "storeTagHistory", 
+          "writeAsync", 
+          "writeBlocking"
+        ], 
+        "description_len": 42, 
+        "first_method": "restartProvider", 
+        "found": true, 
+        "method_count": 25, 
+        "parameters": [
+          {
+            "default": "None", 
+            "desc_len": 41, 
+            "name": "provider", 
+            "optional": false
+          }
+        ], 
+        "return_type": "TypeDescriptor(name=bool, description=True if the provider was successfully restarted, False otherwise., methods=[__xor__(y), __and__(y), __or__(y), __nonzero__(), __str__(), __getattribute__(name), __delattr__(name), __setattr__(name, value), __repr__()], attributes=[], items=[])"
+      }
+    }
+  }, 
+  "query": "hints", 
+  "server_time": "2026-08-31T12:09:46Z"
+}

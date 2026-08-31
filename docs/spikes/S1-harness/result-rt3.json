@@ -1,0 +1,48 @@
+{
+  "query": "routing3", 
+  "routing3": {
+    "ok": true, 
+    "result": {
+      "AAA": {
+        "CROSSTALK_lines": 0, 
+        "failure": null, 
+        "lines": 500, 
+        "missing": 0, 
+        "own_lines": 500
+      }, 
+      "BBB": {
+        "CROSSTALK_lines": 0, 
+        "failure": null, 
+        "lines": 500, 
+        "missing": 0, 
+        "own_lines": 500
+      }, 
+      "errors": {}, 
+      "expected_lines_each": 500, 
+      "probe": {
+        "manager_modules_probe_error": "Traceback (most recent call last):\n  File \"<<_ScriptIDE_Spike_/spike:doGet>>\", line 373, in q_routing3\nAttributeError: 'stringmap' object has no attribute '__finditem__'\n", 
+        "manager_state_class": "<type '<reflected field public org.python.core.PyObject org.python.core.PySystemState.__name__ at 0x1>'>"
+      }, 
+      "project_library_traceback": {
+        "failure": {
+          "class": "<type 'exceptions.ValueError'>", 
+          "frame_error": "Traceback (most recent call last):\n  File \"<<_ScriptIDE_Spike_/spike:doGet>>\", line 417, in run_private\nAttributeError: 'exceptions.ValueError' object has no attribute 'traceback'\n", 
+          "str": "boom from library"
+        }, 
+        "stderr_tail": "", 
+        "stdout": ""
+      }, 
+      "stream_split": {
+        "failure": null, 
+        "stderr": "", 
+        "stdout": "to stdout"
+      }, 
+      "system_call": {
+        "failure": null, 
+        "stderr": "", 
+        "stdout": "now=Mon"
+      }
+    }
+  }, 
+  "server_time": "2026-08-31T12:12:53Z"
+}

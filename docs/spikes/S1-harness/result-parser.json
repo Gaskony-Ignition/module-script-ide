@@ -1,0 +1,66 @@
+{
+  "parser": {
+    "ok": true, 
+    "result": {
+      "py2_backtick": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "py2_except_comma": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "py2_exec_stmt": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "py2_long_literal": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "py2_ne_operator": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "py2_octal": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "py2_print_stmt": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "py2_raise_comma": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "py3_only_fstring": {
+        "attr_lineno": "1", 
+        "attr_offset": "5", 
+        "exc_class": "<type 'exceptions.SyntaxError'>", 
+        "message": "no viable alternative at input '\"{1}\"' (<spike:py3_only_fstring>, line 1)", 
+        "parsed": false
+      }, 
+      "py3_print_call": {
+        "ast_class": "<type '_ast.Module'>", 
+        "parsed": true
+      }, 
+      "syntax_error": {
+        "attr_lineno": "1", 
+        "attr_offset": "6", 
+        "exc_class": "<type 'exceptions.SyntaxError'>", 
+        "message": "no viable alternative at input ':' (<spike:syntax_error>, line 1)", 
+        "parsed": false
+      }, 
+      "syntax_error_line3": {
+        "attr_lineno": "3", 
+        "attr_offset": "4", 
+        "exc_class": "<type 'exceptions.SyntaxError'>", 
+        "message": "no viable alternative at input '=' (<spike:syntax_error_line3>, line 3)", 
+        "parsed": false
+      }
+    }
+  }, 
+  "query": "parser", 
+  "server_time": "2026-08-31T12:09:34Z"
+}

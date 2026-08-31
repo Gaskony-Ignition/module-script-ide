@@ -1,0 +1,34 @@
+{
+  "query": "traceback", 
+  "server_time": "2026-08-31T12:10:01Z", 
+  "traceback": {
+    "ok": true, 
+    "result": {
+      "exc_class": "com.inductiveautomation.ignition.common.script.JythonExecException", 
+      "exc_str": "Traceback (most recent call last):\n  File \"<script-ide:_ScriptIDE_Spike_:ignition/script-python/Spike/Console>\", line 2, in <module>\n  File \"<module:spikelib>\", line 5, in level2\n  File \"<module:spikelib>\", line 2, in boom\nValueError: boom from library\n", 
+      "frames": [
+        {
+          "co_filename": "<script-ide:_ScriptIDE_Spike_:ignition/script-python/Spike/Console>", 
+          "co_name": "<module>", 
+          "tb_lineno": 2
+        }, 
+        {
+          "co_filename": "<module:spikelib>", 
+          "co_name": "level2", 
+          "tb_lineno": 5
+        }, 
+        {
+          "co_filename": "<module:spikelib>", 
+          "co_name": "boom", 
+          "tb_lineno": 2
+        }
+      ], 
+      "getPyCause_present": true, 
+      "pyexc_class": "org.python.core.PyException", 
+      "pyexc_type": "<type 'exceptions.ValueError'>", 
+      "pyexc_value": "boom from library", 
+      "rendered": "Traceback (most recent call last):\n  File \"<script-ide:_ScriptIDE_Spike_:ignition/script-python/Spike/Console>\", line 2, in <module>\n  File \"<module:spikelib>\", line 5, in level2\n  File \"<module:spikelib>\", line 2, in boom\nValueError: boom from library\n", 
+      "submitted_filename": "<script-ide:_ScriptIDE_Spike_:ignition/script-python/Spike/Console>"
+    }
+  }
+}

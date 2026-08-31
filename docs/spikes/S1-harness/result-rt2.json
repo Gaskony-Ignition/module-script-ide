@@ -1,0 +1,47 @@
+{
+  "query": "routing2", 
+  "routing2": {
+    "ok": true, 
+    "result": {
+      "AAA": {
+        "CROSSTALK_lines": 0, 
+        "failure": null, 
+        "first": "AAA-0000", 
+        "last": "AAA-0499", 
+        "lines": 500, 
+        "missing": 0, 
+        "own_lines": 500, 
+        "stderr_len": 0
+      }, 
+      "BBB": {
+        "CROSSTALK_lines": 0, 
+        "failure": null, 
+        "first": "BBB-0000", 
+        "last": "BBB-0499", 
+        "lines": 500, 
+        "missing": 0, 
+        "own_lines": 500, 
+        "stderr_len": 0
+      }, 
+      "errors": {}, 
+      "expected_lines_each": 500, 
+      "project_library": {
+        "failure": {
+          "class": "<type 'exceptions.ImportError'>", 
+          "str": "No module named spikelib"
+        }, 
+        "stderr_tail": "", 
+        "stdout": ""
+      }, 
+      "system_call": {
+        "failure": {
+          "class": "<type 'exceptions.ImportError'>", 
+          "str": "No module named system"
+        }, 
+        "stderr": "", 
+        "stdout": ""
+      }
+    }
+  }, 
+  "server_time": "2026-08-31T12:11:32Z"
+}

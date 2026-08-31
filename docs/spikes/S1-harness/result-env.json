@@ -1,0 +1,32 @@
+{
+  "env": {
+    "ok": true, 
+    "result": {
+      "gateway_class": "com.inductiveautomation.ignition.gateway.IgnitionGateway", 
+      "gateway_script_manager_class": "com.inductiveautomation.ignition.common.script.ScriptManager", 
+      "java_version": "17.0.19", 
+      "jython_sys_version": "2.7.4 (heads/ia/2.7.4:000000000000, Apr 27 2026, 10:15:27)\n[OpenJDK 64-Bit Server VM (Azul Systems, Inc.)]", 
+      "project_script_manager_class": "com.inductiveautomation.ignition.gateway.project.ProjectScriptLifecycle$TrackingProjectScriptManager", 
+      "projects": [
+        "Access_Manager", 
+        "Demo-KPI", 
+        "Mining_Demo", 
+        "Order_Intake", 
+        "Site_Northfield_WTP", 
+        "Site_Redgum_Sewer", 
+        "Site_Starter", 
+        "Template", 
+        "Theme_Installer", 
+        "Themes_Test", 
+        "Toolbox_Home", 
+        "Water_Sim", 
+        "Whiteboard", 
+        "_ScriptIDE_Spike_", 
+        "_wd_scratch_"
+      ], 
+      "same_instance_as_gateway": false
+    }
+  }, 
+  "query": "env", 
+  "server_time": "2026-08-31T12:09:25Z"
+}

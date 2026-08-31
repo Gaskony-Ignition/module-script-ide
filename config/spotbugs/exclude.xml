@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    SpotBugs exclusions for the Script IDE module.
+
+    Every entry here is a JUSTIFIED false positive, narrowed to one class and one
+    bug pattern. Nothing is suppressed because it was inconvenient: the two real
+    findings SpotBugs raised on this module's first full run (a dead `instanceof`
+    in PrivateStateRunner, and two fields in ExecutionService that were written
+    and never read) were FIXED in the code, not excluded.
+
+    Follow that rule. If a new finding appears, the first question is whether it
+    is right.
+-->
+<FindBugsFilter>
+
+    <!--
+        EI_EXPOSE_REP2 — handlers and services hold Gateway-owned singletons
+        (ProjectManager, ScriptManager) obtained from GatewayContext.
+
+        These are long-lived platform objects that are deliberately shared by
+        reference. A defensive copy is neither possible nor meaningful: a copied
+        ProjectManager would not be connected to the gateway, and a copied
+        ScriptManager would have its own PySystemState — which, in this module
+        specifically, would silently break script execution and the Stop button.
+        Sharing the reference IS the correct design here.
+    -->
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.routes.ScriptResourceRouteHandler" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.routes.ScriptAttributesRouteHandler" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.exec.PrivateStateRunner" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.lang.ProjectIndex" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+
+    <!--
+        EI_EXPOSE_REP / EI_EXPOSE_REP2 on Outcome.failure — the record carries the
+        Throwable the user's script threw, so that the traceback can be formatted
+        from it. A Throwable cannot be defensively copied, and cloning one would
+        destroy the cause chain and the PyTraceback that make a frame clickable.
+        Carrying the original is the entire purpose of the field.
+    -->
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.exec.PrivateStateRunner$Outcome" />
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
+    <!--
+        HintIndex.Entry.params is already an immutable List (List.copyOf at every
+        construction site), so the "externally mutable" premise does not hold.
+        SpotBugs cannot see that through the List interface.
+    -->
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.lang.HintIndex$Entry" />
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
+    <!--
+        Gson data-transfer objects: fields are populated reflectively by
+        Gson.fromJson at the route boundary, which SpotBugs cannot see, so it
+        reports them as unwritten/unread. Standard false positive for a
+        deserialisation DTO.
+    -->
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.routes.ScriptResourceRouteHandler$WriteRequest" />
+        <Bug pattern="NP_UNWRITTEN_FIELD,UWF_UNWRITTEN_FIELD,URF_UNREAD_FIELD" />
+    </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.routes.ScriptAttributesRouteHandler$AttributeRequest" />
+        <Bug pattern="NP_UNWRITTEN_FIELD,UWF_UNWRITTEN_FIELD,URF_UNREAD_FIELD" />
+    </Match>
+
+</FindBugsFilter>

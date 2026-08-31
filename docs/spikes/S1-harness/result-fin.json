@@ -1,0 +1,66 @@
+{
+  "final": {
+    "ok": true, 
+    "result": {
+      "_reading": "elapsed ~3s => interrupt reaches a Py.runCode execution. elapsed ~15s => it does not, and Stop needs another mechanism.", 
+      "interrupt_busy_loop": {
+        "interrupt_called_on": 72509, 
+        "still_alive": false, 
+        "tid": 72509
+      }, 
+      "library_traceback": {
+        "class": "<type 'exceptions.ValueError'>", 
+        "frames": [
+          {
+            "co_filename": "<<_ScriptIDE_Spike_/spike:doGet>>", 
+            "co_name": "run_private", 
+            "tb_lineno": 532
+          }, 
+          {
+            "co_filename": "<script-ide:_ScriptIDE_Spike_:console>", 
+            "co_name": "<module>", 
+            "tb_lineno": 2
+          }, 
+          {
+            "co_filename": "<module:spikelib>", 
+            "co_name": "level2", 
+            "tb_lineno": 5
+          }, 
+          {
+            "co_filename": "<module:spikelib>", 
+            "co_name": "boom", 
+            "tb_lineno": 2
+          }
+        ], 
+        "str": "boom from library"
+      }, 
+      "streams": {
+        "failure": null, 
+        "stderr": "via sys.stderr", 
+        "stdout": "via print\nvia sys.stdout"
+      }, 
+      "system_call": {
+        "failure": {
+          "class": "<type 'exceptions.AttributeError'>", 
+          "frames": [
+            {
+              "co_filename": "<<_ScriptIDE_Spike_/spike:doGet>>", 
+              "co_name": "run_private", 
+              "tb_lineno": 532
+            }, 
+            {
+              "co_filename": "<final-system>", 
+              "co_name": "<module>", 
+              "tb_lineno": 2
+            }
+          ], 
+          "str": "'com.inductiveautomation.ignition.common.script.Imm' object has no attribute 'getSystemFlags'"
+        }, 
+        "stdout": ""
+      }, 
+      "traceback_went_to_private_stderr": false
+    }
+  }, 
+  "query": "final", 
+  "server_time": "2026-08-31T12:14:12Z"
+}

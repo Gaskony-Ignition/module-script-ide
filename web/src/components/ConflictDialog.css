@@ -1,0 +1,119 @@
+.conflict-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: var(--bg-secondary);
+  /* Semi-opaque over the workspace rather than a flat panel, so the user keeps
+     the context of which tab is in conflict. */
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  z-index: 20;
+}
+
+.conflict-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(1000px, 100%);
+  max-height: 100%;
+  min-height: 0;
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+}
+
+.conflict-dialog h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.conflict-dialog p {
+  margin: 0;
+}
+
+.conflict-diff {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+}
+
+.conflict-column-heads {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  position: sticky;
+  top: 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.conflict-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conflict-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+}
+
+.conflict-side {
+  padding: 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  /* pre-wrap, never pre-line: collapsing whitespace in a diff of a tab-indented
+     Python file hides the only thing that changed. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.conflict-removed .conflict-side:first-child {
+  background: color-mix(in srgb, var(--error) 22%, transparent);
+}
+
+.conflict-added .conflict-side:last-child {
+  background: color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+.conflict-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.button-danger {
+  border-color: var(--error);
+  color: var(--error);
+  background: none;
+}
+
+.button-danger:hover {
+  background: var(--error);
+  color: var(--bg-primary);
+}
+
+.button-quiet {
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+  background: none;
+}
+
+.button-quiet:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

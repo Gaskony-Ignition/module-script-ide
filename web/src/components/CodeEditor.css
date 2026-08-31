@@ -1,0 +1,32 @@
+.code-editor {
+  position: relative;
+  flex: 1 1 auto;
+  /* Without a zero minimum a long script pushes the editor past the viewport
+     instead of scrolling inside its own pane. */
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+/* One host per open document. All but the active one are display:none — see the
+   one-view-per-document note in CodeEditor.tsx. */
+.code-editor-host {
+  height: 100%;
+}
+
+.code-editor .cm-editor {
+  height: 100%;
+}
+
+.code-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.code-editor-empty {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  color: var(--text-muted);
+}

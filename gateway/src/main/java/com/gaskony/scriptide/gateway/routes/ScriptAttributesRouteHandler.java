@@ -1,0 +1,341 @@
+package com.gaskony.scriptide.gateway.routes;
+
+import com.gaskony.scriptide.common.ScriptResourceTypes;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
+import com.inductiveautomation.ignition.common.resourcecollection.Resource;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourcePath;
+import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
+import com.inductiveautomation.ignition.gateway.project.ProjectManager;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * Reads and writes a script resource's {@code resource.json} attributes — a
+ * timer's delay and threading, a message handler's thread type, a library
+ * script's hint scope.
+ *
+ * <p>This exists as a separate route because the content write only ever calls
+ * {@code putData}; attributes survive untouched through {@code toBuilder()} and
+ * need {@code putAttribute}, which the SDK keeps as a genuinely separate call.</p>
+ *
+ * <h2>The allowlist is per-type, not a union</h2>
+ *
+ * <p>{@link ScriptResourceTypes} holds the measured spellings, and they really do
+ * differ between types that look alike: a timer's {@code sharedThread} is a
+ * boolean, a message handler's {@code threadType} is a case-sensitive string. A
+ * key outside its own type's set is a 400, never a silent drop — writing an
+ * attribute the Designer does not recognise leaves a resource that looks fine and
+ * behaves wrongly.</p>
+ *
+ * <p>Types whose Designer workspace was never measured have an EMPTY allowlist and
+ * therefore reject every attribute write. That is deliberate: see
+ * {@link ScriptResourceTypes}.</p>
+ */
+public final class ScriptAttributesRouteHandler {
+
+    private static final Logger logger = LoggerFactory.getLogger(ScriptAttributesRouteHandler.class);
+
+    private final ProjectManager projectManager;
+    private final ScriptResourceRouteHandler resources;
+
+    public ScriptAttributesRouteHandler(ProjectManager projectManager,
+                                        ScriptResourceRouteHandler resources) {
+        this.projectManager = projectManager;
+        this.resources = resources;
+    }
+
+    /** {@code GET /api/scripts/attributes/:path?project=X} */
+    public Object read(RequestContext req, HttpServletResponse resp) {
+        String project = req.getParameter("project");
+        if (project == null || project.isBlank()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Missing required 'project' parameter");
+        }
+        ResourcePath path;
+        try {
+            path = HandlerSupport.decodePath(req.getParameter("path"));
+        } catch (IllegalArgumentException e) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
+        }
+        // Check the moduleId as well as the typeId, matching the content routes.
+        // typeId alone would admit another module's resource type that happened to
+        // be named "timer" or "script-python". Not known to be exploitable, but the
+        // two write surfaces should not disagree about what they accept.
+        var typeOpt = editableTypeOf(path);
+        if (typeOpt.isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Not an editable script resource type");
+        }
+
+        Optional<Resource> resourceOpt = projectManager.find(project)
+            .flatMap(c -> c.getResource(path));
+        if (resourceOpt.isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+                "No such script: " + path);
+        }
+        Resource resource = resourceOpt.get();
+
+        JsonObject attrs = new JsonObject();
+        for (String name : typeOpt.get().attributeAllowlist()) {
+            resource.getAttribute(name).ifPresent(v -> attrs.add(name, toJson(v)));
+        }
+
+        JsonObject out = new JsonObject();
+        out.addProperty("path", HandlerSupport.encodePath(path));
+        out.addProperty("signature", resource.getResourceSignature().toString());
+        // Tell the client what it may set, so the UI can render only the fields
+        // this type actually supports rather than guessing.
+        var editable = new com.google.gson.JsonArray();
+        typeOpt.get().attributeAllowlist().forEach(editable::add);
+        out.add("editable", editable);
+        out.add("attributes", attrs);
+        return out;
+    }
+
+    /** {@code POST /api/scripts/attributes/:path?project=X} with {@code {attributes:{…}}}. */
+    public Object write(RequestContext req, HttpServletResponse resp) throws java.io.IOException {
+        String project = req.getParameter("project");
+        if (project == null || project.isBlank()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Missing required 'project' parameter");
+        }
+        ResourcePath path;
+        try {
+            path = HandlerSupport.decodePath(req.getParameter("path"));
+        } catch (IllegalArgumentException e) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
+        }
+        // Check the moduleId as well as the typeId, matching the content routes.
+        // typeId alone would admit another module's resource type that happened to
+        // be named "timer" or "script-python". Not known to be exploitable, but the
+        // two write surfaces should not disagree about what they accept.
+        var typeOpt = editableTypeOf(path);
+        if (typeOpt.isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Not an editable script resource type");
+        }
+        Set<String> allowed = typeOpt.get().attributeAllowlist();
+        if (allowed.isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Attributes for '" + path.getResourceType().typeId() + "' are not editable: "
+                    + "this type's Designer workspace has not been measured, so writing one "
+                    + "would be a guess. See ScriptResourceTypes.");
+        }
+
+        Object csrf = HandlerSupport.enforceCsrf(req, resp);
+        if (csrf != null) {
+            return csrf;
+        }
+
+        AttributeRequest body;
+        try {
+            body = HandlerSupport.GSON.fromJson(req.readBody(), AttributeRequest.class);
+        } catch (JsonParseException e) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Malformed JSON request body");
+        }
+        if (body == null || body.attributes == null || body.attributes.isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Request body must contain a non-empty 'attributes' object");
+        }
+        if (!projectManager.isMutable(project)) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_CONFLICT,
+                "Project is not mutable: " + project);
+        }
+
+        Optional<Resource> existingOpt = projectManager.getResource(project, path);
+        if (existingOpt.isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+                "No such script in this project (attributes cannot be set on an "
+                    + "inherited resource without first overriding it): " + path);
+        }
+        Resource existing = existingOpt.get();
+
+        String expected = HandlerSupport.expectedSignature(req, body.baseSignature);
+        String current = existing.getResourceSignature().toString();
+        if (expected == null || expected.isBlank()) {
+            return HandlerSupport.error(resp, HandlerSupport.SC_PRECONDITION_REQUIRED,
+                "Missing If-Match/baseSignature — read the script before updating it");
+        }
+        if (!expected.equals(current)) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_CONFLICT,
+                "This script changed on the gateway since you opened it (concurrent edit)");
+        }
+
+        com.inductiveautomation.ignition.common.resourcecollection.ResourceBuilder builder =
+            existing.toBuilder();
+        for (Map.Entry<String, JsonElement> e : body.attributes.entrySet()) {
+            String name = e.getKey();
+            if (!allowed.contains(name)) {
+                return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                    "Attribute '" + name + "' is not settable on a "
+                        + path.getResourceType().typeId() + " (allowed: " + allowed + ")");
+            }
+            Object value;
+            try {
+                value = validate(name, e.getValue(), path.getResourceType().typeId());
+            } catch (IllegalArgumentException ex) {
+                return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                    ex.getMessage());
+            }
+            // ResourceBuilder has typed putAttribute overloads. Dispatch on the
+            // validated Java type — passing an Object would bind to the shaded
+            // JsonElement overload and fail to compile.
+            if (value instanceof Boolean b) {
+                builder.putAttribute(name, b.booleanValue());
+            } else if (value instanceof Integer i) {
+                builder.putAttribute(name, i.intValue());
+            } else if (value instanceof Long l) {
+                builder.putAttribute(name, l.longValue());
+            } else {
+                builder.putAttribute(name, String.valueOf(value));
+            }
+        }
+
+        Resource updated = builder.build();
+        ChangeOperation op = ChangeOperation.newModifyOp(updated, existing.getResourceSignature());
+        Object pushError = resources.push(op, project, path, req, resp);
+        if (pushError != null) {
+            return pushError;
+        }
+
+        JsonObject out = new JsonObject();
+        out.addProperty("ok", true);
+        projectManager.getResource(project, path)
+            .ifPresent(now -> out.addProperty("signature", now.getResourceSignature().toString()));
+        return out;
+    }
+
+    /**
+     * The editable script type for a path, requiring the {@code ignition} module id
+     * as well as the type id.
+     *
+     * <p>Checking the type id alone would admit another module's resource type that
+     * happened to be named {@code timer} or {@code script-python}. The content
+     * routes already check both; the two write surfaces should not disagree about
+     * what they accept.</p>
+     */
+    private static Optional<ScriptResourceTypes.ScriptType> editableTypeOf(ResourcePath path) {
+        var type = path.getResourceType();
+        if (!ScriptResourceTypes.IGNITION_MODULE.equals(type.moduleId())) {
+            return Optional.empty();
+        }
+        return ScriptResourceTypes.byTypeId(type.typeId());
+    }
+
+    /**
+     * Validate and unwrap one attribute value, enforcing the type the Designer
+     * actually writes.
+     *
+     * <p>The types are checked rather than coerced. A {@code threadType} of
+     * {@code "shared"} (lower case) or a {@code sharedThread} of {@code "true"}
+     * (a string) is accepted by the resource layer and then behaves wrongly, with
+     * nothing in any log to say so.</p>
+     */
+    private static Object validate(String name, JsonElement value, String typeId) {
+        switch (name) {
+            case "hintScope": {
+                int v = asInt(name, value);
+                if (!ScriptResourceTypes.HINT_SCOPE_VALUES.contains(v)) {
+                    throw new IllegalArgumentException(
+                        "hintScope must be one of " + ScriptResourceTypes.HINT_SCOPE_VALUES
+                            + " (ApplicationScope bitmask), got " + v);
+                }
+                return v;
+            }
+            case "threadType": {
+                String v = asString(name, value);
+                if (!ScriptResourceTypes.THREAD_TYPE_VALUES.contains(v)) {
+                    throw new IllegalArgumentException(
+                        "threadType must be exactly one of "
+                            + ScriptResourceTypes.THREAD_TYPE_VALUES + " (case-sensitive), got '"
+                            + v + "'");
+                }
+                return v;
+            }
+            case "delay": {
+                long v = asLong(name, value);
+                if (v < 0 || v > ScriptResourceTypes.MAX_TIMER_DELAY_MS) {
+                    throw new IllegalArgumentException(
+                        "delay must be between 0 and " + ScriptResourceTypes.MAX_TIMER_DELAY_MS
+                            + " ms, got " + v);
+                }
+                return v;
+            }
+            // sharedThread is a BOOLEAN here; the message-handler equivalent is a
+            // STRING named threadType. They are not interchangeable.
+            case "enabled":
+            case "fixedDelay":
+            case "sharedThread":
+                return asBoolean(name, value);
+            default:
+                // Unreachable: the allowlist is checked before this is called.
+                // Fail loudly rather than write an unvalidated value.
+                throw new IllegalArgumentException(
+                    "No validator for attribute '" + name + "' on " + typeId);
+        }
+    }
+
+    private static boolean asBoolean(String name, JsonElement v) {
+        if (!v.isJsonPrimitive() || !v.getAsJsonPrimitive().isBoolean()) {
+            throw new IllegalArgumentException(name + " must be a boolean, got " + v);
+        }
+        return v.getAsBoolean();
+    }
+
+    private static String asString(String name, JsonElement v) {
+        if (!v.isJsonPrimitive() || !v.getAsJsonPrimitive().isString()) {
+            throw new IllegalArgumentException(name + " must be a string, got " + v);
+        }
+        return v.getAsString();
+    }
+
+    private static int asInt(String name, JsonElement v) {
+        if (!v.isJsonPrimitive() || !v.getAsJsonPrimitive().isNumber()) {
+            throw new IllegalArgumentException(name + " must be a number, got " + v);
+        }
+        return v.getAsInt();
+    }
+
+    private static long asLong(String name, JsonElement v) {
+        if (!v.isJsonPrimitive() || !v.getAsJsonPrimitive().isNumber()) {
+            throw new IllegalArgumentException(name + " must be a number, got " + v);
+        }
+        return v.getAsLong();
+    }
+
+    /**
+     * Bridge one attribute value from IA's SHADED Gson into plain Gson.
+     *
+     * <p>{@code Resource.getAttribute} returns
+     * {@code com.inductiveautomation.ignition.common.gson.JsonElement} — a
+     * different class from the {@code com.google.gson.JsonElement} this module
+     * ships, not a classloader variant of it. They cannot be assigned across, so
+     * the conversion is a {@code toString()} and a re-parse. That is the standard
+     * bridge for this boundary in the estate, and it is why shipping our own Gson
+     * is safe: no shaded type is ever handed to it directly.</p>
+     */
+    private static JsonElement toJson(com.inductiveautomation.ignition.common.gson.JsonElement shaded) {
+        try {
+            return com.google.gson.JsonParser.parseString(shaded.toString());
+        } catch (RuntimeException e) {
+            logger.debug("Could not bridge shaded attribute value, using its text: {}",
+                e.getMessage());
+            return new com.google.gson.JsonPrimitive(shaded.toString());
+        }
+    }
+
+    /** Body of an attribute write: {@code {attributes:{…}, baseSignature?}}. */
+    static final class AttributeRequest {
+        Map<String, JsonElement> attributes;
+        String baseSignature;
+    }
+}

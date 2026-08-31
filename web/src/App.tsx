@@ -1,0 +1,95 @@
+import { useEffect, useState } from 'react';
+import { ANONYMOUS, fetchSession, type SessionInfo } from './api/session';
+import { gatewayLoginUrl } from './api/urls';
+import Workspace from './workspace/Workspace';
+// The module version, from the ONE file the build maintains: Gradle's
+// `syncVersion` rewrites web/package.json before `assembleModlStructure`, so the
+// number here is the module's by construction. Imported rather than pushed in
+// through a Vite `define` because an import is checked by the compiler and needs
+// no build config to be true under vitest, `npm run dev` and a gateway build
+// alike — a define is invisible to all three until it is wrong. Vite emits JSON
+// as named exports, so nothing but this string reaches the bundle.
+import { version } from '../package.json';
+import './App.css';
+
+type Status = 'loading' | 'ready' | 'unreachable';
+
+/**
+ * The application shell.
+ *
+ * Its first job is still the P0 one: prove the module serves the SPA, the SPA
+ * reaches the API on the same origin, and the Gateway session cookie identifies
+ * the user. The three non-authenticated branches below are unchanged from P0 and
+ * are deliberately kept apart — an unreachable backend and a signed-out user look
+ * identical to a naive client, and telling them apart is the whole point of the
+ * probe. Once the session says authenticated, the editor workspace takes over.
+ */
+export default function App() {
+  const [status, setStatus] = useState<Status>('loading');
+  const [session, setSession] = useState<SessionInfo>(ANONYMOUS);
+  const [error, setError] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSession()
+      .then((info) => {
+        if (cancelled) return;
+        setSession(info);
+        setStatus('ready');
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setStatus('unreachable');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const signedIn = status === 'ready' && session.authenticated;
+
+  return (
+    <div className="app">
+      <header className="app-header">
+        <h1>Script IDE</h1>
+        <span className="app-version">v{version}</span>
+        {signedIn && (
+          <span className="app-user">
+            {session.username}
+            {session.writable ? '' : ' · read-only'}
+          </span>
+        )}
+      </header>
+
+      {signedIn ? (
+        <Workspace session={session} />
+      ) : (
+        <main className="app-main">
+          {status === 'loading' && <p className="muted">Checking your Gateway session…</p>}
+
+          {/* An unreachable backend is a different problem from being signed out,
+              and the probe is designed so we can tell them apart. Say which. */}
+          {status === 'unreachable' && (
+            <div className="panel panel-error">
+              <h2>Cannot reach the Gateway API</h2>
+              <p className="muted">{error}</p>
+            </div>
+          )}
+
+          {status === 'ready' && !session.authenticated && (
+            <div className="panel">
+              <h2>You are not signed in</h2>
+              <p className="muted">
+                The Script IDE uses your Gateway session. Sign in, then return to this page.
+              </p>
+              <a className="button" href={gatewayLoginUrl()}>
+                Sign in to the Gateway
+              </a>
+            </div>
+          )}
+        </main>
+      )}
+    </div>
+  );
+}

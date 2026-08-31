@@ -1,0 +1,26 @@
+{
+  "query": "stop", 
+  "server_time": "2026-08-31T12:16:26Z", 
+  "stop": {
+    "ok": true, 
+    "result": {
+      "_reading": "busy elapsed ~3s => Stop works at Python trace points. sleep elapsed ~10s => a script blocked in a Java call cannot be stopped, so the UI must say Stop is best-effort.", 
+      "busy_loop_15s": {
+        "interrupt_at_s": 3.0, 
+        "interrupt_call": "returned", 
+        "label": "busy", 
+        "still_alive_after_join": false, 
+        "tid": 72667, 
+        "wallclock_total_s": 3.0
+      }, 
+      "java_sleep_10s": {
+        "interrupt_at_s": 2.0, 
+        "interrupt_call": "returned", 
+        "label": "sleep", 
+        "still_alive_after_join": false, 
+        "tid": 72670, 
+        "wallclock_total_s": 10.06
+      }
+    }
+  }
+}

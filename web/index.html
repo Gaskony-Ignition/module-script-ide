@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Script IDE</title>
+    <script>
+      // Paint the theme before first paint, so the shell never flashes light.
+      // Wrapped because localStorage throws outright in some embedded contexts.
+      (function () {
+        try {
+          var stored = localStorage.getItem('scriptide.theme');
+          if (stored) { document.documentElement.setAttribute('data-theme', stored); }
+        } catch (e) { /* storage unavailable — fall through to the CSS default */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

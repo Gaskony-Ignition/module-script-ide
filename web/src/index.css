@@ -1,0 +1,72 @@
+/*
+ * Design tokens. Every colour, font and spacing value in the app comes from a
+ * variable defined here — the suite rule is no hex outside this file.
+ *
+ * Dark by default (Catppuccin Mocha, the suite palette). `color-scheme` is
+ * declared explicitly and is NOT optional: without it Chrome's "auto dark mode
+ * for web contents" repaints SVG fills, and the symptom is charts rendering
+ * white on a dark page. It is a client-side setting, so the DOM, the props and
+ * the served CSS all read correct and no headless check can reproduce it. That
+ * has cost this estate several releases.
+ */
+:root {
+  color-scheme: dark;
+
+  --bg-primary: #1e1e2e;
+  --bg-secondary: #181825;
+  --bg-tertiary: #313244;
+  --surface: #232334;
+
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --text-muted: #7f849c;
+
+  --border-light: #45475a;
+
+  --accent-primary: #89b4fa;
+  --accent-primary-bg: rgba(137, 180, 250, 0.16);
+
+  --success: #a6e3a1;
+  --warning: #f9e2af;
+  --error: #f38ba8;
+
+  /* Syntax colours for the editor. Named by role, not by hue, so a future light
+     theme can redefine them without touching CodeEditor.tsx. */
+  --syntax-keyword: #cba6f7;
+  --syntax-string: #a6e3a1;
+  --syntax-number: #fab387;
+  --syntax-comment: #6c7086;
+  --syntax-function: #89b4fa;
+  --syntax-type: #f9e2af;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}

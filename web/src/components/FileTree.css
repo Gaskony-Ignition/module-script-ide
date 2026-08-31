@@ -1,0 +1,104 @@
+/* The scrolling region of the rail. Its width, background and right-hand border
+   belong to .workspace-rail now; the tree only takes the space the footer does
+   not, and min-height:0 is what lets it shrink to that instead of overflowing. */
+.file-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) 0 var(--space-3);
+}
+
+.file-tree-empty {
+  padding: var(--space-4);
+  margin: 0;
+}
+
+.file-tree-group {
+  margin-bottom: var(--space-2);
+}
+
+.file-tree-header,
+.file-tree-package,
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-3);
+  background: none;
+  border: 0;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-tree-header {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.file-tree-header:hover,
+.file-tree-package:hover,
+.file-tree-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.file-tree-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+}
+
+.file-tree-package {
+  color: var(--text-secondary);
+}
+
+.file-tree-item.is-selected {
+  background: var(--accent-primary-bg);
+  color: var(--accent-primary);
+}
+
+.file-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-tree-chevron {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 10px;
+  color: var(--text-muted);
+  transition: transform 0.12s ease;
+}
+
+.file-tree-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.badge {
+  margin-left: auto;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.badge-inherited {
+  border-color: var(--text-muted);
+}
+
+.badge-override {
+  border-color: var(--warning);
+  color: var(--warning);
+}

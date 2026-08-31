@@ -1,0 +1,48 @@
+.config-strip {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.config-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.config-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.config-field input[type='number'],
+.config-field select,
+.config-field input[type='text'] {
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.config-field input[type='number'] {
+  width: 96px;
+}
+
+.config-save {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.config-save:disabled {
+  border-color: var(--border-light);
+  color: var(--text-muted);
+  background: none;
+  cursor: default;
+}

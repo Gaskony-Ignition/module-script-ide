@@ -1,0 +1,30 @@
+{
+  "query": "routing", 
+  "routing": {
+    "ok": true, 
+    "result": {
+      "AAA": {
+        "CROSSTALK_lines": 22, 
+        "chars": 4491, 
+        "first": "AAA-0000", 
+        "last": "AAA-0499", 
+        "lines": 477, 
+        "missing": 45, 
+        "own_lines": 455
+      }, 
+      "BBB": {
+        "CROSSTALK_lines": 25, 
+        "chars": 4509, 
+        "first": "BBB-0001", 
+        "last": "BBB-0499", 
+        "lines": 478, 
+        "missing": 47, 
+        "own_lines": 453
+      }, 
+      "errors": {}, 
+      "expected_lines_each": 500, 
+      "unrouted_writes": 0
+    }
+  }, 
+  "server_time": "2026-08-31T12:10:12Z"
+}

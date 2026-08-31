@@ -1,0 +1,90 @@
+.workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  /* min-height:0 all the way down, or the editor grows the page instead of
+     scrolling inside its own pane. */
+  min-height: 0;
+}
+
+.workspace-toolbar {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.workspace-project {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.workspace-project select {
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.workspace-toolbar .button {
+  cursor: pointer;
+}
+
+.workspace-toolbar .button:disabled {
+  border-color: var(--border-light);
+  background: none;
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.workspace-readonly,
+.workspace-notice {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-readonly {
+  color: var(--warning);
+}
+
+.workspace-notice.is-error {
+  color: var(--error);
+}
+
+.workspace-notice.is-info {
+  color: var(--text-muted);
+}
+
+.workspace-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workspace-rail {
+  display: flex;
+  flex: 0 0 260px;
+  flex-direction: column;
+  /* The min-height:0 chain again. Without it the tree never engages its own
+     scrollbar, grows to fit its content, and pushes the footer off the bottom
+     of the rail — which looks exactly like a footer that was never rendered. */
+  min-height: 0;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-light);
+}
+
+.workspace-editor {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
