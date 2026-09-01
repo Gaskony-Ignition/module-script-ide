@@ -52,6 +52,15 @@ const SCRIPTS: ScriptEntry[] = [
     typeLabel: 'Startup',
     scriptKey: 'onStartup.py',
     singleton: true,
+    defined: true,
+  }),
+  entry({
+    path: 'ignition/timer/Disabled',
+    typeId: 'timer',
+    name: 'Disabled',
+    typeLabel: 'Timer',
+    scriptKey: 'handleTimerEvent.py',
+    enabled: false,
   }),
 ];
 
@@ -68,7 +77,58 @@ describe('FileTree', () => {
     expect(headers.some((h) => h.includes('Project Library'))).toBe(true);
     // Event types are nested UNDER Gateway Events, not siblings of the library.
     expect(headers.some((h) => h.includes('Timer'))).toBe(true);
-    expect(headers.some((h) => h.includes('Startup'))).toBe(true);
+    // Startup is NOT one of them: it is a script, not a folder, so it must not
+    // appear as an expandable header at all.
+    expect(headers.some((h) => h.includes('Startup'))).toBe(false);
+  });
+
+  it('lists the four event FOLDERS before the three singleton scripts', () => {
+    // Measured off the real 8.3 Designer (SCRIPTING.md §1): folders first, in
+    // the order Message / Scheduled / Tag Change / Timer, then Shutdown /
+    // Startup / Update as single scripts. Not alphabetical across the group.
+    render(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
+    const labels = screen
+      .getAllByRole('button')
+      .map((b) => (b.textContent ?? '').trim());
+    const order = ['Message Handler', 'Scheduled', 'Tag Change', 'Timer',
+      'Shutdown', 'Startup', 'Update']
+      .map((name) => labels.findIndex((label) => label.startsWith(name)));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('renders a singleton as a row, never as a folder with one child', () => {
+    render(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
+    const startup = screen.getByRole('button', { name: /Startup/ });
+    // A folder carries aria-expanded. Until 1.3.0 this one did, and the script
+    // inside it was a second, nameless row — two things the Designer does not do.
+    expect(startup.getAttribute('aria-expanded')).toBeNull();
+  });
+
+  it('creates a singleton the project does not have yet, from its row', () => {
+    const onCreateSingleton = vi.fn();
+    // No Update script anywhere in SCRIPTS — the row must still be there, and
+    // clicking it is the only route to creating one.
+    render(
+      <FileTree
+        scripts={SCRIPTS}
+        selectedPath={null}
+        onSelect={vi.fn()}
+        onCreateSingleton={onCreateSingleton}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Update/ }));
+    expect(onCreateSingleton).toHaveBeenCalledWith('update');
+  });
+
+  it('badges a disabled event script', () => {
+    // `enabled: false` is what the Designer marks in its own tree. Without the
+    // badge a disabled timer looks identical to a running one.
+    render(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
+    const disabled = screen.getByRole('button', { name: /Disabled/ });
+    expect(disabled.textContent).toContain('off');
+    const running = screen.getByRole('button', { name: /Poller/ });
+    expect(running.textContent).not.toContain('off');
   });
 
   it('nests every gateway event type inside Gateway Events', () => {
@@ -83,24 +143,13 @@ describe('FileTree', () => {
     expect(screen.getByRole('button', { name: /Project Library/ })).toBeTruthy();
   });
 
-  it('offers the Script Console only when a handler is supplied', () => {
-    const onSelectSpecial = vi.fn();
-    const { unmount } = render(
-      <FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />
-    );
+  it('keeps the Script Console out of the tree', () => {
+    // It was a row here in 1.1.0-1.2.0 and read as a script among scripts
+    // (Nigel, 01/09/2026). It lives on the activity bar and in the bottom panel
+    // now, and a second entry point in the tree would be two ways to open one
+    // thing.
+    render(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Script Console' })).toBeNull();
-    unmount();
-
-    render(
-      <FileTree
-        scripts={SCRIPTS}
-        selectedPath={null}
-        onSelect={vi.fn()}
-        onSelectSpecial={onSelectSpecial}
-      />
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Script Console' }));
-    expect(onSelectSpecial).toHaveBeenCalledWith('console');
   });
 
   it('offers delete only for scripts this project owns', () => {
@@ -159,10 +208,11 @@ describe('FileTree', () => {
     expect(screen.queryByRole('button', { name: 'Poller' })).not.toBeInTheDocument();
   });
 
-  it('shows a singleton under its own group, labelled by its type', () => {
+  it('shows a singleton as exactly ONE row, labelled by its type', () => {
     render(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
-    // Two matches: the group header and the entry itself.
-    expect(screen.getAllByRole('button', { name: /Startup/ }).length).toBeGreaterThanOrEqual(2);
+    // ONE, not two. Until 1.3.0 there were two — a folder header and a nameless
+    // row inside it — which is not how the Designer shows a single script.
+    expect(screen.getAllByRole('button', { name: /Startup/ })).toHaveLength(1);
   });
 
   it('badges anything that is not local, and leaves local entries unbadged', () => {
@@ -208,7 +258,13 @@ describe('FileTree', () => {
     // and an empty folder is the only place to create the first script of that
     // kind. So the message is per FOLDER, not one for the whole section.
     expect(screen.getAllByText('None yet.').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Not defined in this project.').length).toBe(3);
+    // The three singletons are still listed — the Designer shows them whether
+    // or not they exist — but as rows, dimmed, with the explanation on the
+    // tooltip rather than as a paragraph where a script should be.
+    for (const label of ['Shutdown', 'Startup', 'Update']) {
+      const row = screen.getByRole('button', { name: new RegExp(label) });
+      expect(row.getAttribute('title')).toContain('Not defined in this project');
+    }
     expect(screen.getByText('No library scripts yet.')).toBeInTheDocument();
   });
 

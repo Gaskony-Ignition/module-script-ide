@@ -36,7 +36,11 @@ describe('ConfigStrip', () => {
     });
     expect(screen.getByLabelText('Enabled')).toBeInTheDocument();
     expect(screen.getByLabelText('Delay (ms)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Fixed delay')).toBeInTheDocument();
+    // `fixedDelay` is the Designer's radio pair, not a checkbox: it names two
+    // modes, and "Fixed delay, unticked" never says the second one out loud.
+    expect(screen.getByLabelText('Fixed Delay')).toBeInTheDocument();
+    expect(screen.getByLabelText('Fixed Rate')).toBeInTheDocument();
+    expect((screen.getByLabelText('Fixed Rate') as HTMLInputElement).checked).toBe(true);
     expect(screen.getByLabelText('Shared thread')).toBeInTheDocument();
     // A timer has no threadType and no hintScope — those belong to other types.
     expect(screen.queryByLabelText('Thread type')).not.toBeInTheDocument();

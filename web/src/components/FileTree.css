@@ -1,69 +1,29 @@
+/*
+ * The script tree.
+ *
+ * Consolidated in 1.3.0. Three generations of rules had stacked up here — a
+ * 22px row height declared twice, `.badge` styled twice with the later block
+ * silently winning, and a `.file-tree-leaf` treatment for a Script Console row
+ * that no longer exists. Duplicated declarations in one stylesheet are not
+ * harmless: the reader has no way to tell which one is in force without opening
+ * the browser, and the dead ones read as intent.
+ *
+ * Metrics are VS Code's: 22px rows, 13px labels, 11px uppercase headings.
+ */
+
 /* The scrolling region of the rail. Its width, background and right-hand border
-   belong to .workspace-rail now; the tree only takes the space the footer does
-   not, and min-height:0 is what lets it shrink to that instead of overflowing. */
+   belong to .workspace-rail; the tree takes the space the footer does not, and
+   min-height:0 is what lets it shrink to that instead of overflowing. */
 .file-tree {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  padding: var(--space-2) 0 var(--space-3);
-}
-
-.file-tree-empty {
-  padding: var(--space-4);
-  margin: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-1) 0 var(--space-3);
 }
 
 .file-tree-group {
   margin-bottom: var(--space-2);
-}
-
-.file-tree-header,
-.file-tree-package,
-.file-tree-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-1) var(--space-3);
-  background: none;
-  border: 0;
-  color: var(--text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.file-tree-header {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.file-tree-header:hover,
-.file-tree-package:hover,
-.file-tree-item:hover {
-  background: var(--bg-tertiary);
-}
-
-.file-tree-count {
-  margin-left: auto;
-  font-family: var(--font-mono);
-}
-
-.file-tree-package {
-  color: var(--text-secondary);
-}
-
-.file-tree-item.is-selected {
-  background: var(--accent-primary-bg);
-  color: var(--accent-primary);
-}
-
-.file-tree-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .file-tree-list {
@@ -72,47 +32,156 @@
   list-style: none;
 }
 
-.file-tree-chevron {
-  display: inline-block;
+/* ---- rows ---------------------------------------------------------------- */
+
+.file-tree-item,
+.file-tree-package,
+.file-tree-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: var(--row-height);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-chrome);
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-tree-item:hover,
+.file-tree-package:hover,
+.file-tree-header:hover {
+  background: var(--bg-tertiary);
+}
+
+.file-tree-item.is-selected {
+  background: var(--accent-primary-bg);
+}
+
+.file-tree-package {
+  color: var(--text-secondary);
+}
+
+.file-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Section headings read as headings — the level above a folder rather than
+   another row in the list. */
+.file-tree-header {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* A non-interactive heading (the Web Dev list has no collapse). */
+.file-tree-static {
+  cursor: default;
+}
+
+.file-tree-static:hover {
+  background: none;
+}
+
+.file-tree-icon {
   flex: 0 0 auto;
-  width: 10px;
   color: var(--text-muted);
-  transition: transform 0.12s ease;
 }
 
-.file-tree-chevron.is-open {
-  transform: rotate(90deg);
+.file-tree-item.is-selected .file-tree-icon,
+.file-tree-item:hover .file-tree-icon {
+  color: var(--text-secondary);
 }
 
+.file-tree-chevron {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.file-tree-count {
+  margin-left: auto;
+  padding-left: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.file-tree-empty {
+  padding: 0 var(--space-3);
+  margin: 0;
+  min-height: var(--row-height);
+  display: flex;
+  align-items: center;
+  font-size: var(--font-size-sm);
+}
+
+/* ---- gateway-event singletons -------------------------------------------- */
+
+/* A singleton that exists is bold; one that does not is dimmed. Measured off
+   the real Designer, which uses weight alone to say "this has been created". */
+.file-tree-name.is-defined {
+  font-weight: 600;
+}
+
+.file-tree-name.is-undefined {
+  color: var(--text-muted);
+}
+
+/* ---- Web Dev ------------------------------------------------------------- */
+
+/* A method an endpoint does not implement yet: visible, but clearly not there. */
+.file-tree-item.is-absent {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.file-tree-method {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* ---- badges -------------------------------------------------------------- */
+
+/*
+ * Inheritance is not decoration — editing an inherited script creates a local
+ * override rather than changing the parent — so the badge stays. What went is
+ * the box: six boxed uppercase INHERITED badges down one rail were more ink
+ * than the script names they annotate, and the border said nothing the word
+ * did not (Nigel's UI standard: a signal that has to be explained is not one).
+ */
 .badge {
   margin-left: auto;
-  padding: 0 var(--space-1);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
+  padding: 0;
+  border: none;
   color: var(--text-muted);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.badge-inherited {
-  border-color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-style: italic;
 }
 
 .badge-override {
-  border-color: var(--warning);
   color: var(--warning);
 }
 
-/* ---- Designer-shaped rail (01/09/2026) ---- */
-
-.file-tree-root-label {
-  padding: var(--space-2) var(--space-3);
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+/* "off" on a disabled event script. Upright, not italic: it is a state of the
+   script rather than a note about where it came from. */
+.badge-disabled {
+  color: var(--warning);
+  font-style: normal;
 }
+
+/* ---- row actions --------------------------------------------------------- */
 
 /* The header and its action button share a row, so the "+" sits on the section
    it acts on rather than in a toolbar detached from it. */
@@ -141,14 +210,17 @@
 
 .file-tree-action {
   flex: 0 0 auto;
-  width: 24px;
+  width: 22px;
   background: none;
   border: none;
+  border-radius: 0;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
+  line-height: 0;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .file-tree-action:hover,
@@ -162,9 +234,9 @@
   color: var(--error);
 }
 
-/* Delete stays hidden until the row is hovered or something in it has focus, so
-   the rail is not a wall of × — but it MUST appear on keyboard focus too, or it
-   is unreachable without a mouse. */
+/* Delete and add stay hidden until the row is hovered or something in it has
+   focus, so the rail is not a wall of icons — but they MUST appear on keyboard
+   focus too, or they are unreachable without a mouse. */
 .file-tree-delete {
   opacity: 0;
 }
@@ -172,130 +244,4 @@
 .file-tree-row:hover .file-tree-delete,
 .file-tree-delete:focus-visible {
   opacity: 1;
-}
-
-/* A leaf header (Script Console) has no chevron; the spacer keeps its label
-   aligned with the sections above it. */
-.file-tree-chevron-spacer {
-  display: inline-block;
-  width: 1em;
-}
-
-.file-tree-leaf.is-selected {
-  background: var(--accent-primary-bg);
-  color: var(--text-primary);
-}
-
-/* ---- VS Code tree (v1.2.0) ---------------------------------------------- */
-
-.file-tree {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-.file-tree-icon {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-
-.file-tree-item.is-selected .file-tree-icon,
-.file-tree-item:hover .file-tree-icon {
-  color: var(--text-secondary);
-}
-
-/* Rows are 22px like VS Code's, which is what makes a long tree scannable. */
-.file-tree-item,
-.file-tree-package,
-.file-tree-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  width: 100%;
-  min-height: 22px;
-  padding: 0 var(--space-2);
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: var(--text-primary);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.file-tree-item:hover,
-.file-tree-package:hover,
-.file-tree-header:hover {
-  background: var(--bg-tertiary);
-}
-
-.file-tree-item.is-selected {
-  background: var(--accent-primary-bg);
-}
-
-/* Section headings read as headings: uppercase, dimmer, and bold — the level
-   above a folder rather than another row in the list. */
-.file-tree-header {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-/* A non-interactive heading (the Web Dev list has no collapse). */
-.file-tree-static {
-  cursor: default;
-}
-
-.file-tree-static:hover {
-  background: none;
-}
-
-/* Script Console is a peer of Gateway Events and Project Library, so it gets the
-   same heading treatment rather than looking like a file that lost its folder. */
-.file-tree-leaf {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  gap: var(--space-2);
-}
-
-.file-tree-leaf.is-selected {
-  color: var(--text-primary);
-}
-
-.file-tree-chevron {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-
-.file-tree-count {
-  margin-left: auto;
-  padding-left: var(--space-2);
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-muted);
-}
-
-/* A method an endpoint does not implement yet: visible, but clearly not there. */
-.file-tree-item.is-absent {
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.file-tree-method {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.file-tree-empty {
-  padding: var(--space-1) var(--space-3);
-  margin: 0;
-  font-size: 12px;
 }

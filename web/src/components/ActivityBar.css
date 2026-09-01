@@ -39,3 +39,10 @@
   outline: 1px solid var(--accent-primary);
   outline-offset: -2px;
 }
+
+/* Pushes the panel toggles to the bottom of the strip, the way VS Code puts
+   accounts and settings there — it is what tells the eye the lower pair do a
+   different job from the upper pair. */
+.activity-spacer {
+  flex: 1 1 auto;
+}

@@ -2,6 +2,99 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] — 2026-09-01
+
+A terminal on the Gateway, a bottom panel, and Gateway Events measured against
+the real Designer.
+
+### Added
+- **Terminal.** A real shell on a real pseudo-terminal, in the browser, running
+  as the Gateway's own operating-system user — prompt, echo, history, Ctrl-C,
+  colour. Java has no pty API and a JNI library would have to be signed and
+  shipped per architecture, so the pty comes from **`script(1)`**:
+  `script -q -c "tty > F; stty cols C rows R; exec /bin/bash -i" /dev/null`. The
+  command given to `-c` is not echoed by the pty, which is what lets the size be
+  set and the slave path captured without either appearing on the user's screen;
+  the captured path is then what a later `stty -F` resizes, so dragging the panel
+  does not type into the shell. Gated on Administrator + CSRF + same-origin with
+  its **own** kill switch, so a site can keep the Script Console and refuse the
+  shell — see `SECURITY.md`.
+- **A bottom panel**, VS Code's dock, holding Script Console and Terminal. The
+  console was a pane beside the editor and split the width with it; a console
+  prints lines and wants to be wide and short (Nigel).
+- **The four VS Code layout glyphs** in the toolbar: a customise-layout menu and
+  a toggle each for the side bar, the panel and the outline. They replace the
+  1.2.0 "Console" and "Outline" text buttons.
+- **Startup, Shutdown and Update can be created from the tree.** A singleton the
+  project does not have is still listed, dimmed; clicking it creates the script
+  and opens it.
+- `Dockerfile.test` beside the gateway's compose file, adding git, ssh and less.
+  git is NOT in the stock Ignition image and cannot be installed from inside the
+  terminal — the Gateway runs as uid 2003 with no sudo, so it has to be in the
+  image.
+
+### Fixed
+- **"Glass Aurora — Teal" rendered violet, and was indistinguishable from
+  "Glass Aurora — Violet"** (Nigel). The two packs differ in exactly two tokens,
+  `accent.primary` and `accent.progress`; everything else, including
+  `surface.page`, is identical. The 1.2.0 resolver walked a candidate list and
+  took the first token that PASSED contrast, so teal's dark `#0f766e` failed and
+  it fell through to `text.status-info` — a token both packs share verbatim. The
+  list is now a fallback for a token that is ABSENT, not one that is dark: the
+  brand colour is kept and lifted in HSL, hue and saturation intact. The neutral
+  ground carries a trace of the brand too (hue only, the page's own lightness
+  restored), which is what makes two sibling themes tell apart at a glance.
+  **A build-time assertion now fails if any two themes generate the same
+  palette** — the 1.2.0 bug shipped because nothing compared one theme's output
+  against another's.
+- **`hidden` did not hide.** `[hidden] { display: none }` from the user agent has
+  the same specificity as any `.thing { display: flex }`, so the later rule won:
+  both panel tabs rendered at once and shared the panel's height, leaving the
+  terminal 39px tall and two rows deep, and a maximised panel did not hide the
+  editor. Forced globally now.
+- **A class-name collision sized the bottom panel wrong.** `App.css` styled a
+  generic `.panel` card for the signed-out state; the dock's own `.panel` picked
+  up its `max-width: 640px` and padding and rendered 640px wide inside a 1050px
+  slot. The card is `.notice-card` now.
+- **Gateway Events did not match the Designer.** Measured off an 8.3 Designer
+  (`SCRIPTING.md` §1, captured 21/08/2026): the four folders come first, in the
+  order Message / Scheduled / Tag Change / Timer, then Shutdown, Startup and
+  Update as **single scripts**. This module listed the singletons first and
+  rendered each as a collapsible folder containing one nameless row — two things
+  the Designer does not do. Singletons are bold once created, and a disabled
+  event script now carries the badge the Designer shows.
+- **A timer's Delay Type is a radio pair**, ● Fixed Delay / ○ Fixed Rate, as the
+  Designer has it. It was a checkbox labelled "Fixed delay", which leaves the
+  reader to work out what unticking it does — and the answer, "fixed rate", never
+  appeared on screen. The Timer description is the Designer's verbatim wording
+  now rather than a paraphrase.
+
+### Changed
+- **Typography.** The UI font is no longer taken from the theme pack: a pack
+  names a typeface as part of a brand — `newsprint-night` asks for Georgia — and
+  the whole IDE was rendering in a serif on that theme. Both stacks now name
+  faces that exist on a Linux desktop; VS Code's own default of `'Droid Sans
+  Mono', monospace` names a font that ships on no current distribution, so the
+  editor had been falling through to whatever fontconfig aliases `monospace` to.
+  Type scale is VS Code's three sizes, 22px rows, 35px title and tab bars, and a
+  30px toolbar.
+- **Body text is softer.** The generator targeted 13:1, which renders very close
+  to white; VS Code's own default is 10.4:1. Now 10.5:1, still well past WCAG
+  AAA. All ten themes measured in the browser: worst element 5.08:1, none below
+  4.5:1.
+- **Script Console is out of the tree.** It read as a script among scripts; it
+  has an activity-bar icon and a panel tab now (Nigel).
+- **The Search icon is gone** from the activity bar. It opened the script tree
+  under the heading "Scripting" — a promise of a view that does not exist. Find
+  and replace are on Ctrl+F and Ctrl+H in the editor and the console.
+- Inheritance badges are lower case and unboxed. Six boxed uppercase `INHERITED`
+  badges down one rail were more ink than the script names they annotated.
+
+### Verified
+Deploy gate 6/6 · v1.1 regression 12/12 · LSP 10/10 · new v1.3 browser suite
+24/24 (tree parity, layout, panel, terminal, fonts, themes) · theme legibility
+10/10 with no element below 4.5:1 · 122 Java and 177 frontend tests.
+
 ## [1.2.0] — 2026-09-01
 
 A VS Code-shaped shell, and Web Dev as a first-class view.

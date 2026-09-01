@@ -23,6 +23,7 @@ recorded here so nobody rebuilds it.
 | Read scripts, language features | authenticated Gateway session |
 | **Write** a script or its attributes | session + **Administrator** + `X-CSRF-Token` + `If-Match` signature |
 | **Execute** a script | session + **Administrator** + CSRF token on the socket + same-origin handshake |
+| **Open a Gateway terminal** | session + **Administrator** + CSRF token on the socket + same-origin handshake, and its OWN kill switch |
 
 Specifics that matter:
 
@@ -40,6 +41,50 @@ Specifics that matter:
 - **Every execution is audited** before it runs, recording a SHA-256 of the source
   plus its size — never the source itself. An audit table is not a code store, and
   a credential typed into the console must not be copied into one.
+
+## The terminal (1.3.0)
+
+The Terminal tab attaches a **real shell on a pseudo-terminal** to the browser,
+running as the Gateway JVM's own operating-system user.
+
+**It grants no privilege that was not already reachable.** An Administrator with
+the Script Console can call `java.lang.Runtime.exec` from Jython today and get the
+same shell as the same user. What the terminal changes is convenience, which is
+the point of a tool — and convenience is worth stating out loud rather than
+hiding behind the equivalence argument.
+
+It is gated exactly as execution is, through **its own** properties, so a site can
+keep the Script Console and refuse the shell:
+
+| Property | Default | Effect |
+| --- | --- | --- |
+| `com.gaskony.scriptide.terminal.enabled` | `true` | `false` refuses every terminal, gateway-wide |
+| `com.gaskony.scriptide.terminal.shell` | first of `/bin/bash`, `/usr/bin/bash`, `/bin/sh` | absolute path to the shell |
+| `com.gaskony.scriptide.terminal.maxPerSession` | `3` | shells one browser tab may hold open, capped at 8 |
+| `com.gaskony.scriptide.terminal.idleMinutes` | `120` | a silent shell is closed after this |
+
+`terminal.requireAdmin=false` needs `terminal.acknowledgeRisk=true` alongside it,
+the same two-flag shape as execution, and warns on every open.
+
+Three specifics:
+
+- **`terminal.shell` is validated, not passed through.** The value is interpolated
+  into the string handed to `script -c`, so it must be an absolute path, to an
+  existing executable, matching `[A-Za-z0-9/._+-]+` — an allowlist, so the rule
+  cannot be defeated by a metacharacter nobody thought of. A rejected value logs a
+  warning and falls back to a built-in candidate.
+- **Terminal ids are scoped to the connection that opened them.** An id from
+  another browser tab addresses nothing, so a leaked or guessed id is not a live
+  shell somebody else can type into.
+- **Individual commands are NOT audited, and cannot be.** The audit line is
+  written when a terminal opens, naming the user, the remote host and the shell. A
+  pty carries keystrokes, not commands: reconstructing what was run would mean
+  keeping a transcript of everything typed, including anything pasted. Auditing
+  the open is honest; auditing the session would be a credential store.
+
+Every shell is closed when its socket closes and when the module shuts down —
+process descendants first, since destroying `script` alone can leave the shell it
+spawned running with nobody reading its output.
 
 ## Turning it off
 

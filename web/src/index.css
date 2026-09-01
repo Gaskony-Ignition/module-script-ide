@@ -43,10 +43,48 @@
   --syntax-function: #dcdcaa;
   --syntax-type: #4ec9b0;
 
-  /* VS Code's own stacks. The mono stack matters: the editor, the console and
-     the output pane must agree on a character cell or columns do not line up. */
-  --font-sans: system-ui, -apple-system, "Segoe UI", "Ubuntu", "Droid Sans", sans-serif;
-  --font-mono: "Droid Sans Mono", "Monaco", "Consolas", "Ubuntu Mono", "Courier New", monospace;
+  /* Fonts.
+   *
+   * These stacks are NOT theme-supplied. A Perspective pack names a typeface as
+   * part of a brand — `newsprint-night` asks for Georgia — and an IDE whose file
+   * tree and tab strip are set in a serif reads as broken. VS Code themes have
+   * never changed the UI font, and neither do ours: a theme here is a palette.
+   *
+   * Both stacks name faces that actually exist on a Linux desktop. VS Code's own
+   * Linux default is `'Droid Sans Mono', monospace`, and Droid ships on no
+   * current distribution — a stack whose every named face is missing falls
+   * through to whatever fontconfig aliases `monospace` to, which on this
+   * workstation was a Courier. Liberation and DejaVu are the two that are
+   * genuinely everywhere.
+   *
+   * The mono stack matters twice over: the editor, the console and the terminal
+   * must agree on a character cell, or columns do not line up between them. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
+    "Liberation Sans", "DejaVu Sans", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", "SF Mono", Menlo,
+    Consolas, "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace;
+
+  /* Type scale, from VS Code's own chrome. Three sizes, each with one job:
+   * 11px uppercase for section headings and panel tabs, 12px for controls and
+   * dense rows, 13px for body and editor text. A fourth size is how a tool
+   * starts looking like a web page. */
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-code: 13px;
+
+  /* Chrome is tight; prose is not. 1.5 through the whole app made every row
+     taller than the icon in it and the tree read as a list of paragraphs. */
+  --line-height-chrome: 1.35;
+  --line-height-prose: 1.5;
+
+  /* One row height for the tree, the outline and every list, so the eye has a
+     single rhythm to follow. VS Code uses 22px. */
+  --row-height: 22px;
+  --header-height: 35px;
+  --tab-height: 35px;
+  --panel-tab-height: 35px;
+  --status-height: 22px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -61,6 +99,7 @@
 
   /* Fixed chrome dimensions, referenced by both the layout and its JS. */
   --activity-bar-width: 48px;
+  --panel-default-height: 260px;
   --rail-min-width: 170px;
   --rail-default-width: 260px;
   --outline-default-width: 240px;
@@ -68,6 +107,25 @@
 
 * {
   box-sizing: border-box;
+}
+
+/*
+ * `hidden` must actually hide.
+ *
+ * The user agent's `[hidden] { display: none }` has the SAME specificity as any
+ * `.thing { display: flex }` in this file, so the later rule wins and the
+ * element stays on screen. Three places rely on `hidden` to keep a component
+ * MOUNTED while it is off screen — the editor under a maximised panel, the
+ * inactive panel tab, and every non-active CodeMirror view — because unmounting
+ * them would discard a terminal's scrollback, a console's REPL locals and an
+ * editor's undo history.
+ *
+ * Measured 01/09/2026: without this the Terminal and Script Console tabs
+ * rendered simultaneously and shared the panel's height, leaving the terminal
+ * 39px tall and two rows deep.
+ */
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -81,8 +139,12 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-chrome);
+  /* Without this, 13px text on a HiDPI Linux desktop renders with the heavy
+     stem weight that made the whole app look muddy against the Designer. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ---- VS Code chrome (v1.2.0) --------------------------------------------
@@ -91,11 +153,6 @@ body {
  * rules that makes the app read as a tool rather than a form: flat surfaces,
  * one accent, a visible focus ring, and no rounded pills.
  */
-
-body {
-  /* VS Code sits at 13px, and the density of a file tree depends on it. */
-  font-size: 13px;
-}
 
 button,
 .button {
@@ -108,7 +165,7 @@ button,
   background: var(--bg-tertiary);
   color: var(--text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 20px;
   cursor: pointer;
   white-space: nowrap;
@@ -153,7 +210,18 @@ textarea {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
+}
+
+/* A section heading anywhere in the chrome: 11px, uppercase, tracked out.
+   This is the single most recognisable thing about VS Code's typography and
+   it is what tells a heading from a row without a box around it. */
+.chrome-heading {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 /* Scrollbars, VS Code style: no track, a thumb that only shows on the surface

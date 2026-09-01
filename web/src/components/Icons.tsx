@@ -176,6 +176,61 @@ export const IconChevronRight = (p: IconProps) => svg(<path d="M6 3.5 10.5 8 6 1
 export const IconChevronDown = (p: IconProps) => svg(<path d="M3.5 6 8 10.5 12.5 6" />, p);
 
 /** The icon for a script resource type, by typeId. */
+/* ---- Layout controls -----------------------------------------------------
+ *
+ * VS Code's four title-bar glyphs, in its own order: customise layout, then the
+ * primary side bar, the panel and the secondary side bar. Each is the same
+ * rounded rectangle with the region in question filled, which is what makes the
+ * set legible at 16px without labels — the filled part IS the answer to "which
+ * edge does this toggle".
+ */
+const FRAME = <rect x="1.6" y="2.6" width="12.8" height="10.8" rx="1.4" />;
+
+export const IconLayout = (p: IconProps) =>
+  svg(
+    <>
+      {FRAME}
+      <path d="M1.6 6.2h12.8M6.2 6.2v7.2" />
+    </>,
+    p
+  );
+
+export const IconSideBarLeft = (p: IconProps) =>
+  svg(
+    <>
+      {FRAME}
+      <path d="M6 2.6v10.8" />
+      <path d="M1.6 2.6h4.4v10.8H1.6z" fill="currentColor" stroke="none" opacity="0.85" />
+    </>,
+    p
+  );
+
+export const IconPanelBottom = (p: IconProps) =>
+  svg(
+    <>
+      {FRAME}
+      <path d="M1.6 9.6h12.8" />
+      <path d="M1.6 9.6h12.8v3.8H1.6z" fill="currentColor" stroke="none" opacity="0.85" />
+    </>,
+    p
+  );
+
+export const IconSideBarRight = (p: IconProps) =>
+  svg(
+    <>
+      {FRAME}
+      <path d="M10 2.6v10.8" />
+      <path d="M10 2.6h4.4v10.8H10z" fill="currentColor" stroke="none" opacity="0.85" />
+    </>,
+    p
+  );
+
+/** Panel chrome: grow the panel to fill the editor area, and put it back. */
+export const IconChevronUp = (p: IconProps) => svg(<path d="M3.5 10 8 5.5 12.5 10" />, p);
+
+/** A tick, for the layout menu's checked items. */
+export const IconCheck = (p: IconProps) => svg(<path d="M3.2 8.4 6.4 11.6 12.8 4.6" />, p);
+
 export function iconForType(typeId: string, props: IconProps = {}) {
   switch (typeId) {
     case 'timer':

@@ -98,14 +98,14 @@ export default function App() {
           {/* An unreachable backend is a different problem from being signed out,
               and the probe is designed so we can tell them apart. Say which. */}
           {status === 'unreachable' && (
-            <div className="panel panel-error">
+            <div className="notice-card notice-card-error">
               <h2>Cannot reach the Gateway API</h2>
               <p className="muted">{error}</p>
             </div>
           )}
 
           {status === 'ready' && !session.authenticated && (
-            <div className="panel">
+            <div className="notice-card">
               <h2>You are not signed in</h2>
               <p className="muted">
                 The Script IDE uses your Gateway session. Sign in, then return to this page.

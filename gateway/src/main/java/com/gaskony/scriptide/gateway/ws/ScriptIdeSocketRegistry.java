@@ -2,6 +2,7 @@ package com.gaskony.scriptide.gateway.ws;
 
 import com.gaskony.scriptide.gateway.exec.ExecAudit;
 import com.gaskony.scriptide.gateway.exec.ExecutionService;
+import com.gaskony.scriptide.gateway.term.TerminalService;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,7 @@ public final class ScriptIdeSocketRegistry {
     private static volatile GatewayContext context;
     private static volatile ExecutionService executionService;
     private static volatile ExecAudit execAudit;
+    private static volatile TerminalService terminalService;
 
     private static final Set<ScriptIdeSocket> OPEN_SOCKETS = ConcurrentHashMap.newKeySet();
 
@@ -39,12 +41,18 @@ public final class ScriptIdeSocketRegistry {
         context = ctx;
         executionService = new ExecutionService(ctx);
         execAudit = new ExecAudit(ctx);
+        terminalService = new TerminalService(ctx);
         logger.debug("Script IDE socket registry initialised");
     }
 
     /** The execution pool, or null when the module is not started. */
     public static ExecutionService getExecutionService() {
         return executionService;
+    }
+
+    /** The terminal pool, or null when the module is not started. */
+    public static TerminalService getTerminalService() {
+        return terminalService;
     }
 
     /** The audit recorder, or null when the module is not started. */
@@ -93,6 +101,13 @@ public final class ScriptIdeSocketRegistry {
         if (service != null) {
             service.shutdown();
         }
+        // Terminals are OS processes, not threads: leaving one behind leaves a
+        // shell running as the Gateway user with nothing reading its output.
+        TerminalService terminals = terminalService;
+        if (terminals != null) {
+            terminals.shutdown();
+        }
+        terminalService = null;
         executionService = null;
         execAudit = null;
         context = null;

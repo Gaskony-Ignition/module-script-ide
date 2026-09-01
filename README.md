@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.2.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.3.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -52,6 +52,15 @@ actually has installed. No static stub file can know that.*
 - **Live error checking** against the real Jython 2.7 parser.
 - **Navigate** — go to definition, document outline, project-wide symbol search and
   cross-file text search over your own scripts.
+- **Web Dev** endpoints as a first-class view: all eight HTTP methods, per-method
+  settings, create and delete.
+- **A terminal on the gateway** — a real shell on a real pseudo-terminal, with a
+  prompt, history, Ctrl-C and colour, running as the Gateway's own user. It is
+  what makes `git` usable against the projects directory. Same gate as execution,
+  with its own switch.
+- **A VS Code-shaped shell**: activity bar, resizable side bar and outline, a
+  bottom panel holding the console and the terminal, and the four layout glyphs
+  in the title bar.
 
 Breakpoint debugging is deliberately **not** included: the only serious Ignition
 debugger requires a running Designer, which defeats the point of a browser IDE.
@@ -81,6 +90,12 @@ Execution requires an authenticated session, the Administrator role, a CSRF toke
 and a same-origin WebSocket handshake. Every run is audited by hash, and execution
 can be switched off gateway-wide with
 `-Dcom.gaskony.scriptide.execution.enabled=false`.
+
+The terminal is gated the same way and has its **own** switch
+(`-Dcom.gaskony.scriptide.terminal.enabled=false`), so a site can keep the Script
+Console and refuse the shell. It grants no privilege that Jython's
+`Runtime.exec` did not already reach — see `SECURITY.md`, which says so plainly
+rather than resting on the equivalence.
 
 ## Build
 

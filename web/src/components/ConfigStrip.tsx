@@ -35,13 +35,21 @@ export interface ConfigStripProps {
   unconfigurableReason?: string;
 }
 
-/** Attributes rendered as a checkbox. */
-const BOOLEAN_FIELDS = new Set(['enabled', 'fixedDelay', 'sharedThread']);
+/**
+ * Attributes rendered as a checkbox.
+ *
+ * `fixedDelay` is NOT one of them: the Designer shows it as a radio pair,
+ * ● Fixed Delay / ○ Fixed Rate, and those are two named modes rather than one
+ * on/off setting. A checkbox called "Fixed delay" leaves the user to work out
+ * what unticking it does, and the answer — "fixed rate" — is a word that never
+ * appears on screen.
+ */
+const BOOLEAN_FIELDS = new Set(['enabled', 'sharedThread']);
 
 const LABELS: Record<string, string> = {
   enabled: 'Enabled',
   delay: 'Delay (ms)',
-  fixedDelay: 'Fixed delay',
+  fixedDelay: 'Delay type',
   sharedThread: 'Shared thread',
   threadType: 'Thread type',
   hintScope: 'Hint scope',
@@ -66,7 +74,9 @@ const TYPE_DOCS: Record<
   { description: string; parameters?: Array<{ name: string; type: string; text: string }> }
 > = {
   timer: {
-    description: 'Timer scripts run repeatedly on the Gateway, on a fixed delay or a fixed rate.',
+    // Verbatim from the Designer, SCRIPTING.md §5.1. The 1.2.0 wording was a
+    // paraphrase, which is the one thing a "parity" string must not be.
+    description: 'Timer scripts that are always running on the Gateway',
   },
   message: {
     description:
@@ -246,6 +256,29 @@ function renderField(
           </option>
         ))}
       </select>
+    );
+  }
+  if (name === 'fixedDelay') {
+    // The Designer's radio pair. `true` is Fixed Delay and is the default it
+    // writes on create.
+    return (
+      <span className="config-radio-pair">
+        {[
+          { value: true, label: 'Fixed Delay' },
+          { value: false, label: 'Fixed Rate' },
+        ].map((option) => (
+          <label className="config-radio" key={String(option.value)}>
+            <input
+              type="radio"
+              name="fixedDelay"
+              checked={(value ?? true) === option.value}
+              disabled={readOnly}
+              onChange={() => onChange(name, option.value)}
+            />
+            {option.label}
+          </label>
+        ))}
+      </span>
     );
   }
   if (name === 'cronExpression') {

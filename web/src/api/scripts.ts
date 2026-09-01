@@ -63,6 +63,20 @@ export interface ScriptEntry {
    * endpoint's verbs without a request per endpoint.
    */
   methods?: string[];
+  /**
+   * The event script's `enabled` attribute, when it has one.
+   *
+   * On the listing because the Designer badges a disabled script in its tree,
+   * and asking per row would be one request per gateway event script.
+   */
+  enabled?: boolean;
+  /**
+   * Singletons only: whether the resource actually carries a script yet.
+   *
+   * The Designer shows Startup, Shutdown and Update whether or not they exist,
+   * and renders the label bold once one does. Absent for every other type.
+   */
+  defined?: boolean;
 }
 
 export interface ScriptTree {

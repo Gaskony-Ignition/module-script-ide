@@ -7,6 +7,9 @@ import com.gaskony.scriptide.gateway.exec.PrivateStateRunner;
 import com.gaskony.scriptide.gateway.exec.TracebackFormatter;
 import com.gaskony.scriptide.gateway.lang.LanguageServer;
 import com.gaskony.scriptide.gateway.lang.ProjectIndex;
+import com.gaskony.scriptide.gateway.term.TerminalPolicy;
+import com.gaskony.scriptide.gateway.term.TerminalService;
+import com.gaskony.scriptide.gateway.term.TerminalSession;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.python.core.PyObject;
@@ -57,6 +60,16 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
 
     /** Whether this connection has presented its CSRF token on the exec channel. */
     private volatile boolean execUnlocked;
+
+    /**
+     * The same, for the terminal channel.
+     *
+     * <p>A SEPARATE flag rather than reusing {@link #execUnlocked}: the two
+     * capabilities have independent kill switches, and unlocking a shell as a
+     * side effect of having run a script would make one of those switches a
+     * decoration.</p>
+     */
+    private volatile boolean termUnlocked;
 
     /**
      * One language server per connection.
@@ -127,6 +140,16 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
                     envelope.has("project") ? envelope.get("project").getAsString() : null);
             } catch (RuntimeException e) {
                 logger.debug("lsp frame failed for '{}': {}", username, e.toString());
+            }
+            return;
+        }
+
+        if ("term".equals(channel)) {
+            try {
+                handleTerminal(envelope.getAsJsonObject("msg"));
+            } catch (RuntimeException e) {
+                logger.debug("term frame failed for '{}': {}", username, e.toString());
+                sendError("term", "Terminal request failed: " + e.getMessage());
             }
             return;
         }
@@ -326,6 +349,109 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         sendOn("exec", result);
     }
 
+    /**
+     * Handle one frame on the terminal channel.
+     *
+     * <p>Gated exactly as {@code exec} is and for the same reasons, but through
+     * its OWN policy: a site that wants the Script Console without a Gateway shell
+     * sets {@code terminal.enabled=false} and keeps the rest. Every gate is
+     * re-read per frame so turning it off takes effect on connections that are
+     * already open.</p>
+     *
+     * <p>Terminal ids are scoped to this connection by {@link TerminalService},
+     * so an id from another tab addresses nothing here.</p>
+     */
+    private void handleTerminal(JsonObject msg) {
+        if (msg == null) {
+            sendError("term", "Missing message body");
+            return;
+        }
+        String action = msg.has("action") ? msg.get("action").getAsString() : "";
+
+        if (!TerminalPolicy.terminalEnabled()) {
+            sendError("term", "The Gateway terminal is disabled on this gateway ("
+                + TerminalPolicy.PROP_ENABLED + "=false).");
+            return;
+        }
+        if (TerminalPolicy.requireAdmin() && !administrator) {
+            sendError("term", "Opening a Gateway terminal requires the Administrator role.");
+            return;
+        }
+        if (!termUnlocked) {
+            String presented = msg.has("csrfToken") ? msg.get("csrfToken").getAsString() : null;
+            if (csrfToken == null || presented == null || !csrfToken.equals(presented)) {
+                sendError("term", "CSRF token missing or invalid.");
+                return;
+            }
+            termUnlocked = true;
+        }
+
+        TerminalService service = ScriptIdeSocketRegistry.getTerminalService();
+        if (service == null) {
+            sendError("term", "The module is shutting down.");
+            return;
+        }
+
+        switch (action) {
+            case "open" -> openTerminal(service, msg);
+            case "input" -> {
+                TerminalSession session = service.get(sessionId, stringOf(msg, "id"));
+                if (session != null) {
+                    session.write(java.util.Base64.getDecoder().decode(stringOf(msg, "data")));
+                }
+            }
+            case "resize" -> {
+                TerminalSession session = service.get(sessionId, stringOf(msg, "id"));
+                if (session != null) {
+                    session.resize(intOf(msg, "cols", 80), intOf(msg, "rows", 24));
+                }
+            }
+            case "close" -> service.close(sessionId, stringOf(msg, "id"));
+            default -> sendError("term", "unknown terminal action: " + action);
+        }
+    }
+
+    private void openTerminal(TerminalService service, JsonObject msg) {
+        try {
+            TerminalSession session = service.open(
+                sessionId, username, remoteHost,
+                intOf(msg, "cols", 80), intOf(msg, "rows", 24),
+                (id, bytes) -> {
+                    JsonObject out = new JsonObject();
+                    out.addProperty("event", "data");
+                    out.addProperty("id", id);
+                    out.addProperty("data", java.util.Base64.getEncoder().encodeToString(bytes));
+                    sendOn("term", out);
+                },
+                (id, code) -> {
+                    JsonObject out = new JsonObject();
+                    out.addProperty("event", "exit");
+                    out.addProperty("id", id);
+                    out.addProperty("code", code);
+                    sendOn("term", out);
+                });
+            JsonObject out = new JsonObject();
+            out.addProperty("event", "opened");
+            out.addProperty("id", session.id());
+            out.addProperty("pty", session.hasPty());
+            sendOn("term", out);
+        } catch (TerminalService.RejectedException e) {
+            sendError("term", e.getMessage());
+        }
+    }
+
+    private static String stringOf(JsonObject msg, String key) {
+        return msg.has(key) && !msg.get(key).isJsonNull() ? msg.get(key).getAsString() : "";
+    }
+
+    private static int intOf(JsonObject msg, String key, int fallback) {
+        try {
+            return msg.has(key) ? msg.get(key).getAsInt() : fallback;
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+    }
+
     /** Send one message on a channel. */
     private void sendOn(String channel, JsonObject msg) {
         JsonObject envelope = new JsonObject();
@@ -345,6 +471,12 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         // Drop the REPL state with the connection — it is per-user and must not
         // outlive the socket that owns it.
         consoleLocals.clear();
+        // A shell outliving the tab that opened it is a process nobody can see
+        // and nobody will close.
+        TerminalService terminals = ScriptIdeSocketRegistry.getTerminalService();
+        if (terminals != null) {
+            terminals.closeAllFor(sessionId);
+        }
         ScriptIdeSocketRegistry.unregister(this);
         logger.debug("Script IDE socket closed for '{}' ({}: {})", username, statusCode, reason);
     }

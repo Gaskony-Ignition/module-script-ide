@@ -25,7 +25,7 @@
 import { resolveWsUrl } from './urls';
 
 /** Channels multiplexed over the one socket. Mirrors ScriptIdeSocket. */
-export type Channel = 'lsp' | 'exec' | 'ping' | 'error';
+export type Channel = 'lsp' | 'exec' | 'term' | 'ping' | 'error';
 
 /** The wire envelope. `project` is deliberately outside `msg`. */
 export interface Envelope<T = unknown> {

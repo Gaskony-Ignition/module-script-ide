@@ -103,3 +103,25 @@
   font-family: var(--font-mono);
   min-width: 160px;
 }
+
+/* The Designer's Fixed Delay / Fixed Rate pair. Inline, because it sits in a
+   strip beside the delay it qualifies and stacking it would break the row. */
+.config-radio-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.config-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.config-radio input {
+  margin: 0;
+  padding: 0;
+}

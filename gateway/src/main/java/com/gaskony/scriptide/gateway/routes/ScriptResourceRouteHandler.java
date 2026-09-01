@@ -220,6 +220,27 @@ public final class ScriptResourceRouteHandler {
             out.addProperty("singleton", st.singleton());
         });
 
+        // The Designer badges a disabled event script in its tree, so the flag
+        // travels on the LISTING. Reading it per row from a second request would
+        // be one request per gateway event script, every time the tree loads.
+        resource.getAttribute("enabled").ifPresent(value -> {
+            try {
+                out.addProperty("enabled", value.getAsBoolean());
+            } catch (RuntimeException e) {
+                // A non-boolean `enabled` is somebody else's malformed resource,
+                // not our failure: omit it and let the row render undecorated.
+                logger.debug("Non-boolean enabled on {}: {}", path, e.getMessage());
+            }
+        });
+
+        // A singleton with no .py data key exists in the collection but has never
+        // been written. The Designer shows it as a normal-weight row you can open
+        // and start typing in; the client needs to know which of the two it is.
+        ScriptResourceTypes.byTypeId(type.typeId())
+            .filter(ScriptResourceTypes.ScriptType::singleton)
+            .ifPresent(st -> out.addProperty("defined",
+                resource.getDataKeys().stream().anyMatch(k -> k.endsWith(".py"))));
+
         String owner = null;
         try {
             owner = resource.getDefiningCollectionName();

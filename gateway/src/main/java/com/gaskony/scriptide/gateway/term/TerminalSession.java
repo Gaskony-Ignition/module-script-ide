@@ -1,0 +1,345 @@
+package com.gaskony.scriptide.gateway.term;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+
+/**
+ * One shell, attached to a real pseudo-terminal, streaming to one browser tab.
+ *
+ * <h2>How a Java 17 module gets a PTY with no native code</h2>
+ *
+ * <p>Java has no pty API and JNI is not an option here: a native library would
+ * have to be signed, shipped per architecture, and would turn a module that runs
+ * anywhere into one that refuses to load somewhere. So the pty comes from
+ * <b>{@code script(1)}</b>, util-linux's session recorder, which allocates one
+ * for its child and copies our pipes through it:</p>
+ *
+ * <pre>script -q -c "tty &gt; F; stty cols C rows R; exec /bin/bash -i" /dev/null</pre>
+ *
+ * <p>Measured in the target gateway container 01/09/2026: the child reports
+ * {@code /dev/pts/0} from {@code tty}, echoes input, prints a prompt, and
+ * {@code stty size} returns what we set. Without a pty the shell has no
+ * controlling terminal - no prompt, no echo, no line editing, and anything that
+ * checks {@code isatty} behaves differently from how it does over ssh.</p>
+ *
+ * <p>Two details are load-bearing. The transcript goes to {@code /dev/null}
+ * because we want the pty, not the recording. And the command given to
+ * {@code -c} is <b>not echoed</b> by the pty - only what the child writes is -
+ * which is why the {@code tty} and {@code stty} calls can be smuggled in front
+ * of the shell without appearing on the user's screen.</p>
+ *
+ * <p>{@code tty > F} exists so resizing does not have to inject a command into
+ * the user's shell: with the slave path on hand, a later
+ * {@code stty -F /dev/pts/N cols ... rows ...} sets the window size from outside
+ * and the kernel raises {@code SIGWINCH} in the foreground process group,
+ * exactly as a terminal emulator does.</p>
+ *
+ * <h2>Bytes, not text</h2>
+ *
+ * <p>Output is forwarded base64-encoded rather than as a String. A pty carries
+ * ANSI control sequences and arbitrary program output, and a UTF-8 sequence can
+ * straddle two reads; decoding here would corrupt both. xterm.js takes the raw
+ * bytes and does the decoding it was written to do.</p>
+ */
+public class TerminalSession {
+
+    private static final Logger logger = LoggerFactory.getLogger(TerminalSession.class);
+
+    /** Bytes handed to the client per frame. */
+    private static final int READ_BUFFER = 8192;
+
+    /**
+     * Ceiling on output forwarded per second.
+     *
+     * <p>A pty makes it one keystroke to run something that prints forever, and
+     * the browser tab is what falls over. Excess is dropped with a visible marker
+     * rather than buffered, because a terminal that silently lags is worse than
+     * one that says it skipped output.</p>
+     */
+    private static final long MAX_BYTES_PER_SECOND = 2L * 1024 * 1024;
+
+    /** ASCII escape, built rather than written, so this file stays plain text. */
+    private static final String ESC = String.valueOf((char) 27);
+    private static final String THROTTLE_NOTE =
+        "\r\n" + ESC + "[33m[output throttled]" + ESC + "[0m\r\n";
+
+    public static final int MIN_COLS = 20;
+    public static final int MAX_COLS = 500;
+    public static final int MIN_ROWS = 5;
+    public static final int MAX_ROWS = 200;
+
+    private final String id;
+    private final String username;
+    private final Process process;
+    private final OutputStream toShell;
+    private final Path ttyFile;
+    private final boolean pty;
+    private volatile String slavePath;
+    private volatile long lastActivity = System.currentTimeMillis();
+    private volatile boolean closed;
+
+    private TerminalSession(String id, String username, Process process, Path ttyFile,
+                            boolean pty) {
+        this.id = id;
+        this.username = username;
+        this.process = process;
+        this.toShell = process.getOutputStream();
+        this.ttyFile = ttyFile;
+        this.pty = pty;
+    }
+
+    public String id() {
+        return id;
+    }
+
+    /** Whether the shell got a real terminal, or is running on bare pipes. */
+    public boolean hasPty() {
+        return pty;
+    }
+
+    public long lastActivity() {
+        return lastActivity;
+    }
+
+    public boolean isAlive() {
+        return !closed && process.isAlive();
+    }
+
+    /**
+     * Where {@code script(1)} and {@code stty(1)} live, best first.
+     *
+     * <p>Probed as a list rather than named inline for two reasons. The Gateway
+     * JVM's {@code PATH} is whatever the service manager gave it and is often
+     * close to empty, so a bare {@code "script"} argv is not reliable; and a
+     * resolved absolute path is one fewer thing an environment can change under
+     * a running gateway.</p>
+     */
+    private static final List<String> SCRIPT_CANDIDATES = List.of("/usr/bin/script", "/bin/script");
+    private static final List<String> STTY_CANDIDATES = List.of("/usr/bin/stty", "/bin/stty");
+
+    /** The first candidate that exists and is executable, or null. */
+    private static String resolve(List<String> candidates) {
+        for (String candidate : candidates) {
+            if (Files.isExecutable(Path.of(candidate))) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /** True when a pty is obtainable on this host at all. */
+    public static boolean ptyAvailable() {
+        return resolve(SCRIPT_CANDIDATES) != null;
+    }
+
+    /**
+     * Start a shell.
+     *
+     * @param onData raw output bytes, already rate-bounded
+     * @param onExit called once with (id, exitCode) when the shell ends
+     */
+    static TerminalSession start(String id, String username, String shell, Path workingDir,
+                                 int cols, int rows,
+                                 Consumer<byte[]> onData, BiConsumer<String, Integer> onExit)
+            throws IOException {
+        int safeCols = clamp(cols, MIN_COLS, MAX_COLS);
+        int safeRows = clamp(rows, MIN_ROWS, MAX_ROWS);
+        String scriptBinary = resolve(SCRIPT_CANDIDATES);
+        boolean pty = scriptBinary != null;
+
+        Path ttyFile = null;
+        List<String> argv = new ArrayList<>();
+        if (pty) {
+            ttyFile = Files.createTempFile("scriptide-tty-", ".path");
+            // Every interpolated value is validated: the shell path by
+            // TerminalPolicy.isSafeShellPath, the size by clamp above, and the
+            // temp path is one we created. Nothing client-supplied reaches here.
+            String launch = "tty > '" + ttyFile + "'; "
+                + "stty cols " + safeCols + " rows " + safeRows + " 2>/dev/null; "
+                + "exec " + shell + " -i";
+            argv.add(scriptBinary);
+            argv.add("-q");
+            argv.add("-c");
+            argv.add(launch);
+            argv.add("/dev/null");
+        } else {
+            argv.add(shell);
+            argv.add("-i");
+        }
+
+        ProcessBuilder builder = new ProcessBuilder(argv);
+        builder.redirectErrorStream(true);
+        if (workingDir != null && Files.isDirectory(workingDir)) {
+            builder.directory(workingDir.toFile());
+        }
+        Map<String, String> env = builder.environment();
+        env.put("TERM", "xterm-256color");
+        env.put("COLUMNS", String.valueOf(safeCols));
+        env.put("LINES", String.valueOf(safeRows));
+        // Nothing in a browser terminal can drive `less`, and a pager waiting for
+        // a key it will never receive looks exactly like a hung command.
+        env.put("PAGER", "cat");
+        env.put("GIT_PAGER", "cat");
+
+        Process process = builder.start();
+        TerminalSession session = new TerminalSession(id, username, process, ttyFile, pty);
+        session.pump(process.getInputStream(), onData, onExit);
+        return session;
+    }
+
+    /** Forward the shell's output until it ends. */
+    private void pump(InputStream in, Consumer<byte[]> onData, BiConsumer<String, Integer> onExit) {
+        Thread reader = new Thread(() -> {
+            byte[] buffer = new byte[READ_BUFFER];
+            long windowStart = System.currentTimeMillis();
+            long windowBytes = 0;
+            boolean throttling = false;
+            try {
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    lastActivity = System.currentTimeMillis();
+                    long now = lastActivity;
+                    if (now - windowStart >= 1000) {
+                        windowStart = now;
+                        windowBytes = 0;
+                        if (throttling) {
+                            throttling = false;
+                            onData.accept(THROTTLE_NOTE.getBytes(StandardCharsets.UTF_8));
+                        }
+                    }
+                    windowBytes += read;
+                    if (windowBytes > MAX_BYTES_PER_SECOND) {
+                        throttling = true;
+                        continue;
+                    }
+                    byte[] chunk = new byte[read];
+                    System.arraycopy(buffer, 0, chunk, 0, read);
+                    onData.accept(chunk);
+                }
+            } catch (IOException e) {
+                logger.debug("Terminal {} read ended: {}", id, e.toString());
+            } finally {
+                int code;
+                try {
+                    code = process.waitFor();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    code = -1;
+                }
+                cleanUp();
+                onExit.accept(id, code);
+            }
+        }, "script-ide-term-" + id);
+        reader.setDaemon(true);
+        reader.start();
+
+        // The slave path appears a moment after the child starts. Read it on a
+        // background thread rather than blocking the socket callback.
+        if (pty) {
+            final Path probeFile = ttyFile;
+            Thread probe = new Thread(() -> {
+                for (int attempt = 0; attempt < 40 && slavePath == null && isAlive(); attempt++) {
+                    try {
+                        String value = Files.readString(probeFile).trim();
+                        if (value.startsWith("/dev/")) {
+                            slavePath = value;
+                            return;
+                        }
+                        Thread.sleep(50);
+                    } catch (IOException e) {
+                        return;
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+            }, "script-ide-term-tty-" + id);
+            probe.setDaemon(true);
+            probe.start();
+        }
+    }
+
+    /** Write keystrokes to the shell. */
+    public void write(byte[] data) {
+        if (closed) {
+            return;
+        }
+        lastActivity = System.currentTimeMillis();
+        try {
+            toShell.write(data);
+            toShell.flush();
+        } catch (IOException e) {
+            logger.debug("Terminal {} write failed: {}", id, e.toString());
+            close();
+        }
+    }
+
+    /**
+     * Tell the kernel the window changed size.
+     *
+     * <p>Done from OUTSIDE the shell, against the slave device, so the user does
+     * not see an {@code stty} command appear at their prompt every time they drag
+     * the panel. Best effort by design - a failed resize costs a redraw, and
+     * failing loudly here would be noise.</p>
+     */
+    public void resize(int cols, int rows) {
+        String path = slavePath;
+        if (!pty || path == null || closed) {
+            return;
+        }
+        int safeCols = clamp(cols, MIN_COLS, MAX_COLS);
+        int safeRows = clamp(rows, MIN_ROWS, MAX_ROWS);
+        String stty = resolve(STTY_CANDIDATES);
+        if (stty == null) {
+            return;
+        }
+        try {
+            new ProcessBuilder(stty, "-F", path,
+                "cols", String.valueOf(safeCols), "rows", String.valueOf(safeRows))
+                .redirectErrorStream(true)
+                .start();
+        } catch (IOException e) {
+            logger.debug("Terminal {} resize failed: {}", id, e.toString());
+        }
+    }
+
+    /** End the shell and everything it started. */
+    public void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        // Descendants first: destroying `script` alone can leave the shell it
+        // spawned running with nobody reading its output.
+        process.descendants().forEach(ProcessHandle::destroy);
+        process.destroy();
+        cleanUp();
+        logger.debug("Terminal {} closed for '{}'", id, username);
+    }
+
+    private void cleanUp() {
+        if (ttyFile != null) {
+            try {
+                Files.deleteIfExists(ttyFile);
+            } catch (IOException e) {
+                logger.debug("Could not remove {}: {}", ttyFile, e.toString());
+            }
+        }
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+}

@@ -7,26 +7,33 @@
   min-height: 0;
 }
 
+/* A title bar, not a page heading.
+ *
+ * 35px and 13px, which is VS Code's. The 1.2.0 header was 48px of padding
+ * around a 16px h1 — it read as the masthead of a web page, and every pixel of
+ * it came off the editor. */
 .app-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
+  height: var(--header-height);
+  flex: 0 0 var(--header-height);
+  padding: 0 var(--space-3);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-light);
-  flex: 0 0 auto;
 }
 
 .app-header h1 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--font-size-base);
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .app-version {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .app-main {
@@ -36,7 +43,15 @@
   padding: var(--space-6) var(--space-5);
 }
 
-.panel {
+/* The signed-out / unreachable card.
+ *
+ * Renamed off `.panel` in 1.3.0: the bottom dock is also called a panel, its
+ * component is `Panel.tsx`, and the two stylesheets collided — this card's
+ * `max-width` and padding silently applied to the dock, which then rendered
+ * 640px wide inside a 1050px slot with an inset on every side. A class name
+ * this generic in an app-wide stylesheet is a trap for the next component that
+ * deserves the obvious word. */
+.notice-card {
   max-width: 640px;
   padding: var(--space-5);
   background: var(--surface);
@@ -44,13 +59,13 @@
   border-radius: var(--radius);
 }
 
-.panel h2 {
+.notice-card h2 {
   margin: 0 0 var(--space-3);
   font-size: 15px;
   font-weight: 600;
 }
 
-.panel-error {
+.notice-card-error {
   border-color: var(--error);
 }
 
@@ -90,10 +105,9 @@
 }
 
 .app-user {
-  margin-left: auto;
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 /* ---- theme picker (v1.1.0) ---- */
@@ -107,9 +121,10 @@
   color: var(--text-primary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
-  padding: 2px var(--space-2);
+  padding: 1px var(--space-2);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
+  max-width: 190px;
 }
 
 /* Visually hidden but still read by a screen reader — the select has a visible

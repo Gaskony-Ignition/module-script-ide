@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.2.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.3.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -48,6 +48,22 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
 - **Byte fidelity when writing scripts** (from P1): never convert a tab to spaces,
   never add or remove a trailing newline. The real Designer writes no terminating
   newline.
+- **The UI font never comes from a theme pack.** A pack names a typeface as part
+  of a brand and `newsprint-night` asks for Georgia; applying it set the whole
+  IDE in a serif. A theme here is a palette. `tools/build-themes.py` drops
+  `font.body` deliberately — do not "restore" it.
+- **`[hidden]` is forced globally in `index.css`.** Three components stay
+  mounted-but-hidden to keep state (the editor under a maximised panel, the
+  inactive panel tab, every non-active CodeMirror view) and the user agent's
+  `[hidden]` rule loses to any `display:` rule in our own stylesheet. Removing
+  the `!important` makes all three visible at once.
+- **The terminal's shell path is validated by an allowlist, never passed
+  through.** It is interpolated into the string handed to `script -c`. See
+  `TerminalPolicy.isSafeShellPath` and its test.
+- **This module is not becoming a git module** (Nigel, 01/09/2026).
+  `Gaskony-Ignition/module-git` exists. git is driven from the terminal's command
+  line; anything added later is VS Code-shaped status and diffs on top of the
+  CLI, not a second implementation.
 
 ## Build, deploy, verify
 

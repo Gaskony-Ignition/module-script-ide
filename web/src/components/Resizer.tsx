@@ -18,8 +18,14 @@ export interface ResizerProps {
   value: number;
   min: number;
   max: number;
-  /** Which side the panel being sized is on, relative to this divider. */
-  side: 'left' | 'right';
+  /**
+   * Which side the panel being sized is on, relative to this divider.
+   *
+   * `top` makes the divider horizontal — the bottom panel is sized by the edge
+   * ABOVE it, so dragging up grows it, which is the opposite sign from a
+   * left-hand panel.
+   */
+  side: 'left' | 'right' | 'top';
   label: string;
   onChange: (width: number) => void;
 }
@@ -38,14 +44,18 @@ export default function Resizer({ value, min, max, side, label, onChange }: Resi
     // Ignore anything but the primary button; a right-click drag would
     // otherwise start a resize the user cannot see they began.
     if (event.button !== 0) return;
-    startRef.current = { x: event.clientX, width: value };
+    startRef.current = {
+      x: side === 'top' ? event.clientY : event.clientX,
+      width: value,
+    };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const delta = event.clientX - startRef.current.x;
-    // Dragging right grows a left-hand panel and shrinks a right-hand one.
+    const delta = (side === 'top' ? event.clientY : event.clientX) - startRef.current.x;
+    // Dragging right grows a left-hand panel and shrinks a right-hand one;
+    // dragging DOWN shrinks a bottom panel, so `top` shares the sign of `right`.
     const next = side === 'left'
       ? startRef.current.width + delta
       : startRef.current.width - delta;
@@ -59,8 +69,8 @@ export default function Resizer({ value, min, max, side, label, onChange }: Resi
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    const grow = side === 'left' ? 'ArrowRight' : 'ArrowLeft';
-    const shrink = side === 'left' ? 'ArrowLeft' : 'ArrowRight';
+    const grow = side === 'top' ? 'ArrowUp' : side === 'left' ? 'ArrowRight' : 'ArrowLeft';
+    const shrink = side === 'top' ? 'ArrowDown' : side === 'left' ? 'ArrowLeft' : 'ArrowRight';
     if (event.key === grow) {
       event.preventDefault();
       onChange(clamp(value + KEY_STEP));
@@ -78,9 +88,9 @@ export default function Resizer({ value, min, max, side, label, onChange }: Resi
 
   return (
     <div
-      className="resizer"
+      className={side === 'top' ? 'resizer resizer-horizontal' : 'resizer'}
       role="separator"
-      aria-orientation="vertical"
+      aria-orientation={side === 'top' ? 'horizontal' : 'vertical'}
       aria-label={label}
       aria-valuenow={Math.round(value)}
       aria-valuemin={min}

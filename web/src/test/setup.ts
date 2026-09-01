@@ -28,3 +28,42 @@ if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
   Range.prototype.getClientRects = () => empty;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
 }
+
+/**
+ * jsdom has no canvas at all, and xterm.js asks for a 2D context at IMPORT time
+ * to measure colour contrast for its DOM renderer. The call is caught internally
+ * so nothing fails, but jsdom prints "Not implemented" with a full stack for
+ * every test file that transitively imports the terminal — which is most of
+ * them, since the workspace does.
+ *
+ * Stubbed rather than depending on the `canvas` package: the tests here never
+ * assert on anything drawn, so a real canvas would be a native build in CI for
+ * output nothing reads. The one method xterm actually calls back into is
+ * `getImageData`, and returning opaque black is a truthful answer for a surface
+ * nothing has painted.
+ */
+if (typeof HTMLCanvasElement !== 'undefined') {
+  HTMLCanvasElement.prototype.getContext = (() => ({
+    fillRect: () => {},
+    clearRect: () => {},
+    getImageData: (_x: number, _y: number, w: number, h: number) => ({
+      data: new Uint8ClampedArray(Math.max(1, w * h) * 4),
+    }),
+    putImageData: () => {},
+    createImageData: () => [],
+    setTransform: () => {},
+    drawImage: () => {},
+    save: () => {},
+    restore: () => {},
+    beginPath: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    closePath: () => {},
+    stroke: () => {},
+    fill: () => {},
+    measureText: () => ({ width: 0 }),
+    scale: () => {},
+    rotate: () => {},
+    translate: () => {},
+  })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+}

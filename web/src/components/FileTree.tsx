@@ -1,25 +1,37 @@
 /**
- * The left rail: every editable script in the open project, plus the console.
+ * The left rail: every editable script in the open project.
  *
  * The "Scripting" heading belongs to the RAIL, not to this component — the rail
  * shows the active view's name and this tree is one of several views it hosts.
- * Rendering it here as well printed it twice.
  *
- * The shape follows the Designer's project browser (Nigel, 01/09/2026), because
- * anyone using this has the Designer's layout in their head already:
+ * The shape is the real Designer's, and it is measured rather than guessed —
+ * `web-designer/docs/design-handoff/real-designer/SCRIPTING.md` §1, captured
+ * from an 8.3 Designer on 21/08/2026:
  *
  *   Scripting
  *   ├── Gateway Events
- *   │   ├── Message
- *   │   ├── Timer
- *   │   └── …
- *   ├── Project Library
- *   │   └── util/helpers
- *   └── Script Console
+ *   │   ├── Message      (folder, shown even when empty)
+ *   │   ├── Scheduled    (folder)
+ *   │   ├── Tag Change   (folder)
+ *   │   ├── Timer        (folder)
+ *   │   ├── Shutdown     ← a SCRIPT, not a folder
+ *   │   ├── Startup      ← a SCRIPT
+ *   │   └── Update       ← a SCRIPT
+ *   └── Project Library
+ *       └── util/helpers
  *
- * The one departure is Script Console, which the Designer keeps on a toolbar
- * rather than in the tree. It sits here deliberately (Nigel): in a browser it is
- * another thing you open, not another window.
+ * **The four folders come first, then the three singletons.** Not alphabetical
+ * across the group — folders-then-leaves, each alphabetical, which is the rule
+ * the whole Designer tree follows. Until 1.3.0 this listed the singletons first
+ * AND rendered them as collapsible folders containing one nameless row, which is
+ * two things the Designer does not do (Nigel, 01/09/2026).
+ *
+ * Two row decorations are measured too: a singleton's label is **bold** once it
+ * has been created, and a disabled event script carries a badge.
+ *
+ * Script Console is deliberately NOT here any more. It was a row in this tree in
+ * 1.1.0–1.2.0, where it read as a script among scripts; it has its own icon on
+ * the activity bar and its own tab in the bottom panel now.
  *
  * Project Library entries carry slash-separated package names and are shown as a
  * nested, collapsible tree; each gateway event type is a flat list, because each
@@ -27,44 +39,57 @@
  */
 import { useMemo, useState } from 'react';
 import type { ScriptEntry, ScriptTypeId } from '../api/scripts';
-import { IconFolder, IconPlus, IconTerminal, IconTrash, iconForType } from './Icons';
+import { IconFolder, IconPlus, IconTrash, iconForType } from './Icons';
 import { Chevron } from './Chevron';
 import './FileTree.css';
-
-/** Non-script destinations the rail can select. */
-export type SpecialTarget = 'console';
 
 export interface FileTreeProps {
   scripts: ScriptEntry[];
   /** Path of the entry currently being edited, if any. */
   selectedPath: string | null;
   onSelect: (entry: ScriptEntry) => void;
-  /** Selected when the console is the active surface. */
-  consoleSelected?: boolean;
-  onSelectSpecial?: (target: SpecialTarget) => void;
   /** Offered only when the session may write — omit to hide create/delete. */
   onCreate?: (typeId: ScriptTypeId) => void;
   onDelete?: (entry: ScriptEntry) => void;
+  /**
+   * Create a singleton that does not exist yet.
+   *
+   * Separate from {@link onCreate}, which opens a name dialog — a singleton has
+   * no name to ask for. The Designer shows Startup, Shutdown and Update whether
+   * or not they exist and writes the resource when you first save; here the row
+   * creates it and opens it, which reaches the same place in one click.
+   */
+  onCreateSingleton?: (typeId: ScriptTypeId) => void;
 }
 
 /**
- * Gateway event types, in the Designer's own order. Project Library is handled
- * separately because it is a package tree rather than a flat list.
+ * The four gateway event types the Designer shows as FOLDERS, in its order.
+ *
+ * Alphabetical by label, and shown even when the project has none of that type —
+ * an empty folder is the only place to click "new" for its type, so filtering
+ * them out makes the first script of a kind impossible to create.
  */
-/** Types the platform stores as ONE resource with no name segment. */
-const SINGLETON_TYPES = new Set<string>(['startup', 'shutdown', 'update']);
-
-const GATEWAY_EVENT_TYPES: ScriptTypeId[] = [
-  'startup',
-  'shutdown',
-  'update',
-  'timer',
+const GATEWAY_EVENT_FOLDERS: ScriptTypeId[] = [
   'message',
   'scheduled',
   'tag-change',
+  'timer',
 ];
 
+/**
+ * The three the Designer shows as single SCRIPTS, in its order.
+ *
+ * The platform stores each as one resource with no name segment. They are not
+ * folders and have no "new" affordance: there can only ever be one.
+ */
+const GATEWAY_EVENT_SINGLETONS: ScriptTypeId[] = ['shutdown', 'startup', 'update'];
+
 const LIBRARY_TYPE: ScriptTypeId = 'script-python';
+
+const GATEWAY_EVENT_TYPES: ScriptTypeId[] = [
+  ...GATEWAY_EVENT_FOLDERS,
+  ...GATEWAY_EVENT_SINGLETONS,
+];
 
 /**
  * Labels for a type with no scripts in the open project.
@@ -129,14 +154,13 @@ export default function FileTree({
   scripts,
   selectedPath,
   onSelect,
-  consoleSelected = false,
-  onSelectSpecial,
   onCreate,
   onDelete,
+  onCreateSingleton,
 }: FileTreeProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
-  const { library, eventGroups, unknownGroups } = useMemo(() => {
+  const { library, eventGroups, singletons, unknownGroups } = useMemo(() => {
     const byType = new Map<string, ScriptEntry[]>();
     for (const entry of scripts) {
       const list = byType.get(entry.typeId);
@@ -150,9 +174,16 @@ export default function FileTree({
       // shows all four folders even when empty, and an empty folder is the only
       // place to click "new" for that type — filtering them out made it
       // impossible to create the first script of a kind.
-      eventGroups: GATEWAY_EVENT_TYPES.map((typeId) => {
+      eventGroups: GATEWAY_EVENT_FOLDERS.map((typeId) => {
         const entries = byType.get(typeId) ?? [];
         return { typeId, label: entries[0]?.typeLabel ?? TYPE_LABELS[typeId] ?? typeId, entries };
+      }),
+      // The three singletons are ROWS, not folders. Each is listed whether or
+      // not it exists: `entry` is undefined until the project has one, and the
+      // row is what creates it.
+      singletons: GATEWAY_EVENT_SINGLETONS.map((typeId) => {
+        const entry = (byType.get(typeId) ?? [])[0];
+        return { typeId, label: entry?.typeLabel ?? TYPE_LABELS[typeId] ?? typeId, entry };
       }),
       // Anything the gateway sent that this build does not know about — better
       // shown under its own heading than silently dropped.
@@ -190,20 +221,15 @@ export default function FileTree({
           <Chevron open={!eventsCollapsed} />
           <span>Gateway Events</span>
           <span className="file-tree-count">
-            {eventGroups.reduce((total, g) => total + g.entries.length, 0)}
+            {eventGroups.reduce((total, g) => total + g.entries.length, 0)
+              + singletons.filter((s) => s.entry).length}
           </span>
         </button>
-        {!eventsCollapsed &&
-          (eventGroups.length === 0 && !onCreate ? (
-            <p className="file-tree-empty muted">None in this project.</p>
-          ) : (
-            eventGroups.map((group) => {
+        {!eventsCollapsed && (
+          <>
+            {eventGroups.map((group) => {
               const key = `type:${group.typeId}`;
               const isCollapsed = collapsed.has(key);
-              // From the TYPE, not from an entry: an empty folder has no entry
-              // to ask, and startup/shutdown/update must not offer "new".
-              const singleton = group.entries[0]?.singleton
-                ?? SINGLETON_TYPES.has(group.typeId);
               return (
                 <div key={group.typeId}>
                   <div className="file-tree-header-row">
@@ -219,9 +245,7 @@ export default function FileTree({
                       <span>{group.label}</span>
                       <span className="file-tree-count">{group.entries.length}</span>
                     </button>
-                    {/* A singleton cannot have a second instance, so it gets no
-                        add button — the Designer does not offer one either. */}
-                    {onCreate && !singleton && (
+                    {onCreate && (
                       <button
                         type="button"
                         className="file-tree-action"
@@ -235,7 +259,7 @@ export default function FileTree({
                   </div>
                   {!isCollapsed && group.entries.length === 0 && (
                     <p className="file-tree-empty muted" style={{ paddingLeft: indent(2) }}>
-                      {singleton ? 'Not defined in this project.' : 'None yet.'}
+                      None yet.
                     </p>
                   )}
                   {!isCollapsed && (
@@ -256,8 +280,26 @@ export default function FileTree({
                   )}
                 </div>
               );
-            })
-          ))}
+            })}
+
+            {/* The three singletons: rows, at the same depth as a folder, after
+                all four folders. Folders-then-leaves is the Designer's rule. */}
+            <ul className="file-tree-list">
+              {singletons.map((single) => (
+                <SingletonRow
+                  key={single.typeId}
+                  typeId={single.typeId}
+                  label={single.label}
+                  entry={single.entry}
+                  selectedPath={selectedPath}
+                  onSelect={onSelect}
+                  onDelete={onDelete}
+                  onCreate={onCreateSingleton}
+                />
+              ))}
+            </ul>
+          </>
+        )}
       </section>
 
       {/* ---- Project Library ---- */}
@@ -335,20 +377,6 @@ export default function FileTree({
         );
       })}
 
-      {/* ---- Script Console ---- */}
-      {onSelectSpecial && (
-        <section className="file-tree-group">
-          <button
-            type="button"
-            className={`file-tree-header file-tree-leaf${consoleSelected ? ' is-selected' : ''}`}
-            aria-current={consoleSelected ? 'true' : undefined}
-            onClick={() => onSelectSpecial('console')}
-          >
-            <IconTerminal size={14} className="file-tree-icon" />
-            <span>Script Console</span>
-          </button>
-        </section>
-      )}
     </nav>
   );
 }
@@ -418,6 +446,86 @@ function PackageBranch({
   );
 }
 
+interface SingletonRowProps {
+  typeId: ScriptTypeId;
+  label: string;
+  /** Undefined until this project actually has the script. */
+  entry?: ScriptEntry;
+  selectedPath: string | null;
+  onSelect: (entry: ScriptEntry) => void;
+  onDelete?: (entry: ScriptEntry) => void;
+  onCreate?: (typeId: ScriptTypeId) => void;
+}
+
+/**
+ * Shutdown, Startup or Update — one row, never a folder.
+ *
+ * The Designer lists all three whether or not the project has them, renders the
+ * label **bold** once one exists, and offers no rename, cut or copy on them
+ * (SCRIPTING.md §1.1 and §5.5). A row for one that does not exist is not dead:
+ * clicking it creates the script, which is the only way to get a Startup script
+ * into a project from here.
+ */
+function SingletonRow({
+  typeId, label, entry, selectedPath, onSelect, onDelete, onCreate,
+}: SingletonRowProps) {
+  const selected = Boolean(entry) && entry?.path === selectedPath;
+  const disabled = entry?.enabled === false;
+  // `defined` comes from the listing; fall back to "it is listed at all", which
+  // is what an older gateway response gives us.
+  const exists = entry ? entry.defined !== false : false;
+  return (
+    <li className="file-tree-row">
+      <button
+        type="button"
+        className={`file-tree-item${selected ? ' is-selected' : ''}`}
+        style={{ paddingLeft: indent(1) }}
+        aria-current={selected ? 'true' : undefined}
+        title={exists ? undefined : `Not defined in this project — click to create the ${label} script.`}
+        onClick={() => {
+          if (entry && exists) {
+            onSelect(entry);
+          } else {
+            onCreate?.(typeId);
+          }
+        }}
+        disabled={!exists && !onCreate}
+      >
+        {iconForType(typeId, { size: 14, className: 'file-tree-icon' })}
+        <span className={`file-tree-name${exists ? ' is-defined' : ' is-undefined'}`}>
+          {label}
+        </span>
+        {disabled && <DisabledBadge />}
+      </button>
+      {entry && exists && onDelete && entry.origin !== 'inherited' && (
+        <button
+          type="button"
+          className="file-tree-action file-tree-delete"
+          title={`Delete the ${label} script`}
+          aria-label={`Delete the ${label} script`}
+          onClick={() => onDelete(entry)}
+        >
+          <IconTrash size={13} />
+        </button>
+      )}
+    </li>
+  );
+}
+
+/**
+ * The Designer's "this event script is switched off" marker.
+ *
+ * A badge rather than dimming the row: dimming is already what an inherited or
+ * unsaved row does, and three meanings on one visual channel is no meaning.
+ */
+function DisabledBadge() {
+  return (
+    <span className="badge badge-disabled" title="Disabled — this script will not run">
+      off
+    </span>
+  );
+}
+
 interface RowProps {
   entry: ScriptEntry;
   depth: number;
@@ -443,6 +551,7 @@ function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete }: RowProps)
       >
         {iconForType(entry.typeId, { size: 14, className: 'file-tree-icon' })}
         <span className="file-tree-name">{entry.name || entry.typeLabel}</span>
+        {entry.enabled === false && <DisabledBadge />}
         {/* Inheritance is not decoration: editing an inherited script CREATES a
             local override rather than changing the parent, and the user has to
             know that before they type. */}

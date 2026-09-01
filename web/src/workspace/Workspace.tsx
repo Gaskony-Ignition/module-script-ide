@@ -31,9 +31,13 @@ import type { SessionInfo } from '../api/session';
 import CodeEditor from '../components/CodeEditor';
 import ConfigStrip from '../components/ConfigStrip';
 import ConflictDialog from '../components/ConflictDialog';
-import ActivityBar, { type ViewId } from '../components/ActivityBar';
+import ActivityBar, { type PanelId, type ViewId } from '../components/ActivityBar';
 import FileTree from '../components/FileTree';
+import { IconExternal, IconPlus } from '../components/Icons';
+import LayoutControls, { type LayoutState } from '../components/LayoutControls';
+import Panel from '../components/Panel';
 import Resizer from '../components/Resizer';
+import TerminalView from '../components/Terminal';
 import WebDevConfigDialog from '../components/WebDevConfigDialog';
 import WebDevTree from '../components/WebDevTree';
 import NewScriptDialog from '../components/NewScriptDialog';
@@ -93,15 +97,10 @@ function rememberWidth(key: string, value: number) {
   }
 }
 
-/**
- * How much of the editing area the console occupies.
- *
- * `split` is the default when the console is opened from the rail, because the
- * reason to open a console is almost always to try something against the script
- * you are looking at — replacing that script with the console would defeat the
- * purpose. `full` exists for when the console IS the task.
- */
-type ConsoleMode = 'hidden' | 'split' | 'full';
+/** A remembered panel height, with the same localStorage caution as widths. */
+function storedHeight(key: string, fallback: number): number {
+  return storedWidth(key, fallback);
+}
 
 export default function Workspace({ session }: WorkspaceProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -115,9 +114,30 @@ export default function Workspace({ session }: WorkspaceProps) {
   const [savingAttrs, setSavingAttrs] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
-  const [consoleMode, setConsoleMode] = useState<ConsoleMode>('hidden');
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [view, setView] = useState<ViewId>('scripts');
+  /**
+   * The bottom panel.
+   *
+   * Console and Terminal live here rather than beside the editor (Nigel,
+   * 01/09/2026). A console needs to be wide and short — it prints lines — and
+   * putting it beside the code halves the width of both. `panelTab` survives the
+   * panel being closed so reopening returns to what you were using.
+   */
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState<PanelId>('console');
+  const [panelMaximised, setPanelMaximised] = useState(false);
+  const [panelHeight, setPanelHeight] = useState(() => storedHeight('panel', 260));
+  /**
+   * Terminals are mounted lazily and then never unmounted.
+   *
+   * A shell is a process on the gateway and its scrollback is the session, so
+   * unmounting the tab to switch away from it would kill both. The flag only
+   * ever goes false→true, and the panel hides the tab rather than removing it.
+   */
+  const [terminalStarted, setTerminalStarted] = useState(false);
+  /** Bumped to restart the shell — see the Terminal tab's ✚ action. */
+  const [terminalKey, setTerminalKey] = useState(0);
   // The side bar collapses to the activity strip, VS Code style. Its width and
   // the outline's are remembered per viewer; a pane you have to re-drag every
   // visit is worse than one that is not resizable.
@@ -572,24 +592,14 @@ export default function Workspace({ session }: WorkspaceProps) {
     );
   }, []);
 
-  const openConsole = useCallback(() => {
-    setConsoleMode((current) => (current === 'hidden' ? 'split' : current));
-  }, []);
-
   /**
-   * Activity-bar click.
+   * Activity-bar click on a side-bar view.
    *
-   * Clicking the ACTIVE view collapses the side bar; clicking any other opens
-   * it on that view. That is VS Code's behaviour, and it is the only way one
-   * strip both switches views and toggles the panel.
+   * Clicking the ACTIVE view collapses the side bar; clicking any other opens it
+   * on that view. That is VS Code's behaviour, and it is the only way one strip
+   * both switches views and toggles the panel it sits beside.
    */
   const selectView = useCallback((next: ViewId) => {
-    if (next === 'console') {
-      // The console is a pane, not a side-bar view — the rail has nothing to
-      // show for it, so the icon toggles the pane instead.
-      setConsoleMode((current) => (current === 'hidden' ? 'split' : 'hidden'));
-      return;
-    }
     setView((current) => {
       if (current === next) {
         setRailOpen((open) => !open);
@@ -598,6 +608,59 @@ export default function Workspace({ session }: WorkspaceProps) {
       setRailOpen(true);
       return next;
     });
+  }, []);
+
+  /**
+   * Activity-bar click on a panel view.
+   *
+   * Same rule one level down: the tab you are already on closes the panel, any
+   * other switches to it and opens the panel if it was shut.
+   */
+  const selectPanel = useCallback((next: PanelId) => {
+    if (next === 'terminal') {
+      // Mount the terminal the first time it is asked for, not on page load —
+      // opening the IDE should not start a shell on the gateway.
+      setTerminalStarted(true);
+    }
+    setPanelOpen((open) => {
+      if (open && panelTab === next) {
+        return false;
+      }
+      setPanelTab(next);
+      return true;
+    });
+  }, [panelTab]);
+
+  /** Open the panel on a given tab, without the toggle-off behaviour. */
+  const showPanel = useCallback((tab: PanelId) => {
+    if (tab === 'terminal') setTerminalStarted(true);
+    setPanelTab(tab);
+    setPanelOpen(true);
+  }, []);
+
+  const layout: LayoutState = {
+    sideBar: railOpen,
+    panel: panelOpen,
+    secondary: outlineOpen,
+  };
+
+  const toggleRegion = useCallback((region: keyof LayoutState) => {
+    if (region === 'sideBar') setRailOpen((open) => !open);
+    else if (region === 'panel') setPanelOpen((open) => !open);
+    else setOutlineOpen((open) => !open);
+  }, []);
+
+  const resetLayout = useCallback(() => {
+    setRailOpen(true);
+    setOutlineOpen(true);
+    setPanelOpen(false);
+    setPanelMaximised(false);
+    setRailWidth(260);
+    setOutlineWidth(240);
+    setPanelHeight(260);
+    rememberWidth('rail', 260);
+    rememberWidth('outline', 240);
+    rememberWidth('panel', 260);
   }, []);
 
   /** Open the console in its own browser tab, on the current project. */
@@ -612,7 +675,7 @@ export default function Workspace({ session }: WorkspaceProps) {
       }
       // Popped out means popped out — leaving a second console in this tab
       // would give two REPLs that look alike and do not share locals.
-      setConsoleMode('hidden');
+      setPanelOpen(false);
     } else {
       setNotice({
         kind: 'error',
@@ -621,6 +684,37 @@ export default function Workspace({ session }: WorkspaceProps) {
       });
     }
   }, [project]);
+
+  /**
+   * Create a gateway-event singleton that does not exist yet.
+   *
+   * Separate from `doCreate` because a singleton has no name to ask for: its
+   * resource path is `<module>/<type>` with no third segment, which is exactly
+   * how the platform stores it.
+   */
+  const createSingleton = useCallback(
+    async (typeId: ScriptTypeId) => {
+      const path = `ignition/${typeId}`;
+      try {
+        await createScript({
+          project,
+          path,
+          source: handlerStub(typeId),
+          csrfToken: session.csrfToken,
+        });
+        const refreshed = await fetchScriptTree(project);
+        setTree(refreshed);
+        const entry = refreshed.scripts.find((candidate) => candidate.path === path);
+        if (entry) {
+          await openScript(entry);
+        }
+        setNotice({ kind: 'info', text: `Created the ${TYPE_LABELS[typeId] ?? typeId} script.` });
+      } catch (e) {
+        setNotice({ kind: 'error', text: describe(e) });
+      }
+    },
+    [openScript, project, session.csrfToken]
+  );
 
   return (
     <main className="workspace">
@@ -651,27 +745,6 @@ export default function Workspace({ session }: WorkspaceProps) {
           {saving ? 'Saving…' : 'Save script'}
         </button>
 
-        <span className="workspace-toolbar-gap" />
-
-        <button
-          type="button"
-          className="button"
-          aria-pressed={consoleMode !== 'hidden'}
-          onClick={() =>
-            setConsoleMode((current) => (current === 'hidden' ? 'split' : 'hidden'))
-          }
-        >
-          Console
-        </button>
-        <button
-          type="button"
-          className="button"
-          aria-pressed={outlineOpen}
-          onClick={() => setOutlineOpen((open) => !open)}
-        >
-          Outline
-        </button>
-
         {readOnly && (
           <span className="workspace-readonly" role="status">
             {readOnlyReason}
@@ -682,13 +755,22 @@ export default function Workspace({ session }: WorkspaceProps) {
             {notice.text}
           </span>
         )}
+
+        <span className="workspace-toolbar-gap" />
+
+        {/* The four VS Code layout glyphs replace the 1.2.0 "Console" and
+            "Outline" text buttons: one control set for all three regions,
+            in the place a VS Code user already looks for them. */}
+        <LayoutControls layout={layout} onToggle={toggleRegion} onReset={resetLayout} />
       </div>
 
       <div className="workspace-body">
         <ActivityBar
-          active={consoleMode !== 'hidden' && view === 'scripts' ? 'console' : view}
+          active={view}
           expanded={railOpen}
           onSelect={selectView}
+          activePanel={panelOpen ? panelTab : null}
+          onSelectPanel={selectPanel}
         />
 
         {/* The rail is a column, not just the tree: the tree scrolls inside it
@@ -723,8 +805,6 @@ export default function Workspace({ session }: WorkspaceProps) {
                   scripts={tree.scripts}
                   selectedPath={activeDoc?.path ?? null}
                   onSelect={(entry) => void openScript(entry)}
-                  consoleSelected={consoleMode !== 'hidden'}
-                  onSelectSpecial={openConsole}
                   // Create and delete are offered only when the session can
                   // actually perform them. A visible button that always 403s
                   // teaches people the tool is broken rather than that they
@@ -735,6 +815,9 @@ export default function Workspace({ session }: WorkspaceProps) {
                       : (typeId) => { setCreateError(null); setCreating(typeId); }
                   }
                   onDelete={readOnly ? undefined : (entry) => setPendingDelete(entry)}
+                  onCreateSingleton={
+                    readOnly ? undefined : (typeId) => void createSingleton(typeId)
+                  }
                 />
               ) : (
                 <nav className="file-tree" aria-label="Scripts">
@@ -759,8 +842,12 @@ export default function Workspace({ session }: WorkspaceProps) {
           </>
         )}
 
-        <div className={`workspace-panes pane-mode-${consoleMode}`}>
-          <section className="workspace-editor">
+        {/* Editor above, panel below — the panel spans the editor's width and
+            stops at the side bars, exactly as VS Code's does. Maximising hides
+            the editor rather than resizing it to nothing, so restoring returns
+            to the height the user had chosen. */}
+        <div className="workspace-center">
+          <section className="workspace-editor" hidden={panelOpen && panelMaximised}>
             <TabStrip
               docs={docs}
               activeUri={activeUri}
@@ -800,49 +887,101 @@ export default function Workspace({ session }: WorkspaceProps) {
             />
           </section>
 
-          {consoleMode !== 'hidden' && (
-            <section className="workspace-console-pane">
-              <div className="pane-head">
-                <span className="pane-title">Script Console</span>
-                <span className="console-spacer" />
-                <button
-                  type="button"
-                  aria-pressed={consoleMode === 'split'}
-                  onClick={() => setConsoleMode('split')}
-                  title="Side by side with the editor"
-                >
-                  Split
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={consoleMode === 'full'}
-                  onClick={() => setConsoleMode('full')}
-                  title="Fill the editing area"
-                >
-                  Full
-                </button>
-                <button type="button" onClick={popOutConsole} title="Open in a new browser tab">
-                  Pop out
-                </button>
-                <button type="button" onClick={() => setConsoleMode('hidden')} aria-label="Close console">
-                  ×
-                </button>
-              </div>
-              {/* Keyed on the project so switching projects gives a fresh console
-                  rather than one whose locals belong to the old project. */}
-              <ScriptConsole
-                key={project}
-                project={project}
-                csrfToken={session.csrfToken}
-                canExecute={session.canExecute !== false && !readOnly}
-                onOpenFrame={(path, line) => {
-                  const entry = tree?.scripts.find((candidate) => candidate.path === path);
-                  if (entry) {
-                    void openScript(entry).then(() => jumpToLine(line - 1, 0));
-                  }
-                }}
+          {panelOpen && !panelMaximised && (
+            <Resizer
+              value={panelHeight}
+              min={90}
+              max={900}
+              side="top"
+              label="Resize the panel"
+              onChange={(height) => {
+                setPanelHeight(height);
+                rememberWidth('panel', height);
+              }}
+            />
+          )}
+
+          {panelOpen && (
+            <div
+              className="workspace-panel-slot"
+              style={
+                panelMaximised
+                  ? { flex: '1 1 auto', minHeight: 0 }
+                  : { flex: `0 0 ${panelHeight}px`, height: panelHeight }
+              }
+            >
+              <Panel
+                activeId={panelTab}
+                onSelect={(id) => showPanel(id as PanelId)}
+                onClose={() => setPanelOpen(false)}
+                maximised={panelMaximised}
+                onToggleMaximise={() => setPanelMaximised((on) => !on)}
+                tabs={[
+                  {
+                    id: 'console',
+                    label: 'Script Console',
+                    actions: (
+                      <button
+                        type="button"
+                        className="panel-icon-button"
+                        onClick={popOutConsole}
+                        aria-label="Open the console in a new browser tab"
+                        title="Open in a new browser tab"
+                      >
+                        <IconExternal size={14} />
+                      </button>
+                    ),
+                    content: (
+                      /* Keyed on the project so switching projects gives a fresh
+                         console rather than one whose locals belong to the old
+                         project. */
+                      <ScriptConsole
+                        key={project}
+                        project={project}
+                        csrfToken={session.csrfToken}
+                        canExecute={session.canExecute !== false && !readOnly}
+                        onOpenFrame={(path, line) => {
+                          const entry = tree?.scripts.find((c) => c.path === path);
+                          if (entry) {
+                            void openScript(entry).then(() => jumpToLine(line - 1, 0));
+                          }
+                        }}
+                      />
+                    ),
+                  },
+                  {
+                    id: 'terminal',
+                    label: 'Terminal',
+                    actions: (
+                      <button
+                        type="button"
+                        className="panel-icon-button"
+                        onClick={() => {
+                          setTerminalStarted(true);
+                          setTerminalKey((n) => n + 1);
+                        }}
+                        aria-label="New terminal"
+                        title="New terminal"
+                      >
+                        <IconPlus size={14} />
+                      </button>
+                    ),
+                    content: terminalStarted ? (
+                      /* The key is what restarts a shell: the component owns the
+                         emulator and the connection, so a remount is the only
+                         honest way to end one and begin another. */
+                      <TerminalView
+                        key={terminalKey}
+                        csrfToken={session.csrfToken}
+                        canOpen={session.canExecute !== false}
+                      />
+                    ) : (
+                      <p className="terminal-notice">Starting a shell…</p>
+                    ),
+                  },
+                ]}
               />
-            </section>
+            </div>
           )}
         </div>
 

@@ -22,3 +22,16 @@
   background: var(--accent-primary);
   outline: none;
 }
+
+/* The horizontal form, for the bottom panel. Same 1px rule and same padded grab
+   area, rotated — the panel is sized from the edge above it. */
+.resizer.resizer-horizontal {
+  flex: 0 0 1px;
+  width: auto;
+  height: 1px;
+  cursor: row-resize;
+}
+
+.resizer.resizer-horizontal::after {
+  inset: -2px 0;
+}

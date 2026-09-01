@@ -72,6 +72,71 @@ def _hex(rgb) -> str:
     return "#" + "".join(f"{max(0, min(255, round(c * 255))):02x}" for c in rgb)
 
 
+def _to_hsl(rgb):
+    r, g, b = rgb
+    hi, lo = max(rgb), min(rgb)
+    lightness = (hi + lo) / 2
+    if hi == lo:
+        return 0.0, 0.0, lightness
+    d = hi - lo
+    sat = d / (2 - hi - lo) if lightness > 0.5 else d / (hi + lo)
+    if hi == r:
+        hue = ((g - b) / d) % 6
+    elif hi == g:
+        hue = (b - r) / d + 2
+    else:
+        hue = (r - g) / d + 4
+    return hue / 6, sat, lightness
+
+
+def _from_hsl(hsl):
+    hue, sat, lightness = hsl
+    if sat == 0:
+        return (lightness, lightness, lightness)
+    q = lightness * (1 + sat) if lightness < 0.5 else lightness + sat - lightness * sat
+    p_ = 2 * lightness - q
+
+    def channel(t):
+        t = t % 1.0
+        if t < 1 / 6:
+            return p_ + (q - p_) * 6 * t
+        if t < 1 / 2:
+            return q
+        if t < 2 / 3:
+            return p_ + (q - p_) * (2 / 3 - t) * 6
+        return p_
+
+    return (channel(hue + 1 / 3), channel(hue), channel(hue - 1 / 3))
+
+
+def lift_to_contrast(rgb, surfaces, minimum: float, dark: bool):
+    """
+    Move a colour to legibility **keeping its hue and saturation**.
+
+    Mixing toward white is what the 1.2.0 generator did, and it desaturates: a
+    brand teal lifted that way arrives grey-green and stops reading as the
+    theme's colour at all. Raising HSL lightness keeps `#0f766e` recognisably
+    teal, which is the entire reason a pack names a brand accent.
+
+    The search is for the SMALLEST lightness change that clears the bar, tried
+    in the direction that suits the theme's polarity first — a mid-tone brand on
+    a mid-tone page can be illegible in both directions for several steps.
+
+    Returns (rgb, wasAdjusted).
+    """
+    if all(_ratio(rgb, s) >= minimum for s in surfaces):
+        return rgb, False
+    hue, sat, lightness = _to_hsl(rgb)
+    start = int(round(lightness * 100))
+    up = list(range(start, 101))
+    down = list(range(start, -1, -1))
+    for value in (up + down) if dark else (down + up):
+        candidate = _from_hsl((hue, sat, value / 100))
+        if all(_ratio(candidate, s) >= minimum for s in surfaces):
+            return candidate, True
+    return ((1.0, 1.0, 1.0) if dark else (0.0, 0.0, 0.0)), True
+
+
 def accent_bg(hex_colour: str, dark: bool) -> str:
     """A translucent wash of the accent, for selections and active rows."""
     return f"color-mix(in srgb, {hex_colour} {'30' if dark else '20'}%, transparent)"
@@ -125,7 +190,12 @@ LIGHT_RAMP = {"secondary": 0.045, "tertiary": 0.10, "surface": 0.02, "border": 0
 
 # Text is placed by TARGET CONTRAST rather than by hue, so "muted" means the same
 # thing in every theme instead of meaning whatever the pack happened to hold.
-TEXT_TARGETS = {"primary": 13.0, "secondary": 7.0, "muted": 4.6}
+#
+# 13:1 was the 1.2.0 setting and it renders body text very close to white, which
+# is brighter than any editor ships and is tiring over a working day. VS Code's
+# own default is #cccccc on #1f1f1f: 10.4:1. These targets put every theme in
+# that neighbourhood, still comfortably past WCAG AAA's 7:1 for body text.
+TEXT_TARGETS = {"primary": 10.5, "secondary": 6.2, "muted": 4.6}
 
 # Every surface a foreground can land on. A colour must clear the bar on ALL of
 # them, because the same token paints the tree (secondary), the editor (primary)
@@ -134,6 +204,21 @@ SURFACE_KEYS = ("--bg-primary", "--bg-secondary", "--bg-tertiary")
 
 MIN_ACCENT_CONTRAST = 4.5
 MIN_TEXT_CONTRAST = 4.5
+
+# How much of the theme's brand accent is stirred into the neutral ground.
+#
+# Not decoration. `aurora-teal` and `aurora-violet` are byte-identical packs
+# apart from `accent.primary` and `accent.progress` — in Perspective they read
+# differently because the glass surfaces tint with the accent, and with a purely
+# page-derived ramp the IDE rendered the teal theme in violet. A ground that
+# carries a trace of the brand is how VS Code themes differ from one another
+# too, and it is what makes two siblings tell apart at a glance.
+#
+# The mix changes HUE ONLY: the page's own lightness is restored afterwards.
+# Without that, a pack whose brand accent is nearly white — `newsprint-night`
+# resolves to #e8e2d6 — has its editor ground dragged three shades lighter than
+# the pack asked for, which is a bigger change than the one being made.
+ACCENT_TINT = 0.30
 
 
 def opaque_page(tokens: dict, dark: bool) -> tuple[float, float, float]:
@@ -186,11 +271,18 @@ def _ratio(a: tuple[float, float, float], b: tuple[float, float, float]) -> floa
 def pick_legible(tokens: dict, names: tuple[str, ...], surfaces: list, dark: bool,
                  minimum: float) -> tuple[str, bool]:
     """
-    First candidate legible on EVERY surface; else the best one, nudged.
+    The first token the pack actually defines, lifted until it is legible.
 
-    Returns (colour, wasAdjusted).
+    1.2.0 walked the candidate list and took the first that PASSED, which is how
+    "Glass Aurora — Teal" came out violet: its brand `#0f766e` failed on the
+    page, so the resolver fell through to `text.status-info`, a token the teal
+    and violet packs share verbatim. The two themes then differed in one token
+    out of eighteen and were indistinguishable on screen.
+
+    A pack's brand colour is not interchangeable with its info colour. So the
+    list is now a fallback for a token that is ABSENT, not for one that is dark:
+    the first token present is kept and lifted in place, hue intact.
     """
-    fallback = None
     for name in names:
         raw = tokens.get(name)
         if not raw or raw == "transparent":
@@ -198,18 +290,69 @@ def pick_legible(tokens: dict, names: tuple[str, ...], surfaces: list, dark: boo
         rgb = _parse(raw)
         if rgb is None:
             continue
-        if fallback is None:
-            fallback = rgb
-        if all(_ratio(rgb, s) >= minimum for s in surfaces):
-            return _hex(rgb), False
-    if fallback is None:
-        return _hex((0.5, 0.5, 0.5)), True
-    ink = (1.0, 1.0, 1.0) if dark else (0.0, 0.0, 0.0)
-    for i in range(1, 101):
-        candidate = _mix(fallback, ink, i / 100)
-        if all(_ratio(candidate, s) >= minimum for s in surfaces):
-            return _hex(candidate), True
-    return _hex(ink), True
+        lifted, adjusted = lift_to_contrast(rgb, surfaces, minimum, dark)
+        return _hex(lifted), adjusted
+    return _hex((0.5, 0.5, 0.5)), True
+
+
+# Syntax roles in the order they keep their colour when two of them collide.
+# Comment is first because a comment that stops looking muted reads as code;
+# string and number next because they are the two a reader scans for. Type is
+# last, and is the one that moves — in these packs it comes from
+# `accent.progress`, which several of them set to a near-neighbour of the brand.
+SYNTAX_PRIORITY = (
+    "--syntax-comment", "--syntax-string", "--syntax-number",
+    "--syntax-keyword", "--syntax-function", "--syntax-type",
+)
+
+# Below this RGB distance two syntax colours are indistinguishable on screen.
+#
+# Deliberately tight. A wider bar starts separating colours that a reader can
+# already tell apart, and the separation is a hue rotation — which takes the
+# colour off the pack's palette. Repainting Nord's function names pink to gain
+# contrast it did not need is a worse outcome than the near-miss it fixed.
+SYNTAX_MIN_DISTANCE = 0.07
+
+
+def _distance(a, b) -> float:
+    return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
+
+def differentiate_syntax(out: dict, surfaces: list, dark: bool, pack_id: str,
+                         report: list[str]) -> None:
+    """
+    Pull apart syntax colours that resolved to the same hue.
+
+    Ten packs carry about six distinct hues between them, so two syntax roles
+    landing on one colour is common rather than exotic — `aurora-teal` gave
+    keyword `#18baad` and type `#15bdaa`, which is one colour with two names.
+    Highlighting that does not distinguish is worse than no highlighting,
+    because it looks deliberate.
+
+    The later role in SYNTAX_PRIORITY is rotated in hue until it separates,
+    then re-lifted so the rotation cannot cost legibility.
+    """
+    kept: list[tuple[str, tuple[float, float, float]]] = []
+    for role in SYNTAX_PRIORITY:
+        rgb = _parse(out[role])
+        if rgb is None:
+            continue
+        clash = next((name for name, other in kept
+                      if _distance(rgb, other) < SYNTAX_MIN_DISTANCE), None)
+        if clash is None:
+            kept.append((role, rgb))
+            continue
+        hue, sat, lightness = _to_hsl(rgb)
+        for turn in (1, 2, 3, 4, 5, 6):
+            trial = _from_hsl(((hue + 0.06 * turn) % 1.0, sat, lightness))
+            trial, _ = lift_to_contrast(trial, surfaces, MIN_ACCENT_CONTRAST, dark)
+            if all(_distance(trial, other) >= SYNTAX_MIN_DISTANCE for _, other in kept):
+                out[role] = _hex(trial)
+                kept.append((role, trial))
+                report.append(f"  {pack_id}: {role} rotated off {clash} to {out[role]}")
+                break
+        else:
+            kept.append((role, rgb))
 
 
 def block(pack: dict, report: list[str]) -> str:
@@ -217,7 +360,23 @@ def block(pack: dict, report: list[str]) -> str:
     dark = pack["dark"]
     ramp = DARK_RAMP if dark else LIGHT_RAMP
 
-    page = opaque_page(tokens, dark)
+    raw_page = opaque_page(tokens, dark)
+
+    # The brand accent, hue intact, legible on the page it will sit on. Resolved
+    # BEFORE the ramp because the ramp is tinted with it.
+    brand_source = next(
+        (rgb for rgb in (_parse(tokens.get(name) or "") for name in ACCENT_SOURCES["--accent-primary"])
+         if rgb is not None),
+        None,
+    )
+    if brand_source is None:
+        page = raw_page
+    else:
+        brand_seed, _ = lift_to_contrast(brand_source, [raw_page], MIN_ACCENT_CONTRAST, dark)
+        mixed = _mix(raw_page, brand_seed, ACCENT_TINT)
+        hue, sat, _ = _to_hsl(mixed)
+        page = _from_hsl((hue, sat, _to_hsl(raw_page)[2]))
+
     secondary = step(page, ramp["secondary"], dark)
     tertiary = step(page, ramp["tertiary"], dark)
     surface = step(page, ramp["surface"], dark)
@@ -246,9 +405,13 @@ def block(pack: dict, report: list[str]) -> str:
             out["--text-muted"] = _hex(candidate)
             break
 
-    font = tokens.get("font.body")
-    if font:
-        out["--font-sans"] = font
+    # The pack's `font.body` is NOT copied through.
+    #
+    # A Perspective pack names a typeface as part of a brand — `newsprint-night`
+    # asks for Georgia — and applying that to an IDE renders the file tree, the
+    # tab strip and every button in a serif. VS Code themes have never changed
+    # the UI font, for exactly this reason: a theme here is a palette. The one
+    # stack lives in index.css, beside the mono stack it has to line up with.
 
     for role, names in ACCENT_SOURCES.items():
         minimum = 3.0 if role == "--syntax-comment" else MIN_ACCENT_CONTRAST
@@ -257,6 +420,8 @@ def block(pack: dict, report: list[str]) -> str:
         if adjusted:
             report.append(f'  {pack["id"]}: {role} nudged to {colour} '
                           f'(no pack token cleared {minimum}:1 on all surfaces)')
+
+    differentiate_syntax(out, surfaces, dark, pack["id"], report)
 
     accent = out["--accent-primary"]
     out["--accent-primary-bg"] = accent_bg(accent, dark)
@@ -275,7 +440,7 @@ def block(pack: dict, report: list[str]) -> str:
     for key, value in out.items():
         lines.append(f"  {key}: {value};")
     lines.append("}")
-    return "\n".join(lines)
+    return "\n".join(lines), out
 
 
 def generate(packs_dir: pathlib.Path) -> str:
@@ -299,7 +464,25 @@ def generate(packs_dir: pathlib.Path) -> str:
         f" * {len(packs)} themes.\n"
         " */\n"
     )
-    css = header + "\n\n".join(block(p, report) for p in packs) + "\n"
+    blocks = [block(p, report) for p in packs]
+
+    # Two themes that generate the same eighteen values are one theme with two
+    # names, and the picker then offers a choice that does nothing. This is the
+    # 1.2.0 aurora bug expressed as an assertion — it shipped precisely because
+    # nothing compared one theme's output against another's.
+    seen: dict[str, str] = {}
+    for pack, (_, out) in zip(packs, blocks):
+        key = "|".join(f"{k}={v}" for k, v in sorted(out.items()))
+        if key in seen:
+            raise SystemExit(
+                f"Themes '{seen[key]}' and '{pack['id']}' generate identical palettes. "
+                "Their packs differ only in tokens this generator ignores — widen "
+                "ACCENT_SOURCES or the accent tint rather than shipping two names "
+                "for one theme."
+            )
+        seen[key] = pack["id"]
+
+    css = header + "\n\n".join(text for text, _ in blocks) + "\n"
     if report:
         print(f"Contrast adjustments ({len(report)}):", file=sys.stderr)
         for line in report:
