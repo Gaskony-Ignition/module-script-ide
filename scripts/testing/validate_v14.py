@@ -134,18 +134,38 @@ with sync_playwright() as p:
             # Designer, Gateway, All — which is not the numeric order.
             rec("HINTS: options are in the Designer's order, not the bitmask's",
                 opts == ["None", "Designer", "Gateway", "All"], f"{opts}")
-        rec("HINTS: the control explains itself",
-            page.locator(".config-help").count() >= 1,
-            page.locator(".config-help").first.inner_text()[:70]
-            if page.locator(".config-help").count() else "no help line")
-        # A help line that pushes the controls onto separate rows is a
-        # regression: it is a whole flex row of its own or it is wrong.
-        if page.locator(".config-help").count():
-            help_box = page.locator(".config-help").first.bounding_box()
-            field_box = page.locator(".config-field").first.bounding_box()
-            rec("HINTS: the help sits BELOW the control, not beside it",
-                help_box["y"] >= field_box["y"] + field_box["height"] - 2,
-                f"help y={help_box['y']:.0f} field bottom={field_box['y'] + field_box['height']:.0f}")
+        # No prose. The Designer says nothing about this control, and 1.4.0's
+        # first attempt gave the rarest setting on the strip a paragraph, which
+        # made it the loudest thing on it (Nigel, 01/09/2026).
+        rec("HINTS: no explanatory prose on the strip",
+            page.locator(".config-help").count() == 0, "")
+        # Out of the way on the RIGHT, as the Designer places it. Measured
+        # against the strip's own box rather than the viewport: the strip does
+        # not span the window once the outline panel is open.
+        field = page.locator(".config-field-trailing").first
+        if field.count():
+            fb = field.bounding_box()
+            sb = strip.bounding_box()
+            # LAST on the row, not merely right-of-centre. The first attempt at
+            # this assertion accepted a control stranded mid-strip with the save
+            # button beyond it — right-hand side, wrong end.
+            others = page.locator(".config-strip > *:not(.config-field-trailing)")
+            rights = [(lambda x: x["x"] + x["width"])(others.nth(i).bounding_box())
+                      for i in range(others.count())]
+            rec("HINTS: the control is the LAST thing on the strip",
+                all(fb["x"] + fb["width"] >= r - 1 for r in rights),
+                f"its right={fb['x'] + fb['width']:.0f}, others end at {max(rights):.0f}"
+                if rights else "nothing else on the strip")
+            rec("HINTS: it sits against the strip's right edge",
+                (sb["x"] + sb["width"]) - (fb["x"] + fb["width"]) < 40,
+                f"{(sb['x'] + sb['width']) - (fb['x'] + fb['width']):.0f}px of margin")
+            rec("HINTS: it is smaller than the strip's ordinary text",
+                float(field.locator(".config-label").evaluate(
+                    "el => getComputedStyle(el).fontSize.replace('px','')")) <= 12,
+                field.locator(".config-label").evaluate(
+                    "el => getComputedStyle(el).fontSize"))
+        else:
+            rec("HINTS: the control is placed as a trailing field", False, "no trailing field")
         page.screenshot(path=f"{OUT}/v14-hint-scope.png")
     else:
         rec("HINTS: a Project Library script shows its settings strip", False, "no strip")

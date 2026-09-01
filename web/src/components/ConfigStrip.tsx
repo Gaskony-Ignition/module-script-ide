@@ -57,29 +57,25 @@ const LABELS: Record<string, string> = {
 };
 
 /**
- * One line saying what a control actually does, for the ones whose name does
- * not say it.
+ * Fields that belong at the far RIGHT of the strip, small and out of the way.
  *
- * `Script Hint Scope` earns one because it is genuinely obscure — Nigel had used
- * the Designer for years without noticing it (01/09/2026) — and because what it
- * does is not guessable from four words. It is not decoration and it is not
- * ours: it is the Designer's control, on Project Library scripts only, and the
- * effect is measured (SCRIPTING.md §4.4): with `Designer` chosen, typing
- * `system.` completes `alarm, dataset, date, db, device, dnp3, file…`; with
- * `Gateway` or `All` the list also carries `bacnet` and `config`, which are
- * gateway-only.
+ * `Script Hint Scope` is the only one, and its placement is the Designer's:
+ * a small grey label and a combo at the top-right of the editor header, well
+ * away from the code. It is a setting almost nobody touches — Nigel had used the
+ * Designer for years without noticing it (01/09/2026) — and 1.4.0's first
+ * attempt gave it a paragraph of explanation, which made the rarest control on
+ * the strip the loudest thing on it.
  *
- * `None` is described as it BEHAVES, not as it reads. Measured twice: it does
- * not remove completions, it shows the widest list — so calling it "no hints"
- * here would be this IDE inventing a behaviour the platform does not have.
+ * What that paragraph said is kept HERE, where it costs the reader nothing:
+ * the combo filters which scope's API the autocomplete offers in this script and
+ * persists to `attributes.hintScope`, so the Designer honours it too. Measured
+ * (web-designer `SCRIPTING.md` §4.4): with `Designer` chosen, `system.`
+ * completes `alarm, dataset, date, db, device, dnp3, file…`; with `Gateway` or
+ * `All` the list also carries the gateway-only `bacnet` and `config`. And
+ * `None` does NOT switch hints off — measured twice, it shows the widest list.
  */
-const FIELD_HELP: Record<string, string> = {
-  hintScope:
-    'Which scope\u2019s API the autocomplete offers in this script \u2014 pick the one it will '
-    + 'actually run in, and Designer-only or Gateway-only calls stop being suggested where '
-    + 'they cannot work. Stored on the script, so the Designer honours it too. '
-    + '(Measured: \u201cNone\u201d does not switch hints off; it shows the widest list.)',
-};
+const TRAILING_FIELDS = new Set(['hintScope']);
+
 
 /**
  * The Designer's own explanatory text for each event type, and the parameters
@@ -183,21 +179,14 @@ export default function ConfigStrip({
     <div className="config-strip" aria-label="Script settings">
       <TypeDocs docs={docs} />
       {editable.map((name) => (
-        <label className="config-field" key={name}>
+        <label
+          className={`config-field${TRAILING_FIELDS.has(name) ? ' config-field-trailing' : ''}`}
+          key={name}
+        >
           <span className="config-label">{LABELS[name] ?? name}</span>
           {renderField(name, attributes[name], onChange, readOnly)}
         </label>
       ))}
-      {/* Help sits OUTSIDE the label and takes a whole row of the wrapping flex
-          strip. Inside it, a sentence becomes a third inline item beside the
-          control and pushes every other field off the row. */}
-      {editable
-        .filter((name) => FIELD_HELP[name])
-        .map((name) => (
-          <p className="config-help muted" key={`help-${name}`}>
-            {FIELD_HELP[name]}
-          </p>
-        ))}
       <button
         type="button"
         className="button config-save"

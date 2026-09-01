@@ -2,10 +2,10 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.4.0 · all phases complete · deployed, gate-green and live-validated on
+**Version 1.4.1 · all phases complete · deployed, gate-green and live-validated on
 `ignition-module-testing` (8.3.8) · 01/09/2026**
 
-1.1.0–1.4.0 are post-1.0 feature work driven by Nigel's review, not new phases.
+1.1.0–1.4.1 are post-1.0 feature work driven by Nigel's review, not new phases.
 1.3.0 added a **Gateway terminal**, moved the console into a **bottom panel**, and
 brought **Gateway Events** into line with the real Designer. 1.4.0 makes
 **inherited scripts read-only until overridden**, names and explains **Script Hint
@@ -43,6 +43,15 @@ remedy is one click from where you are.
 `Script Hint Scope` is the Designer's own control, on Project Library scripts
 only, top-right of the editor header. Its option order is **None · Designer ·
 Gateway · All** — measured, and NOT the bitmask order this module used.
+
+**1.4.1 put it where the Designer puts it and took the words away.** 1.4.0
+renamed and explained it, and the explanation was a paragraph on the strip —
+which made the rarest control in the module the loudest thing on the row (Nigel:
+"I had never even noticed it was there and never needed to use it"). It is now
+small, last on the strip, hard against the right edge, and silent. What the
+paragraph said is kept in the `TRAILING_FIELDS` comment, where it costs a reader
+nothing. The rule generalises: matching a Designer control means matching how
+much room it takes up, not only what it is called.
 
 ## Where we are
 
@@ -92,13 +101,13 @@ line.
 delete without `If-Match` is 428 and with a stale one is 409; `enabled` round-trips
 on Shutdown and Update; a cron expression round-trips and a malformed one is a 400.
 
-**`validate_v14.py` — 17 checks, all in a real browser.** An inherited script
+**`validate_v14.py` — 19 checks, all in a real browser.** An inherited script
 opens with a bar naming the project it came from; **typing into it changes
 nothing** (2593 characters before, 2593 after — the same assertion that was made
 against the real Designer); Save is disabled and Ctrl+S does not fork the parent;
 the Override action unlocks that buffer and nothing else; `Script Hint Scope`
-carries the Designer's name, the Designer's option order and an explanation on its
-own row; and the terminal reports `uid=0 root` with `git version 2.43.0` on the
+carries the Designer's name and option order, is the last thing on the strip and
+sits against its right edge; and the terminal reports `uid=0 root` with `git version 2.43.0` on the
 command line.
 
 **`validate_v13.py` — 25 checks, all in a real browser.** Gateway Events in the
@@ -178,7 +187,7 @@ gutter marker.
   workspace has never been measured. Its tag-path list is the missing piece, and
   guessing the key would write a value the Designer never reads.
 - **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`; `v1.0.0`
-  through `v1.4.0` tagged 01/09/2026. The folder is gitignored by the workspace repo,
+  through `v1.4.1` tagged 01/09/2026. The folder is gitignored by the workspace repo,
   like every sibling module. There is **no GitHub release artefact** — the signed
   `.modl` is built locally and has not been attached to the tag.
 

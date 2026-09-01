@@ -73,18 +73,23 @@ describe('ConfigStrip', () => {
     expect(select.value).toBe('7');
   });
 
-  it('explains what Script Hint Scope does, since four words do not', () => {
+  it('keeps Script Hint Scope small and out of the way, with no prose', () => {
     renderStrip(['hintScope'], { hintScope: 2 });
-    const help = screen.getByText(/autocomplete offers in this script/i);
-    expect(help).toBeInTheDocument();
-    // The measured caveat has to survive an edit: "None" reads like "off" and
-    // is not, and this IDE must not describe a behaviour the platform lacks.
-    expect(help.textContent).toMatch(/does not switch hints off/i);
+    // The Designer puts this at the top-right of the editor header, small, and
+    // says nothing about it. 1.4.0's first attempt gave the rarest control on
+    // the strip a paragraph of explanation and so made it the loudest thing on
+    // it (Nigel, 01/09/2026). The explanation lives in TRAILING_FIELDS' comment
+    // now, where it costs the reader nothing.
+    const field = document.querySelector('.config-field-trailing');
+    expect(field).not.toBeNull();
+    expect(field).toContainElement(screen.getByLabelText('Script Hint Scope'));
+    expect(document.querySelectorAll('.config-help')).toHaveLength(0);
+    expect(screen.queryByText(/autocomplete/i)).not.toBeInTheDocument();
   });
 
-  it('does not explain a control whose name already says it', () => {
-    renderStrip(['enabled'], { enabled: true });
-    expect(document.querySelectorAll('.config-help')).toHaveLength(0);
+  it('does not push an ordinary field to the right', () => {
+    renderStrip(['enabled', 'delay'], { enabled: true, delay: 1000 });
+    expect(document.querySelectorAll('.config-field-trailing')).toHaveLength(0);
   });
 
   it('reports a boolean for a checkbox and a number for a delay', () => {
