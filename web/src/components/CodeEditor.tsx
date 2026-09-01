@@ -29,7 +29,7 @@ import { Annotation, EditorState, Compartment, type Extension } from '@codemirro
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
 import type { LspClient } from '../api/lspClient';
-import type { OpenDoc } from '../workspace/documents';
+import { isLockedByInheritance, type OpenDoc } from '../workspace/documents';
 import { lspExtension } from './lspExtension';
 import { attachDiagnostics } from './lspDiagnostics';
 import { lspUri } from '../api/lspClient';
@@ -40,6 +40,12 @@ import './CodeEditor.css';
 export interface CodeEditorProps {
   docs: OpenDoc[];
   activeUri: string | null;
+  /**
+   * Session/project-wide read-only: no edit permission, or an immutable
+   * project. A document can ALSO be read-only on its own account — see
+   * {@link isLockedByInheritance} — so this is one of two inputs, never the
+   * whole answer.
+   */
   readOnly: boolean;
   onChange: (uri: string, text: string) => void;
   /** Ctrl/Cmd+S. Fired with the URI of the view that had focus. */
@@ -106,7 +112,14 @@ export default function CodeEditor({ docs, activeUri, readOnly, onChange, onSave
         parent: host,
         state: EditorState.create({
           doc: doc.text,
-          extensions: baseExtensions(doc, onChangeRef, onSaveRef, readOnlySwitch, readOnly, lspRef.current),
+          extensions: baseExtensions(
+            doc,
+            onChangeRef,
+            onSaveRef,
+            readOnlySwitch,
+            readOnly || isLockedByInheritance(doc),
+            lspRef.current
+          ),
         }),
       });
       // Diagnostics are PUSHED by the server, so the view subscribes rather than
@@ -159,15 +172,22 @@ export default function CodeEditor({ docs, activeUri, readOnly, onChange, onSave
     }
   }, [docs]);
 
-  // Read-only is a session/project fact, so it is reconfigured rather than baked
-  // into the initial state — a user's permissions can change under an open tab.
+  // Read-only is reconfigured rather than baked into the initial state, because
+  // BOTH of its inputs change under an open tab: a user's permissions can be
+  // revoked, and overriding an inherited script unlocks that one document
+  // without touching any other. Hence per-view, keyed on the doc — a single
+  // dispatch over every view would unlock the whole tab strip.
   useEffect(() => {
-    for (const mounted of viewsRef.current.values()) {
+    for (const doc of docs) {
+      const mounted = viewsRef.current.get(doc.uri);
+      if (!mounted) continue;
       mounted.view.dispatch({
-        effects: mounted.readOnlySwitch.reconfigure(readOnlyExtension(readOnly)),
+        effects: mounted.readOnlySwitch.reconfigure(
+          readOnlyExtension(readOnly || isLockedByInheritance(doc))
+        ),
       });
     }
-  }, [readOnly]);
+  }, [docs, readOnly]);
 
   // Show exactly one view. Hidden rather than unmounted — see the file comment.
   useEffect(() => {

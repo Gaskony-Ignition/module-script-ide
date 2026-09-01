@@ -29,6 +29,7 @@ function doc(overrides: Partial<OpenDoc> = {}): OpenDoc {
     etag: 'sig-1',
     baseText: DESIGNER_SOURCE,
     text: DESIGNER_SOURCE,
+    overridden: false,
     ...overrides,
   };
 }
@@ -266,5 +267,101 @@ describe('CodeEditor container', () => {
     );
     expect(screen.getByTestId('code-editor')).toBeInTheDocument();
     expect(document.querySelectorAll('.code-editor-host')).toHaveLength(0);
+  });
+});
+
+/**
+ * Inheritance is a per-DOCUMENT read-only, not a per-session one.
+ *
+ * Measured off the real 8.3.8 Designer (01/09/2026): an inherited Project
+ * Library script opens through `Open read-only` with the header
+ * `Chart  (Read-Only)`, and typing into it changes nothing — I typed four
+ * characters and the buffer was byte-identical. `Override Resource` is what
+ * makes it writable.
+ *
+ * These are here rather than in a workspace test because the failure they guard
+ * is invisible above CodeMirror: `EditorState.readOnly` is ADVISORY, so a view
+ * that was never given the extension accepts a dispatch quite happily and the
+ * only place the truth exists is the view's own state.
+ */
+describe('CodeEditor inheritance lock', () => {
+  it('refuses edits to an inherited document even when the session may write', () => {
+    render(
+      <CodeEditor
+        docs={[doc({ origin: 'inherited' })]}
+        activeUri="P::ignition/script-python/util/helpers"
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    expect(activeView().state.readOnly).toBe(true);
+  });
+
+  it('unlocks that document once it is overridden', () => {
+    render(
+      <CodeEditor
+        docs={[doc({ origin: 'inherited', overridden: true })]}
+        activeUri="P::ignition/script-python/util/helpers"
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    expect(activeView().state.readOnly).toBe(false);
+  });
+
+  it('unlocks ONLY the overridden document, not every open tab', () => {
+    const inherited = doc({
+      uri: 'P::ignition/script-python/a',
+      path: 'ignition/script-python/a',
+      origin: 'inherited',
+    });
+    const overridden = doc({
+      uri: 'P::ignition/script-python/b',
+      path: 'ignition/script-python/b',
+      origin: 'inherited',
+      overridden: true,
+    });
+    const { rerender } = render(
+      <CodeEditor
+        docs={[inherited, overridden]}
+        activeUri="P::ignition/script-python/a"
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    // Re-render so the reconfigure effect runs over both views, which is the
+    // path a real override takes: the doc object is replaced, not remounted.
+    rerender(
+      <CodeEditor
+        docs={[inherited, { ...overridden }]}
+        activeUri="P::ignition/script-python/a"
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    const views = Array.from(document.querySelectorAll<HTMLElement>('.code-editor-host .cm-editor'))
+      .map((host) => EditorView.findFromDOM(host))
+      .filter((view): view is EditorView => view !== null);
+    expect(views).toHaveLength(2);
+    expect(views.map((view) => view.state.readOnly)).toEqual([true, false]);
+  });
+
+  it('keeps a session-wide read-only in force over an override', () => {
+    // Overriding is a resource decision; it cannot hand write access to a user
+    // who has none. Both inputs are ANDed, and this is the one that must win.
+    render(
+      <CodeEditor
+        docs={[doc({ origin: 'inherited', overridden: true })]}
+        activeUri="P::ignition/script-python/util/helpers"
+        readOnly
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    expect(activeView().state.readOnly).toBe(true);
   });
 });

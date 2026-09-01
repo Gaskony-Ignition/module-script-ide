@@ -159,21 +159,45 @@ public class TerminalSession {
         String scriptBinary = resolve(SCRIPT_CANDIDATES);
         boolean pty = scriptBinary != null;
 
+        // null unless this host already grants the Gateway's own user
+        // passwordless sudo — TerminalPolicy proves that by running it, and
+        // returns null the instant it does not work. See sudoForElevation.
+        String sudo = TerminalPolicy.sudoForElevation();
+
         Path ttyFile = null;
         List<String> argv = new ArrayList<>();
         if (pty) {
             ttyFile = Files.createTempFile("scriptide-tty-", ".path");
             // Every interpolated value is validated: the shell path by
-            // TerminalPolicy.isSafeShellPath, the size by clamp above, and the
+            // TerminalPolicy.isSafeShellPath, the sudo path by the same absolute
+            // candidate list the shell uses, the size by clamp above, and the
             // temp path is one we created. Nothing client-supplied reaches here.
+            //
+            // ELEVATION GOES INSIDE the pty, not around it: `script` itself stays
+            // the Gateway user, so it is the Gateway user that owns the pty and
+            // the process the JVM has to be able to signal. Running `sudo script`
+            // instead would give us a root process this JVM cannot kill, and the
+            // idle sweeper would then be a promise the module cannot keep.
+            String exec = sudo == null
+                ? shell + " -i"
+                // -H so HOME is root's and not the gateway user's: a root shell
+                // writing into the service account's dotfiles leaves root-owned
+                // files behind that the gateway then cannot rewrite.
+                : sudo + " -n -H " + shell + " -i";
             String launch = "tty > '" + ttyFile + "'; "
                 + "stty cols " + safeCols + " rows " + safeRows + " 2>/dev/null; "
-                + "exec " + shell + " -i";
+                + "exec " + exec;
             argv.add(scriptBinary);
             argv.add("-q");
             argv.add("-c");
             argv.add(launch);
             argv.add("/dev/null");
+        } else if (sudo != null) {
+            argv.add(sudo);
+            argv.add("-n");
+            argv.add("-H");
+            argv.add(shell);
+            argv.add("-i");
         } else {
             argv.add(shell);
             argv.add("-i");
@@ -323,6 +347,14 @@ public class TerminalSession {
         closed = true;
         // Descendants first: destroying `script` alone can leave the shell it
         // spawned running with nobody reading its output.
+        //
+        // On an ELEVATED terminal those descendants are root and this JVM is
+        // not, so the destroy is a no-op the OS refuses silently — which is
+        // fine, and is why `script` itself is killed second rather than only.
+        // Killing it closes the pty master, the slave raises SIGHUP, and the
+        // root shell exits on the same mechanism that ends any hung-up session.
+        // The one thing we must not do is claim the descendant kill did the
+        // work: it is belt to the pty's braces, not the other way round.
         process.descendants().forEach(ProcessHandle::destroy);
         process.destroy();
         cleanUp();

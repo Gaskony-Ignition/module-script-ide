@@ -125,3 +125,31 @@
   margin: 0;
   padding: 0;
 }
+
+/* A one-line explanation under the controls it belongs to.
+ *
+ * `flex: 1 0 100%` gives it a whole row of the wrapping strip. Inline beside
+ * the control it would push every other field onto its own line, and a strip
+ * that reflows as you switch script type reads as a bug.
+ *
+ * `order: 1` keeps it below the controls whatever order React emitted, so the
+ * strip is always controls-then-prose.
+ */
+.config-help {
+  flex: 1 0 100%;
+  order: 1;
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+}
+
+/*
+ * NO max-width on the flex item itself.
+ *
+ * `flex: 1 0 100%` only forces a line break if the item's HYPOTHETICAL main
+ * size really is the full width, and a max-width clamps that size before the
+ * line-breaking step — so `max-width: 78ch` here quietly let the sentence sit
+ * back on the control's row, wrapped into three short lines against the right
+ * edge. Measured on the live gateway, 01/09/2026. If a measure limit is wanted,
+ * it belongs on a child, never on the item doing the wrapping.
+ */

@@ -86,8 +86,13 @@ public class TerminalService {
         // be: a pty carries keystrokes, not commands, and reconstructing them from
         // the byte stream would be a transcript of everything the user typed
         // including anything they pasted. SECURITY.md says so plainly.
-        logger.info("Gateway terminal opened by '{}' from {} (shell={}, id={})",
-            username, remoteHost, shell, id);
+        // Whether it elevated is part of the record, not a detail: "opened a
+        // shell" and "opened a root shell" are different events to whoever reads
+        // this log afterwards, and the answer is decided by the host rather than
+        // by anything the user sent, so it cannot be inferred from the request.
+        boolean elevated = TerminalPolicy.sudoForElevation() != null;
+        logger.info("Gateway terminal opened by '{}' from {} (shell={}, elevated={}, id={})",
+            username, remoteHost, shell, elevated, id);
 
         try {
             // The id is minted here, so the callback is bound to it here too —

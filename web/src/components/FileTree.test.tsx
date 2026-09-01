@@ -292,3 +292,71 @@ describe('FileTree', () => {
     expect(screen.queryByRole('button', { name: 'New Update script' })).toBeNull();
   });
 });
+
+/**
+ * Delete and Discard Overrides are different actions and must not share a word.
+ *
+ * Measured off the real 8.3.8 Designer (01/09/2026): the context menu on an
+ * OVERRIDDEN resource has no `Delete` at all. It has `Discard Overrides`, whose
+ * confirmation reads "return to its inherited state". The consequences are
+ * genuinely different — a delete loses the script, a discard loses only this
+ * project's edits and the script keeps running from the parent — so labelling
+ * both "Delete" teaches people to click past the confirmation.
+ */
+describe('FileTree: discarding an override is not deleting', () => {
+  it('offers no destructive action at all on a purely inherited script', () => {
+    render(
+      <FileTree
+        scripts={SCRIPTS}
+        selectedPath={null}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    // `toplevel` is inherited: this project owns nothing to remove, and the
+    // server 404s the attempt, so the button is absent rather than failing.
+    expect(screen.queryByLabelText(/toplevel/i)).not.toBeInTheDocument();
+  });
+
+  it('labels the override action as a discard, naming the project it returns to', () => {
+    render(
+      <FileTree
+        scripts={SCRIPTS}
+        selectedPath={null}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    const discard = screen.getByLabelText('Discard overrides on Poller');
+    expect(discard).toBeInTheDocument();
+    expect(discard.getAttribute('title')).toMatch(/inherited from/i);
+    // The word that must NOT be there.
+    expect(screen.queryByLabelText('Delete Poller')).not.toBeInTheDocument();
+  });
+
+  it('still calls Delete a delete on a script this project owns', () => {
+    const onDelete = vi.fn();
+    render(
+      <FileTree
+        scripts={SCRIPTS}
+        selectedPath={null}
+        onSelect={vi.fn()}
+        onDelete={onDelete}
+      />
+    );
+    fireEvent.click(screen.getByLabelText('Delete helpers'));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(onDelete.mock.calls[0][0].origin).toBe('local');
+  });
+
+  it('says an inherited script is read-only, not that saving will fork it', () => {
+    render(
+      <FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />
+    );
+    // The 1.3.x badge promised "Saving creates a local override", which was true
+    // of this module and NOT true of the Designer — and is no longer true here
+    // either, because saving an inherited script is refused outright now.
+    const badge = screen.getByTitle(/Inherited from ParentProject/);
+    expect(badge.getAttribute('title')).toMatch(/read-only until you override it/i);
+  });
+});

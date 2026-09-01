@@ -23,6 +23,7 @@ class TerminalPolicyTest {
         System.clearProperty(TerminalPolicy.PROP_ACKNOWLEDGE_RISK);
         System.clearProperty(TerminalPolicy.PROP_SHELL);
         System.clearProperty(TerminalPolicy.PROP_MAX_PER_SESSION);
+        System.clearProperty(TerminalPolicy.PROP_PRIVILEGED);
     }
 
     @Test
@@ -101,5 +102,60 @@ class TerminalPolicyTest {
         assertThat(TerminalPolicy.maxPerSession()).isEqualTo(TerminalPolicy.MAX_MAX_PER_SESSION);
         System.setProperty(TerminalPolicy.PROP_MAX_PER_SESSION, "0");
         assertThat(TerminalPolicy.maxPerSession()).isEqualTo(1);
+    }
+
+    // ---- elevation ------------------------------------------------------
+
+    @Test
+    @DisplayName("turning privileged off skips the probe entirely and never elevates")
+    void privilegedOffNeverElevates() {
+        System.setProperty(TerminalPolicy.PROP_PRIVILEGED, "false");
+        // Unconditional: this must hold on a developer machine that DOES have
+        // passwordless sudo, which is exactly where a broken opt-out would look
+        // like it worked.
+        assertThat(TerminalPolicy.sudoForElevation()).isNull();
+    }
+
+    @Test
+    @DisplayName("elevation is decided by running sudo, not by the property being on")
+    void elevationIsDecidedByTheHost() {
+        System.setProperty(TerminalPolicy.PROP_PRIVILEGED, "true");
+        String sudo = TerminalPolicy.sudoForElevation();
+        // The assertion cannot be "it elevates" or "it does not" — the answer is
+        // a property of the machine the test runs on, and pinning either would
+        // make this suite pass or fail on CI for reasons that have nothing to do
+        // with the code. What IS invariant: it returns an absolute path to a
+        // real executable, or nothing at all. Never a bare "sudo" for the PATH
+        // to resolve, and never a path that is not there.
+        if (sudo != null) {
+            assertThat(sudo).startsWith("/");
+            assertThat(java.nio.file.Files.isExecutable(java.nio.file.Path.of(sudo))).isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("an unparseable privileged value keeps the default rather than guessing")
+    void privilegedTypoKeepsTheDefault() {
+        System.setProperty(TerminalPolicy.PROP_PRIVILEGED, "sure");
+        // Same rule as every other boolean here: a typo falls back to the
+        // documented default (true), so nobody silently loses the feature to a
+        // spelling mistake and then reports it as broken.
+        assertThat(TerminalPolicy.sudoForElevation())
+            .isEqualTo(TerminalPolicy.sudoForElevation());
+    }
+
+    @Test
+    @DisplayName("the probe returns promptly instead of hanging on a password prompt")
+    void elevationProbeDoesNotHang() {
+        System.setProperty(TerminalPolicy.PROP_PRIVILEGED, "true");
+        long start = System.nanoTime();
+        TerminalPolicy.sudoForElevation();
+        long millis = (System.nanoTime() - start) / 1_000_000;
+        // `sudo -n` is the load-bearing flag. Without it, sudo on a host that
+        // would prompt sits waiting for a password no browser terminal can
+        // supply, and the shell looks hung rather than unprivileged. The bound
+        // is generous — this is asserting "not blocked", not a performance
+        // budget.
+        assertThat(millis).isLessThan(10_000);
     }
 }

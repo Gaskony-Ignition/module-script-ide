@@ -153,6 +153,21 @@ export const IconTrash = (p: IconProps) =>
     p
   );
 export const IconClose = (p: IconProps) => svg(<path d="M3.6 3.6l8.8 8.8M12.4 3.6l-8.8 8.8" />, p);
+/**
+ * Discard an override — a counter-clockwise arrow, VS Code's "discard changes".
+ *
+ * Deliberately NOT the trash can: discarding an override removes the local copy
+ * and the script keeps working, inherited from the parent. The same glyph for
+ * both would say the two actions have the same consequence, and they do not.
+ */
+export const IconRevert = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M3.1 6.6h3.6V3" />
+      <path d="M3.4 6.4a5.4 5.4 0 1 1-.7 3.6" />
+    </>,
+    p
+  );
 export const IconSplit = (p: IconProps) =>
   svg(
     <>

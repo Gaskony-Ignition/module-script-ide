@@ -39,7 +39,7 @@
  */
 import { useMemo, useState } from 'react';
 import type { ScriptEntry, ScriptTypeId } from '../api/scripts';
-import { IconFolder, IconPlus, IconTrash, iconForType } from './Icons';
+import { IconFolder, IconPlus, IconRevert, IconTrash, iconForType } from './Icons';
 import { Chevron } from './Chevron';
 import './FileTree.css';
 
@@ -540,6 +540,12 @@ function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete }: RowProps)
   // here to remove, and the server 404s it — so the button is absent rather than
   // present and failing.
   const deletable = Boolean(onDelete) && entry.origin !== 'inherited' && !entry.singleton;
+  // On an override, the same button means something else. The Designer offers
+  // no Delete at all on an overridden resource — its menu has `Discard
+  // Overrides`, and the difference is not pedantic: this removes the local copy
+  // and the script keeps working, inherited from the parent. Calling that
+  // "Delete" invites the user to think they are about to lose the script.
+  const discards = entry.origin === 'override';
   return (
     <li className="file-tree-row">
       <button
@@ -564,12 +570,18 @@ function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete }: RowProps)
       {deletable && (
         <button
           type="button"
-          className="file-tree-action file-tree-delete"
-          title={`Delete ${entry.name}`}
-          aria-label={`Delete ${entry.name}`}
+          className={`file-tree-action ${discards ? 'file-tree-discard' : 'file-tree-delete'}`}
+          title={
+            discards
+              ? `Discard the local override of ${entry.name} and return to the copy inherited from ${entry.owner}`
+              : `Delete ${entry.name}`
+          }
+          aria-label={
+            discards ? `Discard overrides on ${entry.name}` : `Delete ${entry.name}`
+          }
           onClick={() => onDelete?.(entry)}
         >
-          <IconTrash size={13} />
+          {discards ? <IconRevert size={13} /> : <IconTrash size={13} />}
         </button>
       )}
     </li>
@@ -578,8 +590,8 @@ function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete }: RowProps)
 
 function originTitle(entry: ScriptEntry): string {
   return entry.origin === 'inherited'
-    ? `Inherited from ${entry.owner}. Saving creates a local override.`
-    : `Overrides a copy inherited from a parent project.`;
+    ? `Inherited from ${entry.owner}. Read-only until you override it.`
+    : `Overrides the copy inherited from ${entry.owner}. Discarding the override returns to it.`;
 }
 
 /** Indentation per tree level, in the token scale. */

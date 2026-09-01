@@ -49,12 +49,42 @@ public final class TerminalPolicy {
     /** Minutes of silence after which a terminal is closed. */
     public static final String PROP_IDLE_MINUTES = PREFIX + "terminal.idleMinutes";
 
+    /**
+     * Whether a new terminal should try to become root.
+     *
+     * <p>Defaults to {@code true} (Nigel, 01/09/2026): the terminal exists to
+     * administer a container, and a shell that cannot install a package or read
+     * a log outside the data directory is a shell you have to leave to do the
+     * work.</p>
+     *
+     * <p>It is a <b>try</b>, not a guarantee, and the distinction is the whole
+     * design. Elevation only happens when the host already grants the Gateway's
+     * own operating-system user passwordless {@code sudo}; the module never
+     * carries a credential and never prompts for one. On a host that does not
+     * grant it — which is every stock Ignition image — the probe fails in
+     * milliseconds and the user gets the ordinary shell, told plainly which one
+     * they got. Setting this true does not make a gateway more privileged; the
+     * IMAGE decides that.</p>
+     *
+     * <p>Nor does it widen the module's threat model, for the same reason the
+     * terminal itself did not: on a host where {@code sudo -n} succeeds for the
+     * Gateway user, an Administrator can already reach a root shell from the
+     * Script Console with {@code Runtime.exec}. What changes is convenience.</p>
+     */
+    public static final String PROP_PRIVILEGED = PREFIX + "terminal.privileged";
+
     public static final int DEFAULT_MAX_PER_SESSION = 3;
     public static final int MAX_MAX_PER_SESSION = 8;
     public static final long DEFAULT_IDLE_MINUTES = 120;
 
     /** Shells we are willing to launch, by absolute path. */
     private static final String[] SHELL_CANDIDATES = {"/bin/bash", "/usr/bin/bash", "/bin/sh"};
+
+    /** Where {@code sudo} lives, best first. Absolute, for the reason argv is. */
+    private static final String[] SUDO_CANDIDATES = {"/usr/bin/sudo", "/bin/sudo"};
+
+    /** How long the passwordless-sudo probe may take before we give up on it. */
+    private static final long SUDO_PROBE_TIMEOUT_SECONDS = 5;
 
     private TerminalPolicy() { /* static config accessor */ }
 
@@ -127,6 +157,76 @@ public final class TerminalPolicy {
         }
         Path path = Path.of(value);
         return Files.isRegularFile(path) && Files.isExecutable(path);
+    }
+
+    /**
+     * The {@code sudo} to elevate through, or {@code null} for "run unprivileged".
+     *
+     * <p>Returns non-null only when ALL of these hold, checked in this order
+     * because each is cheaper than the next:</p>
+     *
+     * <ol>
+     *   <li>{@link #PROP_PRIVILEGED} is not turned off;</li>
+     *   <li>a {@code sudo} binary exists at a known absolute path;</li>
+     *   <li>{@code sudo -n true} actually succeeds as the Gateway's own user.</li>
+     * </ol>
+     *
+     * <p>The third is the one that matters and it is a real execution, not an
+     * inspection of {@code /etc/sudoers} — a file this user usually cannot read,
+     * whose rules can come from six drop-ins and an LDAP plugin, and which is
+     * the wrong thing to parse when you can simply ask. {@code -n} is
+     * load-bearing: without it, sudo on a host that WOULD prompt sits waiting
+     * for a password that no browser terminal can supply, and the shell looks
+     * hung rather than unprivileged.</p>
+     *
+     * <p>Not cached. The probe costs a few milliseconds against an action a user
+     * takes by hand, and caching it would make a gateway that gained or lost the
+     * sudoers rule keep reporting the state it had at startup.</p>
+     */
+    public static String sudoForElevation() {
+        if (!boolProperty(PROP_PRIVILEGED, true)) {
+            return null;
+        }
+        String sudo = null;
+        for (String candidate : SUDO_CANDIDATES) {
+            if (Files.isExecutable(Path.of(candidate))) {
+                sudo = candidate;
+                break;
+            }
+        }
+        if (sudo == null) {
+            return null;
+        }
+        return passwordlessSudoWorks(sudo) ? sudo : null;
+    }
+
+    /** Ask sudo, rather than trying to predict what it would say. */
+    private static boolean passwordlessSudoWorks(String sudo) {
+        Process probe = null;
+        try {
+            probe = new ProcessBuilder(sudo, "-n", "true")
+                .redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .start();
+            // No stdin at all: a sudo that decides to prompt anyway then fails
+            // immediately instead of blocking on a read nobody will answer.
+            probe.getOutputStream().close();
+            if (!probe.waitFor(SUDO_PROBE_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)) {
+                logger.debug("sudo probe timed out; treating the terminal as unprivileged");
+                return false;
+            }
+            return probe.exitValue() == 0;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            logger.debug("sudo probe failed; treating the terminal as unprivileged", e);
+            return false;
+        } finally {
+            if (probe != null && probe.isAlive()) {
+                probe.destroyForcibly();
+            }
+        }
     }
 
     public static int maxPerSession() {

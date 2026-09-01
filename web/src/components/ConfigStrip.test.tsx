@@ -44,7 +44,7 @@ describe('ConfigStrip', () => {
     expect(screen.getByLabelText('Shared thread')).toBeInTheDocument();
     // A timer has no threadType and no hintScope — those belong to other types.
     expect(screen.queryByLabelText('Thread type')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Hint scope')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Script Hint Scope')).not.toBeInTheDocument();
   });
 
   it('offers exactly the two case-sensitive threadType values', () => {
@@ -56,17 +56,35 @@ describe('ConfigStrip', () => {
     expect(options).toEqual(['Shared', 'Dedicated']);
   });
 
-  it('offers the four ApplicationScope hint scopes by their bitmask values', () => {
+  it('offers the four ApplicationScope hint scopes in the Designer\u2019s order', () => {
     renderStrip(['hintScope'], { hintScope: 7 });
-    const select = screen.getByLabelText('Hint scope') as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(['0', '1', '2', '7']);
+    const select = screen.getByLabelText('Script Hint Scope') as HTMLSelectElement;
+    // ORDER IS THE ASSERTION, and it is not the numeric one. The real 8.3.8
+    // Designer lists None, Designer, Gateway, All (screenshotted 01/09/2026);
+    // sorting by bitmask value puts Gateway second, which is what this module
+    // did until 1.4.0.
     expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
       'None',
-      'Gateway',
       'Designer',
+      'Gateway',
       'All',
     ]);
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['0', '2', '1', '7']);
     expect(select.value).toBe('7');
+  });
+
+  it('explains what Script Hint Scope does, since four words do not', () => {
+    renderStrip(['hintScope'], { hintScope: 2 });
+    const help = screen.getByText(/autocomplete offers in this script/i);
+    expect(help).toBeInTheDocument();
+    // The measured caveat has to survive an edit: "None" reads like "off" and
+    // is not, and this IDE must not describe a behaviour the platform lacks.
+    expect(help.textContent).toMatch(/does not switch hints off/i);
+  });
+
+  it('does not explain a control whose name already says it', () => {
+    renderStrip(['enabled'], { enabled: true });
+    expect(document.querySelectorAll('.config-help')).toHaveLength(0);
   });
 
   it('reports a boolean for a checkbox and a number for a delay', () => {
@@ -81,7 +99,7 @@ describe('ConfigStrip', () => {
 
   it('reports hintScope as a number, not the select element string', () => {
     const { onChange } = renderStrip(['hintScope'], { hintScope: 0 });
-    fireEvent.change(screen.getByLabelText('Hint scope'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Script Hint Scope'), { target: { value: '1' } });
     expect(onChange).toHaveBeenCalledWith('hintScope', 1);
   });
 

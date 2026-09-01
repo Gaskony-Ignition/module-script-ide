@@ -2,12 +2,47 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.3.1 · all phases complete · deployed, gate-green and live-validated on
+**Version 1.4.0 · all phases complete · deployed, gate-green and live-validated on
 `ignition-module-testing` (8.3.8) · 01/09/2026**
 
-1.1.0–1.3.0 are post-1.0 feature work driven by Nigel's review, not new phases.
-1.3.0 adds a **Gateway terminal**, moves the console into a **bottom panel**, and
-brings **Gateway Events** into line with the real Designer.
+1.1.0–1.4.0 are post-1.0 feature work driven by Nigel's review, not new phases.
+1.3.0 added a **Gateway terminal**, moved the console into a **bottom panel**, and
+brought **Gateway Events** into line with the real Designer. 1.4.0 makes
+**inherited scripts read-only until overridden**, names and explains **Script Hint
+Scope**, and makes the terminal a **root shell** where the host allows it.
+
+### 1.4.0, and how the Designer was measured
+
+The Designer was DRIVEN, not recalled — `designer-drive` against
+`Site_Redgum_Sewer > Template` on this gateway, 01/09/2026. What it showed:
+
+| Action on an inherited Project Library script | The Designer |
+| --- | --- |
+| Double-click | **Nothing.** No editor opens |
+| Right-click | Exactly `Override Resource` · `Copy Path` · `Open read-only` |
+| `Open read-only` | Header `Chart  (Read-Only)`; caret places, text selects, **typing is discarded** |
+| `Override Resource` | No dialog. Row goes bold+italic; double-click now opens it, header has no suffix |
+| Right-click, overridden | The full local menu, with **no Delete** — `Discard Overrides` in its place |
+| `Discard Overrides` | "…discard this resource and return to its inherited state? All local changes will be lost." |
+
+Two things that change how this is built:
+
+- **Overriding writes nothing.** After `Override Resource` the gateway's own
+  `data/projects/Site_Redgum_Sewer/ignition/script-python/` still held no copy.
+  The italic row is this Designer's mark for *unsaved*. So our override is a tab
+  flag, and the resource appears through the existing save path.
+- **Inheritance is not lost by overriding.** `Discard Overrides` returns to the
+  parent's copy. Calling that button "Delete" — which this module did — describes
+  a consequence that does not happen.
+
+One deliberate deviation: an already-open read-only tab in the Designer does NOT
+become editable when you override the resource, and we do not copy that. It reads
+as an oversight rather than a decision, and the whole point of the bar is that the
+remedy is one click from where you are.
+
+`Script Hint Scope` is the Designer's own control, on Project Library scripts
+only, top-right of the editor header. Its option order is **None · Designer ·
+Gateway · All** — measured, and NOT the bitmask order this module used.
 
 ## Where we are
 
@@ -25,7 +60,8 @@ brings **Gateway Events** into line with the real Designer.
 
 ## What is proved on a real gateway
 
-Five suites, all green, all run against the live gateway rather than mocks.
+Six suites plus a per-theme contrast sweep, all green, all run against the
+live gateway rather than mocks.
 
 **`deploy_gate.py` — 6 checks.** Served bundle hash matches the build; Config ▸
 Modules shows the built version ACTIVE; a real cookie session gets `authenticated:true` with a
@@ -56,7 +92,16 @@ line.
 delete without `If-Match` is 428 and with a stale one is 409; `enabled` round-trips
 on Shutdown and Update; a cron expression round-trips and a malformed one is a 400.
 
-**`validate_v13.py` — 24 checks, all in a real browser.** Gateway Events in the
+**`validate_v14.py` — 17 checks, all in a real browser.** An inherited script
+opens with a bar naming the project it came from; **typing into it changes
+nothing** (2593 characters before, 2593 after — the same assertion that was made
+against the real Designer); Save is disabled and Ctrl+S does not fork the parent;
+the Override action unlocks that buffer and nothing else; `Script Hint Scope`
+carries the Designer's name, the Designer's option order and an explanation on its
+own row; and the terminal reports `uid=0 root` with `git version 2.43.0` on the
+command line.
+
+**`validate_v13.py` — 25 checks, all in a real browser.** Gateway Events in the
 Designer's order with the three singletons as rows rather than folders; the three
 layout toggles; the panel opening below the editor rather than beside it; a
 console run inside the panel; a terminal that shows a prompt, runs a command,
@@ -125,15 +170,15 @@ gutter marker.
   wrong squiggle on correct code costs more trust than ten missed problems.
 - **Perspective/Vision event scripts** are not editable — their code lives inside
   view JSON, not as its own resource.
-- **No git UI.** Nigel's decision (01/09/2026): this module is not becoming a git
+- **No git UI**, still. Nigel's decision (01/09/2026): this module is not becoming a git
   module — `Gaskony-Ignition/module-git` already exists. git is driven from the
   terminal's command line, and any UI added later is VS Code-shaped status and
   diffs on top of that, not a second implementation.
 - **Tag Change attribute writes are still refused**, because that Designer
   workspace has never been measured. Its tag-path list is the missing piece, and
   guessing the key would write a value the Designer never reads.
-- **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`; `v1.0.0`,
-  `v1.1.0`, `v1.2.0` and `v1.3.0` tagged 01/09/2026. The folder is gitignored by the workspace repo,
+- **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`; `v1.0.0`
+  through `v1.4.0` tagged 01/09/2026. The folder is gitignored by the workspace repo,
   like every sibling module. There is **no GitHub release artefact** — the signed
   `.modl` is built locally and has not been attached to the tag.
 
@@ -149,3 +194,16 @@ gutter marker.
 - The nav shell renders the page **key**, not the page title, as the sidebar link.
 - A module install requires a gateway restart. That is inherent to installs, not
   the config-resource case the estate's no-restart rule refers to.
+- **A CSS `max-width` on a flex item defeats `flex-basis: 100%`.** The item's
+  hypothetical main size is clamped before the line-breaking step, so a help line
+  meant to take its own row sat back on the control's row, wrapped into three
+  short lines against the right edge. Every test passed; only the screenshot
+  showed it. Put a measure limit on a child, never on the item doing the wrapping.
+- **The test rig's image is now built, not pulled** —
+  `modules/dockers/ignition/Dockerfile.test`, wired into `docker-compose.yml`
+  01/09/2026. It adds git 2.43.0, less, openssh-client and a **passwordless
+  sudoers rule for the `ignition` user**. That rule is what makes the browser
+  terminal a root shell, and no module property could have: an Ignition module is
+  Java in a JVM that is already uid 2003. The privilege is not confined to the
+  terminal — Jython from the Script Console gets it too — which is why it lives in
+  a file named `.test` and is written out at length there.

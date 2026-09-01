@@ -234,14 +234,25 @@
   color: var(--error);
 }
 
-/* Delete and add stay hidden until the row is hovered or something in it has
-   focus, so the rail is not a wall of icons — but they MUST appear on keyboard
-   focus too, or they are unreachable without a mouse. */
-.file-tree-delete {
+/* Discarding an override is NOT destructive the way deleting is — the script
+   keeps working, inherited from the parent — so it does not take the error
+   colour. Accent instead: a real action, not a warning. */
+.file-tree-discard:hover,
+.file-tree-discard:focus-visible {
+  color: var(--accent-primary);
+}
+
+/* Delete, discard and add stay hidden until the row is hovered or something in
+   it has focus, so the rail is not a wall of icons — but they MUST appear on
+   keyboard focus too, or they are unreachable without a mouse. */
+.file-tree-delete,
+.file-tree-discard {
   opacity: 0;
 }
 
 .file-tree-row:hover .file-tree-delete,
-.file-tree-delete:focus-visible {
+.file-tree-row:hover .file-tree-discard,
+.file-tree-delete:focus-visible,
+.file-tree-discard:focus-visible {
   opacity: 1;
 }

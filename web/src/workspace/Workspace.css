@@ -192,3 +192,65 @@
   background: var(--accent-primary-bg);
   color: var(--text-primary);
 }
+
+/* ---- the inherited-script bar (v1.4.0) ----------------------------------
+ *
+ * Sits between the tab strip and the editor, where the Designer puts its
+ * `(Read-Only)` header suffix. A bar rather than a suffix because it has to
+ * carry a button: the Designer's override lives in a context menu, which is
+ * discoverable only if you already know it is there.
+ *
+ * Warning-coloured, not error-coloured. An inherited script is a normal,
+ * healthy state — most of a site project's library is inherited — so red would
+ * mark the common case as broken.
+ */
+.inherited-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+  min-height: var(--tab-height);
+  padding: 0 var(--space-3);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-light);
+  border-left: 2px solid var(--warning);
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+}
+
+.inherited-bar strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Already overridden: the state is now normal, so the accent stops shouting. */
+.inherited-bar.is-override {
+  border-left-color: var(--accent-primary);
+}
+
+.inherited-bar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pushed to the right edge — it is the one action on the row, and putting it
+   hard against the text makes the sentence look like it continues into it. */
+.inherited-bar-action {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 2px var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.inherited-bar-action:hover,
+.inherited-bar-action:focus-visible {
+  background: var(--accent-primary-bg);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}

@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.3.1 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.4.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -66,10 +66,33 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
 - **`ui-monospace` must never lead `--font-mono`.** Chrome on Linux does not
   recognise it and resolves it to a PROPORTIONAL face when nothing follows.
   Named faces first; the browser suite measures advance width to prove it.
+- **An inherited script is READ-ONLY until it is explicitly overridden**, and
+  that is measured off the real 8.3.8 Designer, not designed here. Double-clicking
+  an inherited Project Library script in the Designer does *nothing*; its context
+  menu offers `Override Resource`, `Copy Path` and `Open read-only`, and the last
+  opens a buffer headed `(Read-Only)` that discards every keystroke. Overriding
+  does NOT break inheritance — the menu on an overridden resource has no `Delete`,
+  only `Discard Overrides`, whose dialog says "return to its inherited state".
+  Until 1.4.0 this module opened inherited scripts writable and created the
+  override silently on the first save. `isLockedByInheritance` is the one place
+  the rule lives; both save paths (button and Ctrl+S) check it, because the
+  keybinding does not go through the disabled button.
+- **Overriding writes nothing.** It is staged in the Designer too — verified on
+  the gateway's own filesystem after `Override Resource`, which had created no
+  local resource. The local copy appears on save, through the existing
+  own-project write path.
 - **This module is not becoming a git module** (Nigel, 01/09/2026).
   `Gaskony-Ignition/module-git` exists. git is driven from the terminal's command
   line; anything added later is VS Code-shaped status and diffs on top of the
   CLI, not a second implementation.
+
+- **The terminal tries to be root, and cannot force it** (Nigel, 01/09/2026).
+  `terminal.privileged` defaults true, but elevation only happens where
+  `sudo -n true` already succeeds for the Gateway's own OS user — a fact about
+  the IMAGE, not about this module. `modules/dockers/ignition/Dockerfile.test`
+  grants it on the test rig, deliberately and with the consequences written out;
+  do not lift that stanza into an image anyone else logs into. `-n` is
+  load-bearing: without it a prompting host hangs the shell.
 
 ## Build, deploy, verify
 

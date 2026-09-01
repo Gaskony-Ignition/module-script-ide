@@ -62,6 +62,7 @@ keep the Script Console and refuse the shell:
 | `com.gaskony.scriptide.terminal.shell` | first of `/bin/bash`, `/usr/bin/bash`, `/bin/sh` | absolute path to the shell |
 | `com.gaskony.scriptide.terminal.maxPerSession` | `3` | shells one browser tab may hold open, capped at 8 |
 | `com.gaskony.scriptide.terminal.idleMinutes` | `120` | a silent shell is closed after this |
+| `com.gaskony.scriptide.terminal.privileged` | `true` | try `sudo -n` first — see Elevation below |
 
 `terminal.requireAdmin=false` needs `terminal.acknowledgeRisk=true` alongside it,
 the same two-flag shape as execution, and warns on every open.
@@ -85,6 +86,41 @@ Three specifics:
 Every shell is closed when its socket closes and when the module shuts down —
 process descendants first, since destroying `script` alone can leave the shell it
 spawned running with nobody reading its output.
+
+### Elevation (1.4.0)
+
+`com.gaskony.scriptide.terminal.privileged` defaults to **`true`**, and when it is
+on a new terminal runs `sudo -n -H <shell> -i` instead of the shell directly.
+
+**This cannot make a gateway more privileged than its host already made it.** The
+module is Java inside a JVM that is already running as the Gateway's own
+operating-system user, and no property makes a process more privileged than the
+process that started it. Elevation happens only where `sudo -n true` **already
+succeeds** for that user — proved by running it, not by reading `/etc/sudoers` —
+and on every stock Ignition image it does not, so the probe fails in milliseconds
+and the user gets the ordinary shell.
+
+Where it *does* succeed, the equivalence that justifies the terminal still holds:
+on such a host an Administrator can already reach a root shell from the Script
+Console with `Runtime.exec`. What changes is convenience.
+
+Three specifics:
+
+- **`-n` is load-bearing.** Without it, `sudo` on a host that would prompt sits
+  waiting for a password no browser terminal can supply, and the shell looks hung
+  rather than unprivileged. A unit test asserts the probe returns promptly.
+- **Elevation goes inside the pty, not around it.** `script` itself stays the
+  Gateway user, so the process this JVM has to signal is one it owns. Running
+  `sudo script` would give us a root process the JVM cannot kill, and the idle
+  sweeper would be a promise the module could not keep. On an elevated terminal
+  the descendant `destroy()` is refused by the OS and the shell exits on the
+  pty's SIGHUP instead — that is the mechanism, not a fallback.
+- **The audit line records `elevated=`.** "Opened a shell" and "opened a root
+  shell" are different events to whoever reads the log later, and the answer is
+  decided by the host rather than by anything the user sent.
+
+Set `terminal.privileged=false` to refuse elevation outright, on a gateway whose
+host does grant the sudoers rule. Nothing else in the module changes.
 
 ## Turning it off
 

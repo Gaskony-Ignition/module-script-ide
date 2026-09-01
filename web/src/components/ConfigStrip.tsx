@@ -52,8 +52,33 @@ const LABELS: Record<string, string> = {
   fixedDelay: 'Delay type',
   sharedThread: 'Shared thread',
   threadType: 'Thread type',
-  hintScope: 'Hint scope',
+  hintScope: 'Script Hint Scope',
   cronExpression: 'Cron expression',
+};
+
+/**
+ * One line saying what a control actually does, for the ones whose name does
+ * not say it.
+ *
+ * `Script Hint Scope` earns one because it is genuinely obscure — Nigel had used
+ * the Designer for years without noticing it (01/09/2026) — and because what it
+ * does is not guessable from four words. It is not decoration and it is not
+ * ours: it is the Designer's control, on Project Library scripts only, and the
+ * effect is measured (SCRIPTING.md §4.4): with `Designer` chosen, typing
+ * `system.` completes `alarm, dataset, date, db, device, dnp3, file…`; with
+ * `Gateway` or `All` the list also carries `bacnet` and `config`, which are
+ * gateway-only.
+ *
+ * `None` is described as it BEHAVES, not as it reads. Measured twice: it does
+ * not remove completions, it shows the widest list — so calling it "no hints"
+ * here would be this IDE inventing a behaviour the platform does not have.
+ */
+const FIELD_HELP: Record<string, string> = {
+  hintScope:
+    'Which scope\u2019s API the autocomplete offers in this script \u2014 pick the one it will '
+    + 'actually run in, and Designer-only or Gateway-only calls stop being suggested where '
+    + 'they cannot work. Stored on the script, so the Designer honours it too. '
+    + '(Measured: \u201cNone\u201d does not switch hints off; it shows the widest list.)',
 };
 
 /**
@@ -108,10 +133,19 @@ const TYPE_DOCS: Record<
  * accepts; anything else is written silently and then behaves unpredictably in
  * the Designer, which is why the control is a select and not a number box.
  */
+/**
+ * The Designer's own combo, in the Designer's own order.
+ *
+ * ORDER IS MEASURED, not sorted by value: the real 8.3.8 Designer lists
+ * `None · Designer · Gateway · All` (screenshotted 01/09/2026 on a Project
+ * Library script). Ours listed Gateway before Designer until 1.4.0, which is
+ * the numeric order and nobody's muscle memory. The values are ApplicationScope
+ * bits — gateway 1, designer 2, client 4, all 7.
+ */
 const HINT_SCOPES: Array<{ value: number; label: string }> = [
   { value: 0, label: 'None' },
-  { value: 1, label: 'Gateway' },
   { value: 2, label: 'Designer' },
+  { value: 1, label: 'Gateway' },
   { value: 7, label: 'All' },
 ];
 
@@ -154,6 +188,16 @@ export default function ConfigStrip({
           {renderField(name, attributes[name], onChange, readOnly)}
         </label>
       ))}
+      {/* Help sits OUTSIDE the label and takes a whole row of the wrapping flex
+          strip. Inside it, a sentence becomes a third inline item beside the
+          control and pushes every other field off the row. */}
+      {editable
+        .filter((name) => FIELD_HELP[name])
+        .map((name) => (
+          <p className="config-help muted" key={`help-${name}`}>
+            {FIELD_HELP[name]}
+          </p>
+        ))}
       <button
         type="button"
         className="button config-save"

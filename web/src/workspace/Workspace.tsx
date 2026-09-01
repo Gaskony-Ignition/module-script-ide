@@ -45,7 +45,7 @@ import OutlinePanel from '../components/OutlinePanel';
 import ScriptConsole from '../components/ScriptConsole';
 import StatusFooter from '../components/StatusFooter';
 import TabStrip from '../components/TabStrip';
-import { docUri, isDirty, newDoc, type OpenDoc } from './documents';
+import { docUri, isDirty, isLockedByInheritance, newDoc, type OpenDoc } from './documents';
 import './Workspace.css';
 
 export interface WorkspaceProps {
@@ -176,6 +176,25 @@ export default function Workspace({ session }: WorkspaceProps) {
   );
 
   /**
+   * Mark this tab as overridden, so its buffer and its settings unlock.
+   *
+   * Nothing is written here. The Designer's `Override Resource` is a STAGED
+   * change too — measured 01/09/2026: after choosing it, the gateway's own
+   * `data/projects/<p>/ignition/script-python/` still held no copy of the
+   * script, and the tree row went italic (this Designer's mark for "unsaved").
+   * The local resource appears on save, which for us is the existing write
+   * path: the resource route already does an own-project lookup, so a save
+   * against an inherited script creates the override rather than modifying the
+   * parent.
+   */
+  const overrideDoc = useCallback((uri: string) => {
+    setDocs((current) =>
+      current.map((d) => (d.uri === uri ? { ...d, overridden: true } : d))
+    );
+    setDocRevision((n) => n + 1);
+  }, []);
+
+  /**
    * Writes are refused for two independent reasons and the UI must say which:
    * the user lacks the role, or the project itself is immutable (inherited or
    * locked). Reporting a single "read-only" sends people to the wrong fix.
@@ -186,6 +205,17 @@ export default function Workspace({ session }: WorkspaceProps) {
       ? `Project "${tree.project}" is not mutable on this gateway, so the editor is read-only.`
       : '';
   const readOnly = readOnlyReason.length > 0;
+
+  /**
+   * The active tab is read-only on its OWN account: inherited, not overridden.
+   *
+   * Kept separate from `readOnly` because the remedy is completely different —
+   * that one needs an administrator, this one needs one click — and a single
+   * "read-only" message would send people to the wrong one.
+   */
+  const activeLocked = activeDoc ? isLockedByInheritance(activeDoc) : false;
+  /** Writes are refused for either reason. */
+  const activeWritable = !readOnly && !activeLocked;
 
   useEffect(() => {
     let cancelled = false;
@@ -325,7 +355,10 @@ export default function Workspace({ session }: WorkspaceProps) {
   const saveDoc = useCallback(
     async (uri: string, baseSignature?: string) => {
       const doc = docsRef.current.find((d) => d.uri === uri);
-      if (!doc || readOnly) return;
+      // Locked as well as read-only: without this, Ctrl+S on an inherited tab
+      // would fork the parent's script even though the buffer refused to be
+      // typed into — the keybinding does not go through the disabled button.
+      if (!doc || readOnly || isLockedByInheritance(doc)) return;
       setSaving(true);
       setNotice(null);
       // Capture the text being written: the user can keep typing during the
@@ -406,7 +439,11 @@ export default function Workspace({ session }: WorkspaceProps) {
     async (uri: string) => {
       const doc = docsRef.current.find((d) => d.uri === uri);
       const state = attrs[uri];
-      if (!doc || !state || readOnly) return;
+      // Same rule as the body. The attributes route refuses an inherited
+      // resource outright ("cannot write attributes on an inherited resource
+      // without first overriding it"), so sending one is a guaranteed 4xx the
+      // user reads as a bug in this IDE.
+      if (!doc || !state || readOnly || isLockedByInheritance(doc)) return;
       setSavingAttrs(true);
       setNotice(null);
       try {
@@ -740,7 +777,7 @@ export default function Workspace({ session }: WorkspaceProps) {
           type="button"
           className="button"
           onClick={() => activeUri && void saveDoc(activeUri)}
-          disabled={!activeDoc || readOnly || saving || !isDirty(activeDoc)}
+          disabled={!activeDoc || !activeWritable || saving || !isDirty(activeDoc)}
         >
           {saving ? 'Saving…' : 'Save script'}
         </button>
@@ -861,7 +898,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                 onChange={(name, value) => changeAttribute(activeUri, name, value)}
                 onSave={() => void saveAttributes(activeUri)}
                 dirty={attrsDirty}
-                readOnly={readOnly}
+                readOnly={!activeWritable}
                 saving={savingAttrs}
                 typeId={activeEntry?.typeId}
                 unconfigurableReason={
@@ -873,6 +910,38 @@ export default function Workspace({ session }: WorkspaceProps) {
                     : undefined
                 }
               />
+            )}
+            {/* The inherited-script bar.
+                The Designer says this with a `(Read-Only)` suffix on the editor
+                header and puts the remedy in a context menu you have to know is
+                there. Said here instead: the state, where the script actually
+                comes from, and the one button that changes it. */}
+            {activeDoc && activeLocked && (
+              <div className="inherited-bar" role="status">
+                <span className="inherited-bar-text">
+                  Read-only — inherited from <strong>{activeEntry?.owner ?? 'a parent project'}</strong>.
+                </span>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="inherited-bar-action"
+                    onClick={() => overrideDoc(activeDoc.uri)}
+                  >
+                    Override in {project}
+                  </button>
+                )}
+              </div>
+            )}
+            {/* Overridden but not yet saved. The local copy does not exist on
+                the gateway until the save, so saying "overridden" alone would
+                claim a resource that is not there. */}
+            {activeDoc?.overridden && activeDoc.origin === 'inherited' && (
+              <div className="inherited-bar is-override" role="status">
+                <span className="inherited-bar-text">
+                  Overriding <strong>{activeEntry?.owner ?? 'the parent'}</strong>&rsquo;s copy. The
+                  local copy is created when you save; the parent is not changed.
+                </span>
+              </div>
             )}
             {docs.length === 0 && (
               <p className="code-editor-empty">Choose a script on the left to start editing.</p>
@@ -1040,17 +1109,42 @@ export default function Workspace({ session }: WorkspaceProps) {
             aria-modal="true"
             aria-labelledby="delete-title"
           >
-            <h2 id="delete-title">Delete {pendingDelete.name || pendingDelete.typeLabel}?</h2>
-            <p className="muted">
-              This removes the script from <strong>{project}</strong> on the gateway.
-              It cannot be undone from here.
-            </p>
+            {/* Two different actions behind one route.
+                DELETE on an overridden resource removes only THIS project's
+                copy, and the script keeps working — inherited from the parent
+                again. The Designer does not call that Delete; its menu on an
+                overridden resource has no Delete at all, only `Discard
+                Overrides`, and its dialog says "return to its inherited state".
+                Wording a reversible action as a permanent one is how people
+                learn to click past confirmations. */}
+            {pendingDelete.origin === 'override' ? (
+              <>
+                <h2 id="delete-title">
+                  Discard overrides on {pendingDelete.name || pendingDelete.typeLabel}?
+                </h2>
+                <p className="muted">
+                  This removes <strong>{project}</strong>&rsquo;s copy and returns the script
+                  to the version inherited from <strong>{pendingDelete.owner}</strong>. The
+                  script keeps working; the local changes are lost.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 id="delete-title">Delete {pendingDelete.name || pendingDelete.typeLabel}?</h2>
+                <p className="muted">
+                  This removes the script from <strong>{project}</strong> on the gateway.
+                  It cannot be undone from here.
+                </p>
+              </>
+            )}
             <div className="newscript-actions">
               <button type="button" onClick={() => setPendingDelete(null)} disabled={deleteBusy}>
                 Cancel
               </button>
               <button type="button" className="danger" onClick={() => void doDelete()} disabled={deleteBusy}>
-                {deleteBusy ? 'Deleting…' : 'Delete'}
+                {pendingDelete.origin === 'override'
+                  ? deleteBusy ? 'Discarding…' : 'Discard overrides'
+                  : deleteBusy ? 'Deleting…' : 'Delete'}
               </button>
             </div>
           </div>

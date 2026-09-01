@@ -147,6 +147,7 @@ function doc(overrides: Partial<OpenDoc> = {}): OpenDoc {
     project: 'P',
     path: 'ignition/script-python/util/helpers',
     scriptKey: 'code.py',
+    overridden: false,
     typeLabel: 'Project Library',
     label: 'helpers',
     origin: 'local',

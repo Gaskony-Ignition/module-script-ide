@@ -28,6 +28,34 @@ export interface OpenDoc {
   baseText: string;
   /** The text in the editor right now. */
   text: string;
+  /**
+   * The user has explicitly overridden this inherited script in this tab.
+   *
+   * Meaningless on a local or already-overridden script; the ONLY thing it does
+   * is unlock an `inherited` document. See {@link isLockedByInheritance}.
+   */
+  overridden: boolean;
+}
+
+/**
+ * True when this document must not be edited because it is inherited from a
+ * parent project and the user has not asked to override it.
+ *
+ * **Measured off the real Designer (8.3.8, 01/09/2026), not inferred.** An
+ * inherited Project Library script there cannot be opened by double-clicking at
+ * all: the context menu offers `Override Resource`, `Copy Path` and
+ * `Open read-only`, and the last of those opens an editor headed
+ * `Chart  (Read-Only)` whose buffer discards every keystroke. Only after
+ * `Override Resource` does the header lose the suffix and the buffer accept
+ * typing.
+ *
+ * This module opened inherited scripts straight into a writable buffer until
+ * 1.4.0 and created the override silently on the first save — the opposite of
+ * the Designer's "you must ask for it" model, and a way to fork a parent's
+ * script by leaning on the keyboard.
+ */
+export function isLockedByInheritance(doc: OpenDoc): boolean {
+  return doc.origin === 'inherited' && !doc.overridden;
 }
 
 /**
@@ -81,5 +109,8 @@ export function newDoc(entry: ScriptEntry, project: string, text: string, etag: 
     etag: etag || entry.signature,
     baseText: text,
     text,
+    // Always false on open, whatever the origin. An override is a gesture, and
+    // a document that starts overridden is a document nobody chose to fork.
+    overridden: false,
   };
 }
