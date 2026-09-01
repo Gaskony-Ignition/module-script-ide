@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.3.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.3.1 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -60,6 +60,12 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
 - **The terminal's shell path is validated by an allowlist, never passed
   through.** It is interpolated into the string handed to `script -c`. See
   `TerminalPolicy.isSafeShellPath` and its test.
+- **Never set `-webkit-font-smoothing`.** It is macOS advice. On Linux the
+  platform default is subpixel RGB antialiasing and `antialiased` forces
+  greyscale — thinner and softer, and invisible to every automated check.
+- **`ui-monospace` must never lead `--font-mono`.** Chrome on Linux does not
+  recognise it and resolves it to a PROPORTIONAL face when nothing follows.
+  Named faces first; the browser suite measures advance width to prove it.
 - **This module is not becoming a git module** (Nigel, 01/09/2026).
   `Gaskony-Ignition/module-git` exists. git is driven from the terminal's command
   line; anything added later is VS Code-shaped status and diffs on top of the

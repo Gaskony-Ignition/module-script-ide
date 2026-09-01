@@ -2,7 +2,7 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.3.0 · all phases complete · deployed, gate-green and live-validated on
+**Version 1.3.1 · all phases complete · deployed, gate-green and live-validated on
 `ignition-module-testing` (8.3.8) · 01/09/2026**
 
 1.1.0–1.3.0 are post-1.0 feature work driven by Nigel's review, not new phases.

@@ -115,8 +115,11 @@ export default function TerminalView({ csrfToken, canOpen, onExit }: TerminalVie
     if (!host) return undefined;
     const term = new XTerm({
       fontFamily: token('--font-mono', 'ui-monospace, monospace'),
-      fontSize: 12,
-      lineHeight: 1.35,
+      // From the same token as the editor, parsed because xterm takes a number:
+      // a terminal and an editor in one window disagreeing about a character
+      // cell is one of those differences nobody names but everybody notices.
+      fontSize: Number.parseFloat(token('--font-size-code', '14px')) || 14,
+      lineHeight: 1.25,
       cursorBlink: true,
       convertEol: false,
       scrollback: 5000,

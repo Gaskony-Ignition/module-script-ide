@@ -120,10 +120,32 @@ with sync_playwright() as p:
 
     # ---------- 5. fonts ----------
     fam = page.evaluate("getComputedStyle(document.body).fontFamily")
-    mono = page.evaluate(
-        "getComputedStyle(document.querySelector('.cm-content') || document.body).fontFamily")
     rec("FONT: UI stack is not a serif", "serif" not in fam.lower().replace("sans-serif", ""), fam[:60])
-    rec("FONT: editor stack is monospace", "mono" in mono.lower(), mono[:60])
+
+    # Measure the ADVANCE WIDTH, not the family string. `ui-monospace` is
+    # unrecognised by Chrome on Linux and falls through to a PROPORTIONAL face
+    # when it is the only entry — 'iiiiiiiiii' 36.1px against 'WWWWWWWWWW'
+    # 122.7px, measured 01/09/2026. A stack whose name contains "mono" proves
+    # nothing about what the browser actually drew.
+    widths = page.evaluate("""() => {
+      const el = document.querySelector('.cm-content') || document.body;
+      const s = getComputedStyle(el);
+      const c = document.createElement('canvas').getContext('2d');
+      c.font = s.fontSize + ' ' + s.fontFamily;
+      return { i: c.measureText('iiiiiiiiii').width,
+               W: c.measureText('WWWWWWWWWW').width,
+               size: s.fontSize, family: s.fontFamily };
+    }""")
+    rec("FONT: the editor actually renders monospaced",
+        abs(widths["i"] - widths["W"]) < 0.5,
+        f'i={widths["i"]:.1f} W={widths["W"]:.1f} at {widths["size"]}')
+
+    # -webkit-font-smoothing: antialiased forces GREYSCALE antialiasing, which on
+    # Linux is thinner and softer than the platform default's subpixel RGB. It
+    # was set in 1.3.0 and is the reason this looked washed out beside VS Code.
+    rec("FONT: platform antialiasing, not forced greyscale",
+        page.evaluate("getComputedStyle(document.body).webkitFontSmoothing") in ("auto", "", None),
+        page.evaluate("getComputedStyle(document.body).webkitFontSmoothing"))
 
     # ---------- 6. themes ----------
     opts = page.locator('select[aria-label="Theme"] option')

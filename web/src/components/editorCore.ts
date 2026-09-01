@@ -51,9 +51,9 @@ export const editorTheme = EditorView.theme(
       height: '100%',
       backgroundColor: 'var(--bg-primary)',
       color: 'var(--text-primary)',
-      fontSize: '13px',
+      fontSize: 'var(--font-size-code)',
     },
-    '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.55' },
+    '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.4' },
     '.cm-content': { caretColor: 'var(--accent-primary)' },
     '.cm-gutters': {
       backgroundColor: 'var(--bg-secondary)',

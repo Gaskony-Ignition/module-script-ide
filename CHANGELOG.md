@@ -2,6 +2,38 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.1] — 2026-09-01
+
+Font rendering, measured side by side against VS Code (Nigel).
+
+### Fixed
+- **`-webkit-font-smoothing: antialiased` is gone.** 1.3.0 set it believing it
+  would lighten heavy stems; on Linux it does the opposite of what was wanted.
+  The platform default there is SUBPIXEL (RGB) antialiasing — the thing that
+  makes small text crisp on an LCD — and `antialiased` forces greyscale, which
+  is thinner and visibly softer. It is macOS advice, copied onto a Linux app.
+  VS Code uses the platform default; so do we now. No automated check can see
+  this, which is the same shape of problem as Chrome's auto dark mode.
+- **`ui-monospace` moved off the front of the mono stack.** Measured in Chrome
+  on Linux: `13px ui-monospace` on its own is **not monospaced** —
+  `iiiiiiiiii` renders 36.1px wide against `WWWWWWWWWW` at 122.7px, because the
+  keyword is unrecognised here and falls through to the default proportional
+  face. Inside a stack Chrome currently skips it and the next entry wins, so the
+  editor was correct by luck; the day a Chrome build resolves it through
+  fontconfig, a code editor set in a proportional font is what ships. Named
+  faces come first now.
+
+### Changed
+- **Code is 14px with 1.4 leading**, which is VS Code's split — 13px chrome,
+  14px code. It was 13px at 1.55, smaller type with more air between the lines,
+  and that reads looser and lighter than the editor beside it. The terminal
+  reads the same token, so a character cell is identical in both.
+
+### Added
+- The browser suite measures the editor's **advance width** rather than reading
+  its font-family string, and asserts the platform's antialiasing is in force.
+  A stack whose name contains "mono" proves nothing about what was drawn.
+
 ## [1.3.0] — 2026-09-01
 
 A terminal on the Gateway, a bottom panel, and Gateway Events measured against

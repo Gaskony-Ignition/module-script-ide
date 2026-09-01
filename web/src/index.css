@@ -61,8 +61,19 @@
    * must agree on a character cell, or columns do not line up between them. */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
     "Liberation Sans", "DejaVu Sans", sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", "SF Mono", Menlo,
-    Consolas, "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", monospace;
+  /*
+   * NAMED FACES FIRST, and `ui-monospace` after them rather than in front.
+   *
+   * Measured in this Chrome on Linux 01/09/2026: `13px ui-monospace` alone is
+   * NOT monospaced — 'iiiiiiiiii' measures 36.1px against 'WWWWWWWWWW' at
+   * 122.7px, because the keyword is unrecognised here and falls through to the
+   * default proportional face. Today Chrome skips it inside a stack and the
+   * next entry wins, so the editor is fine by luck. The day a Chrome build
+   * resolves `ui-monospace` through fontconfig, a code editor set in a
+   * proportional font is what ships.
+   */
+  --font-mono: "Cascadia Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas,
+    "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", ui-monospace, monospace;
 
   /* Type scale, from VS Code's own chrome. Three sizes, each with one job:
    * 11px uppercase for section headings and panel tabs, 12px for controls and
@@ -71,7 +82,9 @@
   --font-size-xs: 11px;
   --font-size-sm: 12px;
   --font-size-base: 13px;
-  --font-size-code: 13px;
+  /* VS Code's own split: 13px chrome, 14px code. The editor and the terminal
+     both read from this one, so a character cell is the same in both. */
+  --font-size-code: 14px;
 
   /* Chrome is tight; prose is not. 1.5 through the whole app made every row
      taller than the icon in it and the tree read as a list of paragraphs. */
@@ -141,11 +154,23 @@ body {
   font-family: var(--font-sans);
   font-size: var(--font-size-base);
   line-height: var(--line-height-chrome);
-  /* Without this, 13px text on a HiDPI Linux desktop renders with the heavy
-     stem weight that made the whole app look muddy against the Designer. */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
+
+/*
+ * There is deliberately NO `-webkit-font-smoothing` here.
+ *
+ * 1.3.0 set `antialiased`, on the theory that it would lighten heavy stems. On
+ * Linux it does the opposite of what was wanted: the default is SUBPIXEL (RGB)
+ * antialiasing, which is what makes small text look crisp on an LCD, and
+ * `antialiased` forces greyscale — thinner, softer, and visibly less sharp than
+ * VS Code sitting next to it. VS Code on Linux uses the platform default, and so
+ * do we now.
+ *
+ * `-webkit-font-smoothing: antialiased` is advice for macOS, where the default
+ * over-thickens. Copying it onto a Linux app is a small, invisible-to-tests
+ * downgrade of every glyph on screen — no automated check can see it, which is
+ * the same shape of problem as Chrome's auto dark mode.
+ */
 
 /* ---- VS Code chrome (v1.2.0) --------------------------------------------
  *
