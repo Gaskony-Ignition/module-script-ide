@@ -105,6 +105,33 @@ export interface DiagnosticsForDocument {
   diagnostics: LspDiagnostic[];
 }
 
+/**
+ * A symbol as the server reports it — LSP `SymbolInformation`, the flat shape
+ * with a `location`, not the nested `DocumentSymbol` tree.
+ *
+ * The server sends the flat form for both documentSymbol and workspace/symbol,
+ * so one type covers the outline panel and project-wide search alike. Nesting is
+ * reconstructed on the client from `containerName`, which is the only place the
+ * parent relationship survives.
+ */
+export interface SymbolInformation {
+  name: string;
+  /** LSP SymbolKind — 5 Class, 6 Method, 12 Function, 13 Variable. */
+  kind: number;
+  /** Enclosing class or module, when the server knew one. */
+  containerName?: string;
+  location: { uri: string; range: Range };
+}
+
+/** One hit from `scriptide/searchText` — a project-wide text search. */
+export interface TextSearchHit {
+  uri: string;
+  path?: string;
+  line: number;
+  /** The matching line, for the results list. */
+  text: string;
+}
+
 export interface ServerCapabilities {
   textDocumentSync?: number;
   hoverProvider?: boolean;
@@ -424,6 +451,64 @@ export class LspClient {
       { textDocument: { uri }, position },
       document.project
     );
+  }
+
+  /**
+   * The symbols in one open document, for the outline panel.
+   *
+   * Returns [] rather than throwing when the document is not open: the outline
+   * is a companion view and must never be the thing that breaks editing.
+   */
+  async documentSymbols(uri: string): Promise<SymbolInformation[]> {
+    const document = this.documents.get(uri);
+    if (!document) return [];
+    this.ensureSynced(document.project);
+    const result = await this.transport.request<SymbolInformation[] | null>(
+      'lsp',
+      'textDocument/documentSymbol',
+      { textDocument: { uri } },
+      document.project
+    );
+    return result ?? [];
+  }
+
+  /**
+   * Where a name is defined. LSP allows one Location or an array; both are
+   * normalised to an array here so callers never branch on the shape.
+   */
+  async definition(uri: string, position: Position): Promise<Array<{ uri: string; range: Range }>> {
+    const document = this.documents.get(uri);
+    if (!document) return [];
+    this.ensureSynced(document.project);
+    const result = await this.transport.request<
+      { uri: string; range: Range } | Array<{ uri: string; range: Range }> | null
+    >('lsp', 'textDocument/definition', { textDocument: { uri }, position }, document.project);
+    if (!result) return [];
+    return Array.isArray(result) ? result : [result];
+  }
+
+  /** Project-wide symbol search, for quick-open. */
+  async workspaceSymbols(project: string, query: string): Promise<SymbolInformation[]> {
+    this.ensureSynced(project);
+    const result = await this.transport.request<SymbolInformation[] | null>(
+      'lsp',
+      'workspace/symbol',
+      { query },
+      project
+    );
+    return result ?? [];
+  }
+
+  /** Project-wide plain-text search — the module's own method, not standard LSP. */
+  async searchText(project: string, query: string): Promise<TextSearchHit[]> {
+    this.ensureSynced(project);
+    const result = await this.transport.request<TextSearchHit[] | null>(
+      'lsp',
+      'scriptide/searchText',
+      { query },
+      project
+    );
+    return result ?? [];
   }
 
   /** Documents the server is believed to know about. For tests and diagnostics. */

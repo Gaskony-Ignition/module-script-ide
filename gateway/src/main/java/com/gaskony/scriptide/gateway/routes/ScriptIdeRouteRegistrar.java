@@ -104,6 +104,15 @@ public class ScriptIdeRouteRegistrar {
             .handler(scriptResourceRouteHandler::write)
             .mount();
 
+        // Same explicit-method rule as the POST above. DELETE is admin-gated and
+        // requires If-Match, so it cannot be reached by a stray link or a GET.
+        routes.newRoute(ScriptIdePaths.ROUTE_SCRIPT_CONTENT)
+            .method(HttpMethod.DELETE)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(scriptResourceRouteHandler::delete)
+            .mount();
+
         routes.newRoute(ScriptIdePaths.ROUTE_SCRIPT_ATTRIBUTES)
             .type(RouteGroup.TYPE_JSON)
             .accessControl(authed)

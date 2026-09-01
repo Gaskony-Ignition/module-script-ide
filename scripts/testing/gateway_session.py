@@ -119,6 +119,20 @@ def login(page) -> None:
     """Log in via the gateway web UI. Raises on failure — never continue unauthenticated."""
     page.goto(GATEWAY_URL + "/", wait_until="load", timeout=30000)
     dismiss_quick_start(page)
+    # Wait for the login link, and reload once if it does not arrive.
+    #
+    # The gateway's own web UI is a SPA that boots AFTER the `load` event, and
+    # straight after a module install — which restarts the gateway — the nav can
+    # take longer to render than a single wait allows. The symptom is a
+    # perfectly correct selector timing out, which reads like a broken locator
+    # rather than a slow boot, and it cost a retry of the deploy gate after
+    # every single install until this was added (01/09/2026).
+    try:
+        page.wait_for_selector(LOGIN_LINK, state="visible", timeout=20000)
+    except Exception:
+        page.reload(wait_until="load", timeout=30000)
+        dismiss_quick_start(page)
+        page.wait_for_selector(LOGIN_LINK, state="visible", timeout=30000)
     page.click(LOGIN_LINK, timeout=10000)
     page.wait_for_selector(USER_FIELD, timeout=10000)
     page.fill(USER_FIELD, CONFIG["username"])

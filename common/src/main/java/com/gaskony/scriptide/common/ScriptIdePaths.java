@@ -73,13 +73,17 @@ public final class ScriptIdePaths {
     public static final String ROUTE_SCRIPTS = "/api/scripts";
 
     /**
-     * {@code GET|POST /api/scripts/content/:path?project=X} — read or write one
-     * script body.
+     * {@code GET|POST|DELETE /api/scripts/content/:path?project=X} — read, write
+     * or delete one script body.
      *
      * <p>{@code :path} is {@code <moduleId>/<typeId>/<folder/name>},
      * URL-encoded into ONE route segment (slashes become {@code %2F}) because
      * RouteGroup matches a single segment. A two-segment value addresses a type's
      * singleton, which is how startup/shutdown/update are stored.</p>
+     *
+     * <p>POST creates when the path does not yet exist in the project and modifies
+     * when it does; DELETE removes it. Both require Administrator, a CSRF token
+     * and — for anything but a create — an {@code If-Match} signature.</p>
      */
     public static final String ROUTE_SCRIPT_CONTENT = "/api/scripts/content/:path";
 

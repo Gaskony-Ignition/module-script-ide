@@ -42,19 +42,55 @@ class ScriptResourceTypesTest {
     }
 
     @Test
-    @DisplayName("unmeasured types are body-only, so an attribute write cannot invent a value")
-    void unmeasuredTypesRejectAttributeWrites() {
-        // Deliberately empty until their Designer workspace is measured. If someone
-        // "helpfully" fills these in from analogy, this test should fail and make
-        // them justify it.
-        assertThat(ScriptResourceTypes.byTypeId(ScriptResourceTypes.TYPE_SCHEDULED)
-            .orElseThrow().attributeAllowlist()).isEmpty();
+    @DisplayName("Tag Change is STILL body-only, because its tag list was never measured")
+    void tagChangeRejectsAttributeWrites() {
+        // The Designer's Tag Change workspace has a tag-path list and NOTHING
+        // measured records the attribute holding it. Guessing the key would put a
+        // value on a live gateway that the Designer never reads — which is worse
+        // than declining, because it looks configured and is not.
+        //
+        // The other three types moved OFF this list in 1.1.0 on measured
+        // evidence, not analogy: see enabledIsMeasuredNotInferred below. If you
+        // are here to add tag-change from analogy, go and measure the workspace
+        // instead; that is a smaller job than the bug it prevents.
         assertThat(ScriptResourceTypes.byTypeId(ScriptResourceTypes.TYPE_TAG_CHANGE)
             .orElseThrow().attributeAllowlist()).isEmpty();
-        assertThat(ScriptResourceTypes.byTypeId(ScriptResourceTypes.TYPE_SHUTDOWN)
-            .orElseThrow().attributeAllowlist()).isEmpty();
-        assertThat(ScriptResourceTypes.byTypeId(ScriptResourceTypes.TYPE_UPDATE)
-            .orElseThrow().attributeAllowlist()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Scheduled carries cronExpression — without it the type is unconfigurable")
+    void scheduledCarriesCron() {
+        // Measured off a real resource: {"cronExpression": "*/30 * * * *",
+        // "enabled": true}. Until 1.1.0 this was empty, which meant a scheduled
+        // script could be edited here but never given a schedule.
+        assertThat(ScriptResourceTypes.byTypeId(ScriptResourceTypes.TYPE_SCHEDULED)
+            .orElseThrow().attributeAllowlist())
+            .containsExactlyInAnyOrder("enabled", "cronExpression");
+    }
+
+    @Test
+    @DisplayName("every event type that can be disabled exposes `enabled`")
+    void enabledIsMeasuredNotInferred() {
+        // `enabled` is the one attribute every measured gateway event type
+        // carries, and it is the tick box the Designer shows on all of them.
+        // Verified by round-tripping a write through a real gateway, not by
+        // reasoning from Startup — see docs/STATE.md.
+        for (String typeId : new String[] {
+            ScriptResourceTypes.TYPE_TIMER,
+            ScriptResourceTypes.TYPE_MESSAGE,
+            ScriptResourceTypes.TYPE_STARTUP,
+            ScriptResourceTypes.TYPE_SHUTDOWN,
+            ScriptResourceTypes.TYPE_UPDATE,
+            ScriptResourceTypes.TYPE_SCHEDULED,
+        }) {
+            assertThat(ScriptResourceTypes.byTypeId(typeId).orElseThrow().attributeAllowlist())
+                .as("%s must expose the Designer's Enabled tick box", typeId)
+                .contains("enabled");
+        }
+        // The Project Library is not an event and has no enabled flag — asserting
+        // its ABSENCE keeps the loop above from being a vacuous "contains".
+        assertThat(ScriptResourceTypes.byTypeId(ScriptResourceTypes.TYPE_SCRIPT_PYTHON)
+            .orElseThrow().attributeAllowlist()).doesNotContain("enabled");
     }
 
     @Test

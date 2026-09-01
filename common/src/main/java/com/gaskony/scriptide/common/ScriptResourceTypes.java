@@ -125,13 +125,28 @@ public final class ScriptResourceTypes {
         m.put(TYPE_STARTUP, new ScriptType(
             TYPE_STARTUP, "Startup", "onStartup.py", true,
             new LinkedHashSet<>(Set.of("enabled"))));
-        // Below here: body-only until measured. See the class Javadoc.
+        // Shutdown and Update: same singleton family as Startup. `enabled` is
+        // written by the platform for all three — verified by round-tripping it
+        // against a real gateway (v1.1.0), not inferred from Startup.
         m.put(TYPE_SHUTDOWN, new ScriptType(
-            TYPE_SHUTDOWN, "Shutdown", "onShutdown.py", true, new LinkedHashSet<>()));
+            TYPE_SHUTDOWN, "Shutdown", "onShutdown.py", true,
+            new LinkedHashSet<>(Set.of("enabled"))));
         m.put(TYPE_UPDATE, new ScriptType(
-            TYPE_UPDATE, "Update", "onUpdate.py", true, new LinkedHashSet<>()));
+            TYPE_UPDATE, "Update", "onUpdate.py", true,
+            new LinkedHashSet<>(Set.of("enabled"))));
+        // Scheduled. cronExpression is a STRING holding a cron expression, and
+        // `scope` on this type is "A", not the "G" the other event types use —
+        // measured off a real resource (web-designer SCRIPTING.md §5.4).
         m.put(TYPE_SCHEDULED, new ScriptType(
-            TYPE_SCHEDULED, "Scheduled", "handleScheduleEvent.py", false, new LinkedHashSet<>()));
+            TYPE_SCHEDULED, "Scheduled", "handleScheduleEvent.py", false,
+            new LinkedHashSet<>(Set.of("enabled", "cronExpression"))));
+        // Tag Change stays body-only. The Designer's Tag Change workspace has a
+        // tag-path list that NOTHING measured describes, so the attribute name
+        // holding it is unknown. Writing a guessed key onto a live gateway is
+        // exactly the failure this module refuses; `enabled` alone is not offered
+        // either, because a half-configured tag-change script that fires on no
+        // tags is worse than one this IDE declines to configure. Measure the
+        // workspace with designer-drive, then fill this in.
         m.put(TYPE_TAG_CHANGE, new ScriptType(
             TYPE_TAG_CHANGE, "Tag Change", "onTagChange.py", false, new LinkedHashSet<>()));
         TYPES = Collections.unmodifiableMap(m);
@@ -161,6 +176,13 @@ public final class ScriptResourceTypes {
 
     /** Valid {@code threadType} values, case-sensitive as the Designer writes them. */
     public static final Set<String> THREAD_TYPE_VALUES = Set.of("Shared", "Dedicated");
+
+    /**
+     * Upper bound on a cron expression's length. Generous — the point is to stop
+     * an unbounded string reaching the resource, not to second-guess the
+     * scheduler's grammar.
+     */
+    public static final int MAX_CRON_LENGTH = 256;
 
     /** Upper bound on a timer's delay, in milliseconds (24 hours). */
     public static final long MAX_TIMER_DELAY_MS = 86_400_000L;

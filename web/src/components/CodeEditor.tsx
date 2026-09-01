@@ -25,27 +25,16 @@
  * the user had survives.
  */
 import { useEffect, useRef } from 'react';
-import { indentUnit, syntaxHighlighting, HighlightStyle, bracketMatching } from '@codemirror/language';
-import { python } from '@codemirror/lang-python';
 import { Annotation, EditorState, Compartment, type Extension } from '@codemirror/state';
-import {
-  EditorView,
-  keymap,
-  lineNumbers,
-  highlightActiveLine,
-  highlightActiveLineGutter,
-  drawSelection,
-  rectangularSelection,
-  highlightSpecialChars,
-} from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
-import { tags } from '@lezer/highlight';
+import { EditorView, keymap } from '@codemirror/view';
+import { defaultKeymap, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
 import type { LspClient } from '../api/lspClient';
 import type { OpenDoc } from '../workspace/documents';
 import { lspExtension } from './lspExtension';
 import { attachDiagnostics } from './lspDiagnostics';
 import { lspUri } from '../api/lspClient';
 import { lintGutter } from '@codemirror/lint';
+import { byteFidelity, editorTheme, pythonSurface } from './editorCore';
 import './CodeEditor.css';
 
 export interface CodeEditorProps {
@@ -65,54 +54,6 @@ export interface CodeEditorProps {
    */
   lsp?: LspClient | null;
 }
-
-/**
- * Syntax colours, expressed with the design tokens rather than CodeMirror's own
- * defaults — those are tuned for a light page and are barely legible here.
- */
-const highlightStyle = HighlightStyle.define([
-  { tag: tags.keyword, color: 'var(--syntax-keyword)' },
-  { tag: [tags.controlKeyword, tags.moduleKeyword], color: 'var(--syntax-keyword)' },
-  { tag: [tags.name, tags.deleted, tags.character, tags.propertyName], color: 'var(--text-primary)' },
-  { tag: [tags.function(tags.variableName), tags.labelName], color: 'var(--syntax-function)' },
-  { tag: [tags.definition(tags.variableName)], color: 'var(--text-primary)' },
-  { tag: [tags.className, tags.typeName], color: 'var(--syntax-type)' },
-  { tag: [tags.number, tags.bool, tags.null], color: 'var(--syntax-number)' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--syntax-string)' },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--syntax-comment)', fontStyle: 'italic' },
-  { tag: [tags.operator, tags.punctuation], color: 'var(--text-secondary)' },
-  { tag: tags.invalid, color: 'var(--error)' },
-]);
-
-const editorTheme = EditorView.theme(
-  {
-    '&': {
-      height: '100%',
-      backgroundColor: 'var(--bg-primary)',
-      color: 'var(--text-primary)',
-      fontSize: '13px',
-    },
-    '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.55' },
-    '.cm-content': { caretColor: 'var(--accent-primary)' },
-    '.cm-gutters': {
-      backgroundColor: 'var(--bg-secondary)',
-      color: 'var(--text-muted)',
-      border: 'none',
-      borderRight: '1px solid var(--border-light)',
-    },
-    '.cm-activeLine': { backgroundColor: 'var(--bg-tertiary)' },
-    '.cm-activeLineGutter': { backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' },
-    '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--accent-primary)' },
-    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-      backgroundColor: 'var(--accent-primary-bg)',
-    },
-    '.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
-      backgroundColor: 'var(--accent-primary-bg)',
-      color: 'inherit',
-    },
-  },
-  { dark: true }
-);
 
 /** One CodeMirror instance plus the DOM node it owns and its read-only switch. */
 interface MountedView {
@@ -235,6 +176,39 @@ export default function CodeEditor({ docs, activeUri, readOnly, onChange, onSave
     }
   }, [docs, activeUri]);
 
+  /**
+   * Reveal a line in the active view, for the outline panel and for a clicked
+   * traceback frame.
+   *
+   * Driven by a window event rather than a prop, because the caller is two
+   * components away and the alternative is threading an imperative handle
+   * through everything in between. Rebound whenever the active view changes, so
+   * it always moves the view the user is actually looking at.
+   */
+  useEffect(() => {
+    function onReveal(event: Event) {
+      const detail = (event as CustomEvent<{ line: number; character?: number }>).detail;
+      if (!detail || !activeUri) return;
+      const mounted = viewsRef.current.get(activeUri);
+      if (!mounted) return;
+      const { view } = mounted;
+      // Clamp: the symbol table can be a moment behind the buffer, and asking
+      // CodeMirror for a line past the end throws rather than saturating.
+      const lineNumber = Math.min(Math.max(detail.line + 1, 1), view.state.doc.lines);
+      const line = view.state.doc.line(lineNumber);
+      const pos = Math.min(line.from + (detail.character ?? 0), line.to);
+      view.dispatch({
+        selection: { anchor: pos },
+        // Centred rather than CodeMirror's default, so the target does not land
+        // against the bottom edge with no context under it.
+        effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+      });
+      view.focus();
+    }
+    window.addEventListener('scriptide:reveal', onReveal);
+    return () => window.removeEventListener('scriptide:reveal', onReveal);
+  }, [activeUri]);
+
   return <div className="code-editor" ref={rootRef} data-testid="code-editor" />;
 }
 
@@ -273,28 +247,11 @@ function baseExtensions(
 ): Extension[] {
   const uri = doc.uri;
   return [
-    lineNumbers(),
-    highlightActiveLineGutter(),
-    highlightSpecialChars(),
-    history(),
-    drawSelection(),
-    rectangularSelection(),
-    highlightActiveLine(),
-    bracketMatching(),
-    syntaxHighlighting(highlightStyle, { fallback: true }),
-    python(),
+    ...pythonSurface,
 
-    // ---- byte fidelity ----
-    // A literal tab, so every indent CodeMirror generates (auto-indent after a
-    // ':', indentMore, indentOnInput) is a tab and never spaces.
-    indentUnit.of('\t'),
-    // Tab width for DISPLAY and for the column arithmetic the Python indenter
-    // does; it never converts a tab into spaces.
-    EditorState.tabSize.of(4),
-    // Pin the line separator. Left at its default, CodeMirror splits the document
-    // on any of CR, LF or CRLF and rejoins with \n — so opening and saving a file
-    // with CRLF endings rewrites every line, invisibly.
-    EditorState.lineSeparator.of('\n'),
+    // ---- byte fidelity ---- see editorCore. Shared with the Script Console, so
+    // a tab means the same thing in both.
+    ...byteFidelity,
 
     keymap.of([
       {

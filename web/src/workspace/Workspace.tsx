@@ -11,6 +11,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiError,
+  createScript,
+  deleteScript,
   fetchProjects,
   fetchScriptTree,
   readScriptAttributes,
@@ -29,6 +31,9 @@ import CodeEditor from '../components/CodeEditor';
 import ConfigStrip from '../components/ConfigStrip';
 import ConflictDialog from '../components/ConflictDialog';
 import FileTree from '../components/FileTree';
+import NewScriptDialog from '../components/NewScriptDialog';
+import OutlinePanel from '../components/OutlinePanel';
+import ScriptConsole from '../components/ScriptConsole';
 import StatusFooter from '../components/StatusFooter';
 import TabStrip from '../components/TabStrip';
 import { docUri, isDirty, newDoc, type OpenDoc } from './documents';
@@ -58,6 +63,16 @@ interface Conflict {
 
 type Notice = { kind: 'error' | 'info'; text: string } | null;
 
+/**
+ * How much of the editing area the console occupies.
+ *
+ * `split` is the default when the console is opened from the rail, because the
+ * reason to open a console is almost always to try something against the script
+ * you are looking at — replacing that script with the console would defeat the
+ * purpose. `full` exists for when the console IS the task.
+ */
+type ConsoleMode = 'hidden' | 'split' | 'full';
+
 export default function Workspace({ session }: WorkspaceProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [project, setProject] = useState<string>('');
@@ -70,6 +85,16 @@ export default function Workspace({ session }: WorkspaceProps) {
   const [savingAttrs, setSavingAttrs] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  const [consoleMode, setConsoleMode] = useState<ConsoleMode>('hidden');
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ScriptEntry | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  // Bumped on every edit so the outline re-requests. A counter rather than the
+  // text itself: the effect only needs to know THAT it changed.
+  const [docRevision, setDocRevision] = useState(0);
 
   // Saves are fired from a CodeMirror keybinding as well as from the button, and
   // both read the CURRENT docs array. Keeping it in a ref avoids handing the
@@ -177,6 +202,7 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   const handleChange = useCallback((uri: string, text: string) => {
     setDocs((current) => current.map((d) => (d.uri === uri ? { ...d, text } : d)));
+    setDocRevision((n) => n + 1);
   }, []);
 
   const closeDoc = useCallback((uri: string) => {
@@ -368,12 +394,118 @@ export default function Workspace({ session }: WorkspaceProps) {
   );
 
   const activeAttrs = activeUri ? attrs[activeUri] : undefined;
+  // The tree entry behind the open tab, for its resource type. Looked up rather
+  // than stored on the doc: the tree is re-read after every create and delete,
+  // and a copy on the doc would go stale the first time that happened.
+  const activeEntry = useMemo(
+    () => tree?.scripts.find((entry) => entry.path === activeDoc?.path),
+    [tree, activeDoc]
+  );
   const attrsDirty = activeAttrs
     ? // Both objects are built from the same server response and only ever have
       // their values replaced, so key order is stable and a JSON compare is a
       // sound equality test here.
       JSON.stringify(activeAttrs.attributes) !== JSON.stringify(activeAttrs.base)
     : false;
+
+  // ---- create ----------------------------------------------------------
+
+  const doCreate = useCallback(
+    async (name: string) => {
+      setCreateBusy(true);
+      setCreateError(null);
+      const path = `ignition/script-python/${name}`;
+      try {
+        await createScript({ project, path, csrfToken: session.csrfToken });
+        setCreating(false);
+        // Re-read the tree rather than splicing the new entry in: the server
+        // decides the signature and the data key, and inventing either here
+        // would give the first save a base it never agreed to.
+        const refreshed = await fetchScriptTree(project);
+        setTree(refreshed);
+        const entry = refreshed.scripts.find((candidate) => candidate.path === path);
+        if (entry) {
+          await openScript(entry);
+        }
+        setNotice({ kind: 'info', text: `Created ${name}.` });
+      } catch (e) {
+        setCreateError(describe(e));
+      } finally {
+        setCreateBusy(false);
+      }
+    },
+    [openScript, project, session.csrfToken]
+  );
+
+  // ---- delete ----------------------------------------------------------
+
+  const doDelete = useCallback(async () => {
+    const entry = pendingDelete;
+    if (!entry) return;
+    setDeleteBusy(true);
+    try {
+      await deleteScript({
+        project,
+        path: entry.path,
+        baseSignature: entry.signature,
+        csrfToken: session.csrfToken,
+      });
+      setPendingDelete(null);
+      // Close the tab too — leaving an editor open on a resource that no longer
+      // exists means the next Ctrl+S recreates it, silently undoing the delete.
+      closeDoc(docUri(project, entry.path));
+      setTree(await fetchScriptTree(project));
+      setNotice({ kind: 'info', text: `Deleted ${entry.name || entry.typeLabel}.` });
+    } catch (e) {
+      const message =
+        e instanceof ApiError && e.isConflict
+          ? 'That script changed on the gateway since this list was loaded. '
+            + 'Nothing was deleted — reopen it to see the current version.'
+          : describe(e);
+      setNotice({ kind: 'error', text: message });
+      setPendingDelete(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [closeDoc, pendingDelete, project, session.csrfToken]);
+
+  // ---- navigation ------------------------------------------------------
+
+  /** Move the caret in the active editor to a zero-based line. */
+  const jumpToLine = useCallback((line: number, character: number) => {
+    // The editor owns its CodeMirror views, so the jump is published as a DOM
+    // event on the document rather than plumbed through five components. The
+    // editor listens for it and moves the view that has the matching URI.
+    window.dispatchEvent(
+      new CustomEvent('scriptide:reveal', { detail: { line, character } })
+    );
+  }, []);
+
+  const openConsole = useCallback(() => {
+    setConsoleMode((current) => (current === 'hidden' ? 'split' : current));
+  }, []);
+
+  /** Open the console in its own browser tab, on the current project. */
+  const popOutConsole = useCallback(() => {
+    const url = `${window.location.pathname}?view=console&project=${encodeURIComponent(project)}`;
+    const handle = window.open(url, '_blank');
+    if (handle) {
+      try {
+        handle.opener = null;
+      } catch {
+        /* same-origin, so this is hygiene rather than an exposure */
+      }
+      // Popped out means popped out — leaving a second console in this tab
+      // would give two REPLs that look alike and do not share locals.
+      setConsoleMode('hidden');
+    } else {
+      setNotice({
+        kind: 'error',
+        text: 'The browser blocked the pop-out. Allow popups for this gateway, '
+          + 'or keep using the console in this tab.',
+      });
+    }
+  }, [project]);
 
   return (
     <main className="workspace">
@@ -404,6 +536,27 @@ export default function Workspace({ session }: WorkspaceProps) {
           {saving ? 'Saving…' : 'Save script'}
         </button>
 
+        <span className="workspace-toolbar-gap" />
+
+        <button
+          type="button"
+          className="button"
+          aria-pressed={consoleMode !== 'hidden'}
+          onClick={() =>
+            setConsoleMode((current) => (current === 'hidden' ? 'split' : 'hidden'))
+          }
+        >
+          Console
+        </button>
+        <button
+          type="button"
+          className="button"
+          aria-pressed={outlineOpen}
+          onClick={() => setOutlineOpen((open) => !open)}
+        >
+          Outline
+        </button>
+
         {readOnly && (
           <span className="workspace-readonly" role="status">
             {readOnlyReason}
@@ -426,6 +579,13 @@ export default function Workspace({ session }: WorkspaceProps) {
               scripts={tree.scripts}
               selectedPath={activeDoc?.path ?? null}
               onSelect={(entry) => void openScript(entry)}
+              consoleSelected={consoleMode !== 'hidden'}
+              onSelectSpecial={openConsole}
+              // Create and delete are offered only when the session can actually
+              // perform them. A visible button that always 403s teaches people
+              // the tool is broken rather than that they lack a role.
+              onCreate={readOnly ? undefined : () => { setCreateError(null); setCreating(true); }}
+              onDelete={readOnly ? undefined : (entry) => setPendingDelete(entry)}
             />
           ) : (
             <nav className="file-tree" aria-label="Scripts">
@@ -437,39 +597,145 @@ export default function Workspace({ session }: WorkspaceProps) {
           <StatusFooter scripts={tree?.scripts ?? []} transport={transport} />
         </div>
 
-        <section className="workspace-editor">
-          <TabStrip
-            docs={docs}
-            activeUri={activeUri}
-            onSelect={setActiveUri}
-            onClose={closeDoc}
-          />
-          {activeUri && activeAttrs && (
-            <ConfigStrip
-              editable={activeAttrs.editable}
-              attributes={activeAttrs.attributes}
-              onChange={(name, value) => changeAttribute(activeUri, name, value)}
-              onSave={() => void saveAttributes(activeUri)}
-              dirty={attrsDirty}
-              readOnly={readOnly}
-              saving={savingAttrs}
+        {/* The editor half is ALWAYS mounted, even when the console is full
+            width — it owns every CodeMirror instance, and unmounting it would
+            destroy the undo history and scroll position of every open tab. It
+            is hidden with a class instead. */}
+        <div className={`workspace-panes pane-mode-${consoleMode}`}>
+          <section className="workspace-editor">
+            <TabStrip
+              docs={docs}
+              activeUri={activeUri}
+              onSelect={setActiveUri}
+              onClose={closeDoc}
             />
+            {activeUri && activeAttrs && (
+              <ConfigStrip
+                editable={activeAttrs.editable}
+                attributes={activeAttrs.attributes}
+                onChange={(name, value) => changeAttribute(activeUri, name, value)}
+                onSave={() => void saveAttributes(activeUri)}
+                dirty={attrsDirty}
+                readOnly={readOnly}
+                saving={savingAttrs}
+                typeId={activeEntry?.typeId}
+                unconfigurableReason={
+                  activeEntry?.typeId === 'tag-change'
+                    ? 'Tag Change settings are not editable here yet — the Designer\'s tag-path '
+                      + 'list has not been measured, and writing a guessed key would put a value '
+                      + 'on the gateway that the Designer never reads. Configure it in the '
+                      + 'Designer; the script body is fully editable here.'
+                    : undefined
+                }
+              />
+            )}
+            {docs.length === 0 && (
+              <p className="code-editor-empty">Choose a script on the left to start editing.</p>
+            )}
+            <CodeEditor
+              docs={docs}
+              activeUri={activeUri}
+              readOnly={readOnly}
+              onChange={handleChange}
+              onSave={(uri) => void saveDoc(uri)}
+              lsp={lsp}
+            />
+          </section>
+
+          {consoleMode !== 'hidden' && (
+            <section className="workspace-console-pane">
+              <div className="pane-head">
+                <span className="pane-title">Script Console</span>
+                <span className="console-spacer" />
+                <button
+                  type="button"
+                  aria-pressed={consoleMode === 'split'}
+                  onClick={() => setConsoleMode('split')}
+                  title="Side by side with the editor"
+                >
+                  Split
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={consoleMode === 'full'}
+                  onClick={() => setConsoleMode('full')}
+                  title="Fill the editing area"
+                >
+                  Full
+                </button>
+                <button type="button" onClick={popOutConsole} title="Open in a new browser tab">
+                  Pop out
+                </button>
+                <button type="button" onClick={() => setConsoleMode('hidden')} aria-label="Close console">
+                  ×
+                </button>
+              </div>
+              {/* Keyed on the project so switching projects gives a fresh console
+                  rather than one whose locals belong to the old project. */}
+              <ScriptConsole
+                key={project}
+                project={project}
+                csrfToken={session.csrfToken}
+                canExecute={session.canExecute !== false && !readOnly}
+                onOpenFrame={(path, line) => {
+                  const entry = tree?.scripts.find((candidate) => candidate.path === path);
+                  if (entry) {
+                    void openScript(entry).then(() => jumpToLine(line - 1, 0));
+                  }
+                }}
+              />
+            </section>
           )}
-          {docs.length === 0 && (
-            <p className="code-editor-empty">Choose a script on the left to start editing.</p>
-          )}
-          {/* Mounted even with no documents: it owns the CodeMirror instances and
-              unmounting it would destroy every one of them. */}
-          <CodeEditor
-            docs={docs}
-            activeUri={activeUri}
-            readOnly={readOnly}
-            onChange={handleChange}
-            onSave={(uri) => void saveDoc(uri)}
+        </div>
+
+        {outlineOpen && (
+          <OutlinePanel
+            uri={activeUri ? lspUri(activeDoc?.project ?? project, activeDoc?.path ?? '') : null}
+            revision={docRevision}
             lsp={lsp}
+            onJump={jumpToLine}
           />
-        </section>
+        )}
       </div>
+
+      {creating && (
+        <NewScriptDialog
+          existingNames={
+            tree?.scripts
+              .filter((entry) => entry.typeId === 'script-python')
+              .map((entry) => entry.name) ?? []
+          }
+          busy={createBusy}
+          error={createError}
+          onCreate={(name) => void doCreate(name)}
+          onCancel={() => setCreating(false)}
+        />
+      )}
+
+      {pendingDelete && (
+        <div className="newscript-backdrop" role="presentation">
+          <div
+            className="newscript-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-title"
+          >
+            <h2 id="delete-title">Delete {pendingDelete.name || pendingDelete.typeLabel}?</h2>
+            <p className="muted">
+              This removes the script from <strong>{project}</strong> on the gateway.
+              It cannot be undone from here.
+            </p>
+            <div className="newscript-actions">
+              <button type="button" onClick={() => setPendingDelete(null)} disabled={deleteBusy}>
+                Cancel
+              </button>
+              <button type="button" className="danger" onClick={() => void doDelete()} disabled={deleteBusy}>
+                {deleteBusy ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {conflict && (
         <ConflictDialog

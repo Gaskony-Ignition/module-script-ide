@@ -25,6 +25,14 @@ export interface ConfigStripProps {
   dirty: boolean;
   readOnly: boolean;
   saving?: boolean;
+  /** Resource type, so the strip can show that type's Designer documentation. */
+  typeId?: string;
+  /**
+   * Why this type has no editable settings, when it has none. Rendered instead
+   * of nothing: a Tag Change script with no visible controls otherwise looks
+   * like a bug in this IDE rather than a deliberate refusal.
+   */
+  unconfigurableReason?: string;
 }
 
 /** Attributes rendered as a checkbox. */
@@ -37,6 +45,52 @@ const LABELS: Record<string, string> = {
   sharedThread: 'Shared thread',
   threadType: 'Thread type',
   hintScope: 'Hint scope',
+  cronExpression: 'Cron expression',
+};
+
+/**
+ * The Designer's own explanatory text for each event type, and the parameters
+ * its handler is called with.
+ *
+ * Both are STATIC in the Designer — they describe what the event type is and
+ * what its handler receives. Neither is stored in `resource.json` and neither is
+ * editable there, so neither is editable here: inventing a `description`
+ * attribute would write a key the platform does not read and the Designer would
+ * never show, which is the opposite of the two tools lining up.
+ *
+ * Wording is verbatim from the real Designer where it was measured
+ * (web-designer `docs/design-handoff/real-designer/SCRIPTING.md` §5.1–5.4).
+ */
+const TYPE_DOCS: Record<
+  string,
+  { description: string; parameters?: Array<{ name: string; type: string; text: string }> }
+> = {
+  timer: {
+    description: 'Timer scripts run repeatedly on the Gateway, on a fixed delay or a fixed rate.',
+  },
+  message: {
+    description:
+      'Message handler scripts that run whenever the Gateway receives a script message',
+    parameters: [
+      {
+        name: 'payload',
+        type: 'dict',
+        text: 'A dictionary that holds the objects passed to this message handler. '
+          + "Retrieve them with a subscript, e.g. myObject = payload['argumentName']",
+      },
+    ],
+  },
+  startup: { description: 'Project startup script that runs in the Gateway' },
+  shutdown: { description: 'Project shutdown script that runs in the Gateway' },
+  update: { description: 'Project update script that runs in the Gateway' },
+  scheduled: {
+    description:
+      'Scheduled scripts run on the Gateway according to a cron expression.',
+  },
+  'tag-change': {
+    description:
+      'Tag change scripts run on the Gateway when one of their configured tags changes.',
+  },
 };
 
 /**
@@ -62,12 +116,28 @@ export default function ConfigStrip({
   dirty,
   readOnly,
   saving = false,
+  typeId,
+  unconfigurableReason,
 }: ConfigStripProps) {
-  // Body-only type: render nothing, not an empty bar.
-  if (editable.length === 0) return null;
+  const docs = typeId ? TYPE_DOCS[typeId] : undefined;
+
+  // Body-only type: still say what the script IS and why there is nothing to
+  // configure, rather than rendering an empty bar or nothing at all.
+  if (editable.length === 0) {
+    if (!docs && !unconfigurableReason) return null;
+    return (
+      <div className="config-strip config-strip-docs" aria-label="Script settings">
+        <TypeDocs docs={docs} />
+        {unconfigurableReason && (
+          <p className="config-note muted">{unconfigurableReason}</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="config-strip" aria-label="Script settings">
+      <TypeDocs docs={docs} />
       {editable.map((name) => (
         <label className="config-field" key={name}>
           <span className="config-label">{LABELS[name] ?? name}</span>
@@ -85,6 +155,34 @@ export default function ConfigStrip({
       >
         {saving ? 'Saving settings…' : 'Save settings'}
       </button>
+    </div>
+  );
+}
+
+/**
+ * The Designer's description and handler parameters for this event type.
+ *
+ * Read-only by construction — see TYPE_DOCS. Rendered above the controls so the
+ * page reads in the same order as the Designer's workspace.
+ */
+function TypeDocs({ docs }: { docs?: (typeof TYPE_DOCS)[string] }) {
+  if (!docs) return null;
+  return (
+    <div className="config-docs">
+      <p className="config-description">{docs.description}</p>
+      {docs.parameters && docs.parameters.length > 0 && (
+        <dl className="config-params">
+          {docs.parameters.map((param) => (
+            <div className="config-param" key={param.name}>
+              <dt>
+                <code>{param.name}</code>
+                <span className="config-param-type muted">({param.type})</span>
+              </dt>
+              <dd className="muted">{param.text}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </div>
   );
 }
@@ -148,6 +246,22 @@ function renderField(
           </option>
         ))}
       </select>
+    );
+  }
+  if (name === 'cronExpression') {
+    return (
+      <input
+        type="text"
+        className="config-cron"
+        value={String(value ?? '')}
+        placeholder="*/30 * * * *"
+        spellCheck={false}
+        // Free text, not a builder. The gateway's scheduler is the arbiter of
+        // what a valid expression is, and a builder here would quietly refuse
+        // expressions the platform accepts.
+        onChange={(e) => onChange(name, e.target.value)}
+        disabled={readOnly}
+      />
     );
   }
   // An attribute this build does not know how to render. Shown read-only rather

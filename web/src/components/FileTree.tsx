@@ -1,38 +1,61 @@
 /**
- * The left rail: every editable script in the open project.
+ * The left rail: every editable script in the open project, plus the console.
  *
- * Grouped by resource type, in the order ScriptResourceTypes declares them so
- * the rail reads the same way as the Designer's own project browser. Project
- * Library entries carry slash-separated package names (`util/helpers`) and are
- * shown as a nested, collapsible tree; every other type is a flat list, because
- * every other type is genuinely flat on the gateway.
+ * The shape follows the Designer's project browser (Nigel, 01/09/2026), because
+ * anyone using this has the Designer's layout in their head already:
+ *
+ *   Scripting
+ *   ├── Gateway Events
+ *   │   ├── Message
+ *   │   ├── Timer
+ *   │   └── …
+ *   ├── Project Library
+ *   │   └── util/helpers
+ *   └── Script Console
+ *
+ * The one departure is Script Console, which the Designer keeps on a toolbar
+ * rather than in the tree. It sits here deliberately (Nigel): in a browser it is
+ * another thing you open, not another window.
+ *
+ * Project Library entries carry slash-separated package names and are shown as a
+ * nested, collapsible tree; each gateway event type is a flat list, because each
+ * is genuinely flat on the gateway.
  */
 import { useMemo, useState } from 'react';
 import type { ScriptEntry, ScriptTypeId } from '../api/scripts';
 import './FileTree.css';
+
+/** Non-script destinations the rail can select. */
+export type SpecialTarget = 'console';
 
 export interface FileTreeProps {
   scripts: ScriptEntry[];
   /** Path of the entry currently being edited, if any. */
   selectedPath: string | null;
   onSelect: (entry: ScriptEntry) => void;
+  /** Selected when the console is the active surface. */
+  consoleSelected?: boolean;
+  onSelectSpecial?: (target: SpecialTarget) => void;
+  /** Offered only when the session may write — omit to hide create/delete. */
+  onCreate?: () => void;
+  onDelete?: (entry: ScriptEntry) => void;
 }
 
 /**
- * Display order of the type groups. Matches ScriptResourceTypes.all()'s
- * insertion order — the listing endpoint does not promise an order, so the
- * client fixes one rather than letting the rail reshuffle between reads.
+ * Gateway event types, in the Designer's own order. Project Library is handled
+ * separately because it is a package tree rather than a flat list.
  */
-const TYPE_ORDER: ScriptTypeId[] = [
-  'script-python',
-  'timer',
-  'message',
+const GATEWAY_EVENT_TYPES: ScriptTypeId[] = [
   'startup',
   'shutdown',
   'update',
+  'timer',
+  'message',
   'scheduled',
   'tag-change',
 ];
+
+const LIBRARY_TYPE: ScriptTypeId = 'script-python';
 
 interface PackageNode {
   /** Segment name, e.g. `util`. Empty for the root. */
@@ -76,26 +99,40 @@ function sortNode(node: PackageNode) {
   node.children.forEach(sortNode);
 }
 
-export default function FileTree({ scripts, selectedPath, onSelect }: FileTreeProps) {
+export default function FileTree({
+  scripts,
+  selectedPath,
+  onSelect,
+  consoleSelected = false,
+  onSelectSpecial,
+  onCreate,
+  onDelete,
+}: FileTreeProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
-  const groups = useMemo(() => {
+  const { library, eventGroups, unknownGroups } = useMemo(() => {
     const byType = new Map<string, ScriptEntry[]>();
     for (const entry of scripts) {
       const list = byType.get(entry.typeId);
       if (list) list.push(entry);
       else byType.set(entry.typeId, [entry]);
     }
-    // Known types first in their declared order, then anything the gateway sent
-    // that this build does not know about — better shown than silently dropped.
-    const ordered = [
-      ...TYPE_ORDER.filter((t) => byType.has(t)),
-      ...[...byType.keys()].filter((t) => !TYPE_ORDER.includes(t as ScriptTypeId)),
-    ];
-    return ordered.map((typeId) => {
-      const entries = byType.get(typeId) ?? [];
-      return { typeId, label: entries[0]?.typeLabel ?? typeId, entries };
-    });
+    const known = new Set<string>([LIBRARY_TYPE, ...GATEWAY_EVENT_TYPES]);
+    return {
+      library: byType.get(LIBRARY_TYPE) ?? [],
+      eventGroups: GATEWAY_EVENT_TYPES.filter((t) => byType.has(t)).map((typeId) => {
+        const entries = byType.get(typeId) ?? [];
+        return { typeId, label: entries[0]?.typeLabel ?? typeId, entries };
+      }),
+      // Anything the gateway sent that this build does not know about — better
+      // shown under its own heading than silently dropped.
+      unknownGroups: [...byType.keys()]
+        .filter((t) => !known.has(t))
+        .map((typeId) => {
+          const entries = byType.get(typeId) ?? [];
+          return { typeId, label: entries[0]?.typeLabel ?? typeId, entries };
+        }),
+    };
   }, [scripts]);
 
   function toggle(key: string) {
@@ -107,59 +144,158 @@ export default function FileTree({ scripts, selectedPath, onSelect }: FileTreePr
     });
   }
 
-  if (scripts.length === 0) {
-    return (
-      <nav className="file-tree" aria-label="Scripts">
-        <p className="file-tree-empty muted">No editable scripts in this project.</p>
-      </nav>
-    );
-  }
+  const eventsCollapsed = collapsed.has('group:gateway-events');
+  const libraryCollapsed = collapsed.has('group:library');
 
   return (
-    <nav className="file-tree" aria-label="Scripts">
-      {groups.map((group) => {
-        const groupKey = `type:${group.typeId}`;
-        const isCollapsed = collapsed.has(groupKey);
+    <nav className="file-tree" aria-label="Scripting">
+      <div className="file-tree-root-label">Scripting</div>
+
+      {/* ---- Gateway Events ---- */}
+      <section className="file-tree-group">
+        <button
+          type="button"
+          className="file-tree-header"
+          aria-expanded={!eventsCollapsed}
+          onClick={() => toggle('group:gateway-events')}
+        >
+          <Chevron open={!eventsCollapsed} />
+          <span>Gateway Events</span>
+          <span className="file-tree-count">
+            {eventGroups.reduce((total, g) => total + g.entries.length, 0)}
+          </span>
+        </button>
+        {!eventsCollapsed &&
+          (eventGroups.length === 0 ? (
+            <p className="file-tree-empty muted">None in this project.</p>
+          ) : (
+            eventGroups.map((group) => {
+              const key = `type:${group.typeId}`;
+              const isCollapsed = collapsed.has(key);
+              return (
+                <div key={group.typeId}>
+                  <button
+                    type="button"
+                    className="file-tree-package"
+                    style={{ paddingLeft: indent(1) }}
+                    aria-expanded={!isCollapsed}
+                    onClick={() => toggle(key)}
+                  >
+                    <Chevron open={!isCollapsed} />
+                    <span>{group.label}</span>
+                    <span className="file-tree-count">{group.entries.length}</span>
+                  </button>
+                  {!isCollapsed && (
+                    <ul className="file-tree-list">
+                      {[...group.entries]
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map((entry) => (
+                          <ScriptRow
+                            key={entry.path}
+                            entry={entry}
+                            depth={2}
+                            selectedPath={selectedPath}
+                            onSelect={onSelect}
+                            onDelete={onDelete}
+                          />
+                        ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })
+          ))}
+      </section>
+
+      {/* ---- Project Library ---- */}
+      <section className="file-tree-group">
+        <div className="file-tree-header-row">
+          <button
+            type="button"
+            className="file-tree-header"
+            aria-expanded={!libraryCollapsed}
+            onClick={() => toggle('group:library')}
+          >
+            <Chevron open={!libraryCollapsed} />
+            <span>Project Library</span>
+            <span className="file-tree-count">{library.length}</span>
+          </button>
+          {onCreate && (
+            <button
+              type="button"
+              className="file-tree-action"
+              title="New library script"
+              aria-label="New library script"
+              onClick={onCreate}
+            >
+              +
+            </button>
+          )}
+        </div>
+        {!libraryCollapsed &&
+          (library.length === 0 ? (
+            <p className="file-tree-empty muted">No library scripts yet.</p>
+          ) : (
+            <PackageBranch
+              node={buildPackageTree(library)}
+              depth={0}
+              collapsed={collapsed}
+              onToggle={toggle}
+              selectedPath={selectedPath}
+              onSelect={onSelect}
+              onDelete={onDelete}
+            />
+          ))}
+      </section>
+
+      {/* ---- anything unrecognised ---- */}
+      {unknownGroups.map((group) => {
+        const key = `type:${group.typeId}`;
+        const isCollapsed = collapsed.has(key);
         return (
           <section className="file-tree-group" key={group.typeId}>
             <button
               type="button"
               className="file-tree-header"
               aria-expanded={!isCollapsed}
-              onClick={() => toggle(groupKey)}
+              onClick={() => toggle(key)}
             >
               <Chevron open={!isCollapsed} />
               <span>{group.label}</span>
               <span className="file-tree-count">{group.entries.length}</span>
             </button>
-            {!isCollapsed &&
-              (group.typeId === 'script-python' ? (
-                <PackageBranch
-                  node={buildPackageTree(group.entries)}
-                  depth={0}
-                  collapsed={collapsed}
-                  onToggle={toggle}
-                  selectedPath={selectedPath}
-                  onSelect={onSelect}
-                />
-              ) : (
-                <ul className="file-tree-list">
-                  {[...group.entries]
-                    .sort((a, b) => a.name.localeCompare(b.name))
-                    .map((entry) => (
-                      <ScriptRow
-                        key={entry.path}
-                        entry={entry}
-                        depth={1}
-                        selectedPath={selectedPath}
-                        onSelect={onSelect}
-                      />
-                    ))}
-                </ul>
-              ))}
+            {!isCollapsed && (
+              <ul className="file-tree-list">
+                {group.entries.map((entry) => (
+                  <ScriptRow
+                    key={entry.path}
+                    entry={entry}
+                    depth={1}
+                    selectedPath={selectedPath}
+                    onSelect={onSelect}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </ul>
+            )}
           </section>
         );
       })}
+
+      {/* ---- Script Console ---- */}
+      {onSelectSpecial && (
+        <section className="file-tree-group">
+          <button
+            type="button"
+            className={`file-tree-header file-tree-leaf${consoleSelected ? ' is-selected' : ''}`}
+            aria-current={consoleSelected ? 'true' : undefined}
+            onClick={() => onSelectSpecial('console')}
+          >
+            <span className="file-tree-chevron-spacer" aria-hidden="true" />
+            <span>Script Console</span>
+          </button>
+        </section>
+      )}
     </nav>
   );
 }
@@ -171,9 +307,18 @@ interface BranchProps {
   onToggle: (key: string) => void;
   selectedPath: string | null;
   onSelect: (entry: ScriptEntry) => void;
+  onDelete?: (entry: ScriptEntry) => void;
 }
 
-function PackageBranch({ node, depth, collapsed, onToggle, selectedPath, onSelect }: BranchProps) {
+function PackageBranch({
+  node,
+  depth,
+  collapsed,
+  onToggle,
+  selectedPath,
+  onSelect,
+  onDelete,
+}: BranchProps) {
   return (
     <ul className="file-tree-list">
       {node.children.map((child) => {
@@ -199,6 +344,7 @@ function PackageBranch({ node, depth, collapsed, onToggle, selectedPath, onSelec
                 onToggle={onToggle}
                 selectedPath={selectedPath}
                 onSelect={onSelect}
+                onDelete={onDelete}
               />
             )}
           </li>
@@ -211,6 +357,7 @@ function PackageBranch({ node, depth, collapsed, onToggle, selectedPath, onSelec
           depth={depth + 1}
           selectedPath={selectedPath}
           onSelect={onSelect}
+          onDelete={onDelete}
         />
       ))}
     </ul>
@@ -222,12 +369,17 @@ interface RowProps {
   depth: number;
   selectedPath: string | null;
   onSelect: (entry: ScriptEntry) => void;
+  onDelete?: (entry: ScriptEntry) => void;
 }
 
-function ScriptRow({ entry, depth, selectedPath, onSelect }: RowProps) {
+function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete }: RowProps) {
   const selected = entry.path === selectedPath;
+  // Only a script this project OWNS can be deleted. An inherited one has nothing
+  // here to remove, and the server 404s it — so the button is absent rather than
+  // present and failing.
+  const deletable = Boolean(onDelete) && entry.origin !== 'inherited' && !entry.singleton;
   return (
-    <li>
+    <li className="file-tree-row">
       <button
         type="button"
         className={`file-tree-item${selected ? ' is-selected' : ''}`}
@@ -245,6 +397,17 @@ function ScriptRow({ entry, depth, selectedPath, onSelect }: RowProps) {
           </span>
         )}
       </button>
+      {deletable && (
+        <button
+          type="button"
+          className="file-tree-action file-tree-delete"
+          title={`Delete ${entry.name}`}
+          aria-label={`Delete ${entry.name}`}
+          onClick={() => onDelete?.(entry)}
+        >
+          ×
+        </button>
+      )}
     </li>
   );
 }

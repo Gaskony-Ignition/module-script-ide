@@ -287,3 +287,129 @@ export function saveScriptAttributes(request: SaveAttributesRequest): Promise<Sa
     request.baseSignature
   );
 }
+
+// ==================== Create and delete ====================
+
+/**
+ * Create a new, empty Project Library script.
+ *
+ * There is no separate create route: POST to a path the project does not yet
+ * define takes the server's create branch. The distinction that matters is the
+ * PRECONDITION — a create must NOT send an If-Match, because there is no version
+ * to match and sending one would make the server treat it as a modify of
+ * something absent. So this deliberately does not go through {@link postJson},
+ * which always sets the header.
+ *
+ * The body is created empty. The real Designer writes a zero-byte `code.py` for
+ * a new library script, and matching that keeps a fresh script byte-identical
+ * whichever tool made it.
+ */
+export async function createScript(request: {
+  project: string;
+  path: string;
+  csrfToken?: string;
+}): Promise<SaveResult> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  if (request.csrfToken) {
+    headers[CSRF_HEADER] = request.csrfToken;
+  }
+  const response = await fetch(
+    scriptRouteUrl('/api/scripts/content', request.path, request.project),
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers,
+      // No baseSignature: absent means create. Empty source, not a template —
+      // a comment header would be this module inventing house style for
+      // somebody else's codebase.
+      body: JSON.stringify({ source: '' }),
+    }
+  );
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return (await response.json()) as SaveResult;
+}
+
+/**
+ * DELETE /api/scripts/content/:path
+ *
+ * `baseSignature` is REQUIRED by the server (428 without it) and is the reason a
+ * delete cannot discard an edit the user never saw: if the script changed since
+ * the tree was listed, this fails with a 409 instead of destroying the newer
+ * version.
+ */
+export async function deleteScript(request: {
+  project: string;
+  path: string;
+  baseSignature: string;
+  csrfToken?: string;
+}): Promise<{ ok: true; deleted?: string }> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'If-Match': request.baseSignature,
+  };
+  if (request.csrfToken) {
+    headers[CSRF_HEADER] = request.csrfToken;
+  }
+  const response = await fetch(
+    scriptRouteUrl('/api/scripts/content', request.path, request.project),
+    { method: 'DELETE', credentials: 'same-origin', headers }
+  );
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return (await response.json()) as { ok: true; deleted?: string };
+}
+
+/**
+ * Validate a proposed Project Library script name, returning an error string or
+ * null.
+ *
+ * This is a real constraint, not input hygiene: a library script's resource name
+ * becomes its Python module path, so `my-utils` creates a module that cannot be
+ * imported by any syntax Python has — `import project.my-utils` is a parse error.
+ * The Designer refuses such a name and so must this. Folders are allowed, since
+ * `util/helpers` is an ordinary package path, but each segment must independently
+ * be a valid identifier.
+ */
+export function validateScriptName(name: string): string | null {
+  if (!name || !name.trim()) {
+    return 'Enter a name';
+  }
+  if (name !== name.trim()) {
+    return 'Name cannot start or end with a space';
+  }
+  if (name.startsWith('/') || name.endsWith('/')) {
+    return 'Name cannot start or end with "/"';
+  }
+  if (name.includes('//')) {
+    return 'Name cannot contain an empty folder segment';
+  }
+  const segments = name.split('/');
+  for (const segment of segments) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment)) {
+      return `"${segment}" is not a valid Python name — letters, digits and `
+        + 'underscores only, and it cannot start with a digit';
+    }
+    if (PYTHON_KEYWORDS.has(segment)) {
+      return `"${segment}" is a Python keyword, so the module could never be imported`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Python 2.7 keywords. Jython 2.7 is what runs these scripts, so this is the
+ * py2 list — `print` and `exec` ARE keywords here and `True`/`False`/`None` are
+ * not, which is the opposite of Python 3 on three counts.
+ */
+const PYTHON_KEYWORDS = new Set([
+  'and', 'as', 'assert', 'break', 'class', 'continue', 'def', 'del', 'elif',
+  'else', 'except', 'exec', 'finally', 'for', 'from', 'global', 'if', 'import',
+  'in', 'is', 'lambda', 'not', 'or', 'pass', 'print', 'raise', 'return', 'try',
+  'while', 'with', 'yield',
+]);

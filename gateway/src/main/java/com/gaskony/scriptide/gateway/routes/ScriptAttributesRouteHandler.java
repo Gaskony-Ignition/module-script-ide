@@ -228,7 +228,20 @@ public final class ScriptAttributesRouteHandler {
         if (!ScriptResourceTypes.IGNITION_MODULE.equals(type.moduleId())) {
             return Optional.empty();
         }
-        return ScriptResourceTypes.byTypeId(type.typeId());
+        Optional<ScriptResourceTypes.ScriptType> found =
+            ScriptResourceTypes.byTypeId(type.typeId());
+        // Refuse the folder. The platform reports every event-script directory
+        // that has children as a resource with a real signature and an empty
+        // name, and before this guard an attribute write to `ignition/scheduled`
+        // returned 200 and stored a cronExpression on a directory. Only the three
+        // singletons legitimately have no name segment. Measured 01/09/2026 —
+        // see ScriptResourceRouteHandler#isNamelessNonSingleton.
+        // isResourceTypeFolder(), not getName(): on `ignition/scheduled`
+        // getName() returns "scheduled", so a name check never fires.
+        if (path.isResourceTypeFolder() && found.map(t -> !t.singleton()).orElse(true)) {
+            return Optional.empty();
+        }
+        return found;
     }
 
     /**
@@ -269,6 +282,34 @@ public final class ScriptAttributesRouteHandler {
                             + " ms, got " + v);
                 }
                 return v;
+            }
+            case "cronExpression": {
+                String v = asString(name, value);
+                // Shape only. The gateway's own scheduler is the arbiter of
+                // whether an expression is valid, and a stricter check here
+                // would reject expressions the platform accepts — which is a
+                // worse failure than passing one through and being told.
+                String trimmed = v.trim();
+                if (trimmed.isEmpty()) {
+                    throw new IllegalArgumentException(
+                        "cronExpression cannot be empty — a scheduled script with no "
+                            + "expression never runs");
+                }
+                if (trimmed.length() > ScriptResourceTypes.MAX_CRON_LENGTH) {
+                    throw new IllegalArgumentException(
+                        "cronExpression must be at most "
+                            + ScriptResourceTypes.MAX_CRON_LENGTH + " characters");
+                }
+                int fields = trimmed.split("\\s+").length;
+                if (fields < 5 || fields > 7) {
+                    throw new IllegalArgumentException(
+                        "cronExpression must have between 5 and 7 space-separated fields, got "
+                            + fields);
+                }
+                // Stored trimmed: a trailing space round-trips into the resource
+                // and then differs from the same expression typed in the Designer,
+                // which shows up as a spurious change on every diff.
+                return trimmed;
             }
             // sharedThread is a BOOLEAN here; the message-handler equivalent is a
             // STRING named threadType. They are not interchangeable.

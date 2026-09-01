@@ -88,3 +88,72 @@
   min-width: 0;
   min-height: 0;
 }
+
+/* ---- split panes (v1.1.0) ---- */
+
+.workspace-panes {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-panes > .workspace-editor {
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-console-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border-light);
+}
+
+/* Console at full width: the editor stays MOUNTED but hidden, so every open
+   tab keeps its CodeMirror view, undo history and scroll position. Unmounting
+   it to save a flex line would throw all three away. */
+.pane-mode-full > .workspace-editor {
+  display: none;
+}
+
+.pane-mode-full > .workspace-console-pane {
+  flex: 1 1 100%;
+  border-left: none;
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-tertiary);
+  flex: 0 0 auto;
+}
+
+.pane-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pane-head button[aria-pressed='true'] {
+  background: var(--accent-primary-bg);
+  color: var(--text-primary);
+}
+
+.workspace-toolbar-gap {
+  flex: 1 1 auto;
+}
+
+.app-main-console {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 0;
+}

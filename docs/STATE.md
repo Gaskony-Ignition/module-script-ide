@@ -90,8 +90,8 @@ gutter marker.
 - Attribute writes for `scheduled`, `tag-change`, `shutdown` and `update` are
   refused, because those Designer workspaces were never measured. Adding one is a
   single map entry in `ScriptResourceTypes` *after* measuring it.
-- **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`, initial commit
-  and tag `v1.0.0` pushed 01/09/2026. The folder is gitignored by the workspace repo,
+- **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`; `v1.0.0` and
+  `v1.1.0` tagged 01/09/2026. The folder is gitignored by the workspace repo,
   like every sibling module. There is **no GitHub release artefact** — the signed
   `.modl` is built locally and has not been attached to the tag.
 

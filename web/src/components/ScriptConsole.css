@@ -1,0 +1,139 @@
+/* The Script Console. Editor above, output below, both scrolling independently. */
+
+.console {
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* so the children can actually shrink inside a flex parent */
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+.console-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+  flex: 0 0 auto;
+}
+
+.console-spacer {
+  flex: 1 1 auto;
+}
+
+.console-project {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.console-hint {
+  font-size: 12px;
+}
+
+.console-denied {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+/* The editor takes the upper share and the output the lower, both able to
+   shrink to nothing — min-height:0 is what allows that inside a flex column. */
+.console-editor {
+  flex: 1 1 45%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.console-output {
+  flex: 1 1 55%;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.console-empty {
+  margin: 0;
+  font-family: var(--font-sans);
+}
+
+.console-block {
+  margin: 0 0 var(--space-2);
+  border-left: 2px solid transparent;
+  padding-left: var(--space-2);
+}
+
+.console-block pre {
+  margin: 0;
+  /* Output is preformatted but must not force the pane to scroll sideways for
+     one long line — wrap it and keep the whitespace. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+
+.console-stdout {
+  color: var(--text-primary);
+}
+
+.console-stderr {
+  color: var(--warning);
+  border-left-color: var(--warning);
+}
+
+.console-note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.console-error {
+  color: var(--error);
+  border-left-color: var(--error);
+}
+
+.console-frames {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0 0 0 var(--space-3);
+}
+
+.console-frames li {
+  margin: 0;
+}
+
+.console-frame,
+.console-frame-link {
+  font: inherit;
+  color: var(--text-secondary);
+}
+
+.console-frame-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-primary);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.console-frame-link:hover,
+.console-frame-link:focus-visible {
+  color: var(--text-primary);
+}
+
+.console-traceback {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}

@@ -126,6 +126,9 @@ public final class ScriptResourceRouteHandler {
             if (!ScriptResourceTypes.isEditable(type.moduleId(), type.typeId())) {
                 continue;
             }
+            if (isNamelessNonSingleton(path)) {
+                continue;
+            }
             scripts.add(describe(resource, path, project));
         }
 
@@ -142,6 +145,26 @@ public final class ScriptResourceRouteHandler {
         return body;
     }
 
+    /**
+     * True for a CONTAINER the platform reports alongside real resources.
+     *
+     * <p>Measured 01/09/2026: a project with {@code ignition/scheduled/Probe
+     * Scheduled} also reports a resource at bare {@code ignition/scheduled} —
+     * the folder — with a real signature, no data keys and an empty name. There
+     * is no {@code resource.json} for it on disk; it exists only in the runtime
+     * collection.</p>
+     *
+     * <p>Left in, it appears in the rail as a row labelled with its type ("Scheduled"),
+     * indistinguishable from a singleton, and it is WRITABLE: a save against it
+     * returns 200 and hangs a {@code cronExpression} off a folder. That is this
+     * module writing junk onto a live gateway, which is the one thing it is not
+     * allowed to do.</p>
+     *
+     * <p>The discriminator is the type, not the shape. An empty name is exactly
+     * how startup/shutdown/update legitimately address their singleton, so
+     * "empty name" alone would hide three real scripts. A non-singleton type with
+     * an empty name has no other meaning.</p>
+     */
     /**
      * One tree entry.
      *
@@ -361,6 +384,103 @@ public final class ScriptResourceRouteHandler {
         return out;
     }
 
+    // ==================== DELETE /api/scripts/content/:path ====================
+
+    /**
+     * Delete one script resource.
+     *
+     * <p>Administrator-gated by the route strategy, with the same CSRF check and
+     * optimistic-concurrency guard as {@link #write}. Status map: 400 bad input,
+     * 403 CSRF, 404 missing project or script, 409 signature mismatch or push
+     * conflict, 428 delete without a base signature, 502 push failure.</p>
+     *
+     * <h3>Why the OWN-project lookup, and why an inherited script is a 404</h3>
+     *
+     * <p>Like {@link #write}, this resolves through {@code getResource(project,
+     * path)} rather than the inheritance-merged {@code find}. The consequence is
+     * deliberate and is the whole reason this method cannot share {@code write}'s
+     * shape: if the script is only inherited, there is nothing in THIS project to
+     * delete, and a merged lookup would find the parent's copy and delete it —
+     * silently editing a different project than the one in the URL. So an
+     * inherited-only path 404s here, which is honest: the user is looking at a
+     * script this project does not own.</p>
+     *
+     * <h3>Why If-Match is required rather than optional</h3>
+     *
+     * <p>A delete is the one operation that cannot be undone from inside this
+     * module, and {@code newDeleteOp} takes only a {@link
+     * com.inductiveautomation.ignition.common.resourcecollection.ResourceSignature}
+     * — which carries both the resource id AND the version. Requiring the caller
+     * to have read the resource first means we can refuse to delete a script that
+     * changed underneath them, rather than discarding an edit they never saw.</p>
+     */
+    public Object delete(RequestContext req, HttpServletResponse resp) throws IOException {
+        String project = req.getParameter("project");
+        if (project == null || project.isBlank()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Missing required 'project' parameter");
+        }
+        ResourcePath resourcePath;
+        try {
+            resourcePath = HandlerSupport.decodePath(req.getParameter("path"));
+        } catch (IllegalArgumentException e) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
+        }
+        Object rejected = rejectNonScript(resourcePath, resp);
+        if (rejected != null) {
+            return rejected;
+        }
+
+        Object csrf = HandlerSupport.enforceCsrf(req, resp);
+        if (csrf != null) {
+            return csrf;
+        }
+
+        if (projectManager.find(project).isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+                "No such project: " + project);
+        }
+        if (!projectManager.isMutable(project)) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_CONFLICT,
+                "Project is not mutable: " + project);
+        }
+
+        // OWN-project lookup — see the Javadoc. Absent means "this project does
+        // not define it", which for a delete is a 404 and never a create.
+        Optional<Resource> existingOpt = projectManager.getResource(project, resourcePath);
+        if (existingOpt.isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+                "No such script in " + project + " (an inherited script cannot be "
+                    + "deleted from the project that inherits it)");
+        }
+        Resource existing = existingOpt.get();
+
+        String expected = HandlerSupport.expectedSignature(req, null);
+        String current = existing.getResourceSignature().toString();
+        if (expected == null || expected.isBlank()) {
+            return HandlerSupport.error(resp, HandlerSupport.SC_PRECONDITION_REQUIRED,
+                "Missing If-Match — read the script before deleting it");
+        }
+        if (!expected.equals(current)) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_CONFLICT,
+                "This script changed on the gateway since you opened it (concurrent edit)");
+        }
+
+        ChangeOperation op = ChangeOperation.newDeleteOp(existing.getResourceSignature());
+        Object pushError = push(op, project, resourcePath, req, resp);
+        if (pushError != null) {
+            return pushError;
+        }
+
+        logger.info("Script deleted: {} in {} by {}", resourcePath, project,
+            HandlerSupport.actorFor(req));
+
+        JsonObject out = new JsonObject();
+        out.addProperty("ok", true);
+        out.addProperty("deleted", resourcePath.toString());
+        return out;
+    }
+
     /** Run a push, mapping every failure onto a status. Returns null on success. */
     Object push(ChangeOperation op, String project, ResourcePath path,
                 RequestContext req, HttpServletResponse resp) {
@@ -408,7 +528,49 @@ public final class ScriptResourceRouteHandler {
                 "Not an editable script resource type: "
                     + type.moduleId() + "/" + type.typeId());
         }
+        // Refuse the folder as well as the wrong type. Filtering containers out
+        // of the LISTING is not enough on its own — the routes are addressable
+        // directly, and before this guard a POST to `ignition/scheduled` returned
+        // 200 and hung an attribute off a directory. See isContainerNode.
+        if (isNamelessNonSingleton(path)) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "'" + type.typeId() + "' is a folder, not a script — address a "
+                    + "script inside it. Only startup, shutdown and update are "
+                    + "addressed without a name.");
+        }
         return null;
+    }
+
+    /**
+     * A path with no name segment, on a type for which that is meaningless.
+     *
+     * <p>Measured 01/09/2026: a project holding {@code ignition/scheduled/Probe
+     * Scheduled} ALSO reports a resource at bare {@code ignition/scheduled} —
+     * the folder — with a real signature, no data keys and an empty name. There
+     * is no {@code resource.json} for it on disk; it exists only in the runtime
+     * collection, and every event-script folder with children produces one.</p>
+     *
+     * <p>Left in the listing it appears in the rail as a row labelled with its
+     * type ("Scheduled"), indistinguishable from a singleton. Left reachable by
+     * the routes it is WRITABLE: a save returned 200 and hung a
+     * {@code cronExpression} off a directory.</p>
+     *
+     * <p>The discriminator is the TYPE, not the shape. An empty name is exactly
+     * how startup/shutdown/update address their singleton, so "empty name" alone
+     * would hide three real scripts.</p>
+     */
+    private static boolean isNamelessNonSingleton(ResourcePath path) {
+        // isResourceTypeFolder() is the platform's own predicate for "this path
+        // addresses the type's folder, with no name under it". getName() is NOT
+        // that: on `ignition/scheduled` it returns "scheduled", so a getName()
+        // check silently never fires — which is exactly how the first attempt at
+        // this guard did nothing at all.
+        if (!path.isResourceTypeFolder()) {
+            return false;
+        }
+        return ScriptResourceTypes.byTypeId(path.getResourceType().typeId())
+            .map(type -> !type.singleton())
+            .orElse(true);
     }
 
     /** The .py key a resource actually carries, falling back to its type's default. */
