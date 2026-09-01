@@ -13,6 +13,7 @@
  * (message handler). Sending the wrong one is accepted by the resource layer and
  * then behaves wrongly, with nothing in any log to say so.
  */
+import type { ReactNode } from 'react';
 import type { AttributeValue } from '../api/scripts';
 import './ConfigStrip.css';
 
@@ -33,6 +34,15 @@ export interface ConfigStripProps {
    * like a bug in this IDE rather than a deliberate refusal.
    */
   unconfigurableReason?: string;
+  /**
+   * Rendered first, on the same row as the controls.
+   *
+   * The inheritance state goes here (Nigel, 02/09/2026). It used to be its own
+   * bar below this one, and two chrome rows stacked above the code cost the
+   * editor ~70px for two short sentences that never appear at the same time as
+   * each other. One row, notice on the left, settings on the right.
+   */
+  leading?: ReactNode;
 }
 
 /**
@@ -158,15 +168,20 @@ export default function ConfigStrip({
   saving = false,
   typeId,
   unconfigurableReason,
+  leading,
 }: ConfigStripProps) {
   const docs = typeId ? TYPE_DOCS[typeId] : undefined;
 
   // Body-only type: still say what the script IS and why there is nothing to
   // configure, rather than rendering an empty bar or nothing at all.
   if (editable.length === 0) {
-    if (!docs && !unconfigurableReason) return null;
+    if (!docs && !unconfigurableReason && !leading) return null;
     return (
-      <div className="config-strip config-strip-docs" aria-label="Script settings">
+      <div
+        className={`config-strip${docs || unconfigurableReason ? ' config-strip-docs' : ''}`}
+        aria-label="Script settings"
+      >
+        {leading}
         <TypeDocs docs={docs} />
         {unconfigurableReason && (
           <p className="config-note muted">{unconfigurableReason}</p>
@@ -177,6 +192,7 @@ export default function ConfigStrip({
 
   return (
     <div className="config-strip" aria-label="Script settings">
+      {leading}
       <TypeDocs docs={docs} />
       {editable.map((name) => (
         <label

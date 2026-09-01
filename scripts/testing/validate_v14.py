@@ -59,10 +59,10 @@ with sync_playwright() as p:
         inherited.click()
         page.wait_for_timeout(2500)
 
-        rec("EDIT: opening an inherited script says so, in a bar",
-            page.locator(".inherited-bar").count() == 1,
-            page.locator(".inherited-bar").inner_text().replace("\n", " ")[:90]
-            if page.locator(".inherited-bar").count() else "no bar")
+        rec("EDIT: opening an inherited script says so",
+            page.locator(".inherited-note").count() == 1,
+            page.locator(".inherited-note").inner_text().replace("\n", " ")[:90]
+            if page.locator(".inherited-note").count() else "no bar")
 
         # The assertion that matters. EditorState.readOnly is advisory, so the
         # only honest test is to type and look — exactly what was done to the
@@ -92,8 +92,8 @@ with sync_playwright() as p:
         page.screenshot(path=f"{OUT}/v14-inherited-readonly.png")
 
         # ---------- override unlocks it ----------
-        override = page.locator(".inherited-bar-action").first
-        rec("OVERRIDE: the bar carries the action that unlocks it",
+        override = page.locator(".inherited-note-action").first
+        rec("OVERRIDE: the notice carries the action that unlocks it",
             override.count() == 1,
             override.inner_text() if override.count() else "absent")
         if override.count():
@@ -106,10 +106,10 @@ with sync_playwright() as p:
                 "document.querySelector('.code-editor-host:not([style*=none]) .cm-content').innerText")
             rec("OVERRIDE: the buffer accepts typing afterwards",
                 "# overridden" in unlocked, "")
-            rec("OVERRIDE: the bar now explains the save, not the lock",
-                page.locator(".inherited-bar.is-override").count() == 1,
-                page.locator(".inherited-bar").inner_text().replace("\n", " ")[:90]
-                if page.locator(".inherited-bar").count() else "")
+            rec("OVERRIDE: the notice now explains the save, not the lock",
+                page.locator(".inherited-note.is-override").count() == 1,
+                page.locator(".inherited-note").inner_text().replace("\n", " ")[:90]
+                if page.locator(".inherited-note").count() else "")
             # NOTHING is written by overriding. The Designer stages it too — the
             # gateway filesystem had no copy of the script after Override
             # Resource, only after save. We deliberately do NOT save here.
@@ -194,6 +194,68 @@ with sync_playwright() as p:
     rec("TERM: the prompt marks the shell as privileged",
         "#" in rows.strip()[-400:], "")
     page.screenshot(path=f"{OUT}/v14-terminal-root.png")
+
+    # ---------- 4. chrome sizing and row count (1.4.2) ----------
+    # Nigel, 02/09/2026: "The drop downs all seem to be squished... the save
+    # script button is bleeding into the edges... can't you make the hint scope
+    # & Read only/override stuff all on 1 line so that it doesn't reduce the
+    # script window unecessarily?"
+    page.locator('button[aria-label="Terminal"]').click()   # close the panel again
+    page.wait_for_timeout(400)
+    page.locator(".file-tree-group", has_text="PROJECT LIBRARY").locator(
+        ".file-tree-item").first.click()
+    page.wait_for_timeout(1500)
+
+    # Every control in the chrome is the same height, and none of them touches
+    # the bar it sits in. A control sized by its padding and a select sized by
+    # its own content never line up, which is what "squished" looked like.
+    sizes = page.evaluate("""() => {
+      const pick = (sel) => { const el = document.querySelector(sel); if (!el) return null;
+        const r = el.getBoundingClientRect(); return { h: r.height, top: r.top, bottom: r.bottom }; };
+      const bar = pick('.workspace-toolbar');
+      return { bar,
+               project: pick('.workspace-project select'),
+               save: pick('.workspace-toolbar .button'),
+               theme: pick('.theme-picker select'),
+               hint: pick('.config-field-trailing select') };
+    }""")
+    controls = {k: v for k, v in sizes.items() if k != "bar" and v}
+    heights = sorted({round(v["h"]) for v in controls.values()})
+    rec("CHROME: every control in the chrome is one height",
+        len(heights) == 1, f"{ {k: round(v['h']) for k, v in controls.items()} }")
+    if sizes["bar"] and sizes["save"]:
+        clearance = min(sizes["save"]["top"] - sizes["bar"]["top"],
+                        sizes["bar"]["bottom"] - sizes["save"]["bottom"])
+        rec("CHROME: the Save button does not touch the bar's edges",
+            clearance >= 3, f"{clearance:.0f}px clearance")
+
+    # THE row-count assertion. The inheritance notice and the settings used to
+    # be two stacked rows above the code; they are one row now.
+    page.select_option(".workspace-project select", INHERIT_PROJECT)
+    page.wait_for_timeout(2500)
+    page.locator(".file-tree-row:has(.badge-inherited) .file-tree-item").first.click()
+    page.wait_for_timeout(2000)
+    rows = page.evaluate("""() => {
+      const n = document.querySelector('.inherited-note');
+      const s = document.querySelector('.config-strip');
+      if (!n || !s) return null;
+      return { sameRow: s.contains(n),
+               tops: [n.getBoundingClientRect().top, s.getBoundingClientRect().top] };
+    }""")
+    rec("LAYOUT: the inheritance notice shares the settings row",
+        bool(rows and rows["sameRow"]),
+        f"tops {rows['tops']}" if rows else "one of them is missing")
+    if rows:
+        chrome = page.evaluate("""() => {
+          const ed = document.querySelector('.workspace-editor').getBoundingClientRect();
+          const cm = document.querySelector('.code-editor-host:not([style*=none])');
+          return cm ? cm.getBoundingClientRect().top - ed.top : null;
+        }""")
+        # Two 35px rows plus the tab strip was ~105px of chrome above the code on
+        # an inherited script. One row brings it back under 80.
+        rec("LAYOUT: chrome above the code stays under 80px",
+            chrome is not None and chrome < 80, f"{chrome:.0f}px")
+    page.screenshot(path=f"{OUT}/v14-one-row.png")
 
     rec("CONSOLE: no page errors from our own code", not errs, "; ".join(errs[:3]))
     b.close()

@@ -2,10 +2,10 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.4.1 · all phases complete · deployed, gate-green and live-validated on
+**Version 1.4.2 · all phases complete · deployed, gate-green and live-validated on
 `ignition-module-testing` (8.3.8) · 01/09/2026**
 
-1.1.0–1.4.1 are post-1.0 feature work driven by Nigel's review, not new phases.
+1.1.0–1.4.2 are post-1.0 feature work driven by Nigel's review, not new phases.
 1.3.0 added a **Gateway terminal**, moved the console into a **bottom panel**, and
 brought **Gateway Events** into line with the real Designer. 1.4.0 makes
 **inherited scripts read-only until overridden**, names and explains **Script Hint
@@ -43,6 +43,29 @@ remedy is one click from where you are.
 `Script Hint Scope` is the Designer's own control, on Project Library scripts
 only, top-right of the editor header. Its option order is **None · Designer ·
 Gateway · All** — measured, and NOT the bitmask order this module used.
+
+### 1.4.2 — chrome sizing, one row, and a second route to root
+
+Three things, all from Nigel's 02/09/2026 review of the 1.4.1 screenshot.
+
+- **Every control in the chrome is one height.** There wasn't a token for it:
+  each control carried its own `padding: 1px …` and no height, and a `<select>`
+  and a `<button>` with the same padding come out different sizes. In a 30px bar
+  both looked squashed and the Save button touched the border. `--control-height:
+  24px` now, the toolbar is 34px, and the live check asserts one height across
+  project/save/theme/hint plus ≥3px clearance. **Set the height, not the
+  padding.**
+- **`.workspace-toolbar` was declared TWICE**, forty lines apart, with the later
+  block silently winning on gap and padding while the earlier one kept the
+  height. Same trap `FileTree.css` already carries a warning about.
+- **The inheritance notice moved INTO the settings row.** It was its own bar
+  below it, so an inherited script paid two chrome rows — ~105px above the code —
+  to say two sentences that are never both true at once. It is the settings
+  strip's `leading` element now: 69px, measured.
+- **A Docker-daemon route to root**, preferred over `sudo` where available.
+  See the CLAUDE.md non-negotiables; the short version is that a process cannot
+  raise its own privilege, the daemon runs as host root and will simply create
+  an exec with `User:"0"`, and that needs nothing at all in the image.
 
 **1.4.1 put it where the Designer puts it and took the words away.** 1.4.0
 renamed and explained it, and the explanation was a paragraph on the strip —
@@ -101,7 +124,7 @@ line.
 delete without `If-Match` is 428 and with a stale one is 409; `enabled` round-trips
 on Shutdown and Update; a cron expression round-trips and a malformed one is a 400.
 
-**`validate_v14.py` — 19 checks, all in a real browser.** An inherited script
+**`validate_v14.py` — 23 checks, all in a real browser.** An inherited script
 opens with a bar naming the project it came from; **typing into it changes
 nothing** (2593 characters before, 2593 after — the same assertion that was made
 against the real Designer); Save is disabled and Ctrl+S does not fork the parent;
@@ -187,7 +210,7 @@ gutter marker.
   workspace has never been measured. Its tag-path list is the missing piece, and
   guessing the key would write a value the Designer never reads.
 - **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`; `v1.0.0`
-  through `v1.4.1` tagged 01/09/2026. The folder is gitignored by the workspace repo,
+  through `v1.4.2` tagged 01–02/09/2026. The folder is gitignored by the workspace repo,
   like every sibling module. There is **no GitHub release artefact** — the signed
   `.modl` is built locally and has not been attached to the tag.
 

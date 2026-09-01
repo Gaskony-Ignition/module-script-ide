@@ -58,20 +58,41 @@ public final class TerminalPolicy {
      * work.</p>
      *
      * <p>It is a <b>try</b>, not a guarantee, and the distinction is the whole
-     * design. Elevation only happens when the host already grants the Gateway's
-     * own operating-system user passwordless {@code sudo}; the module never
-     * carries a credential and never prompts for one. On a host that does not
-     * grant it — which is every stock Ignition image — the probe fails in
-     * milliseconds and the user gets the ordinary shell, told plainly which one
-     * they got. Setting this true does not make a gateway more privileged; the
-     * IMAGE decides that.</p>
+     * design. There are two routes, and the module can take neither of them
+     * unless the host has already opened it:</p>
+     *
+     * <ol>
+     *   <li>the <b>Docker daemon</b>, when its socket is mounted and reachable
+     *       — see {@link #dockerContainerForElevation()};</li>
+     *   <li>passwordless {@code sudo}, when the host grants it to the Gateway's
+     *       own operating-system user — see {@link #sudoForElevation()}.</li>
+     * </ol>
+     *
+     * <p>The module never carries a credential and never prompts for one. On a
+     * host offering neither — which is every stock Ignition image — both probes
+     * fail in milliseconds and the user gets the ordinary shell. Setting this
+     * true does not make a gateway more privileged; the HOST decides that.</p>
      *
      * <p>Nor does it widen the module's threat model, for the same reason the
-     * terminal itself did not: on a host where {@code sudo -n} succeeds for the
-     * Gateway user, an Administrator can already reach a root shell from the
-     * Script Console with {@code Runtime.exec}. What changes is convenience.</p>
+     * terminal itself did not: on a host where either route works, an
+     * Administrator can already reach a root shell from the Script Console with
+     * {@code Runtime.exec}. What changes is convenience.</p>
      */
     public static final String PROP_PRIVILEGED = PREFIX + "terminal.privileged";
+
+    /**
+     * Whether the Docker route may be used, independently of {@link #PROP_PRIVILEGED}.
+     *
+     * <p>It gets its own switch because it is not the same risk as {@code sudo},
+     * and pretending otherwise would be dishonest. The sudo route grants root
+     * <b>inside this container</b>. The Docker socket is the daemon's full API,
+     * running as root <b>on the host</b> — anyone who can reach it can start a
+     * privileged container that mounts {@code /}, whatever this module chooses to
+     * do with it. Mounting that socket is a decision about the host, not about a
+     * terminal, and a site that wants the narrower route needs to be able to say
+     * so without giving up elevation entirely.</p>
+     */
+    public static final String PROP_DOCKER = PREFIX + "terminal.docker";
 
     public static final int DEFAULT_MAX_PER_SESSION = 3;
     public static final int MAX_MAX_PER_SESSION = 8;
@@ -157,6 +178,41 @@ public final class TerminalPolicy {
         }
         Path path = Path.of(value);
         return Files.isRegularFile(path) && Files.isExecutable(path);
+    }
+
+    /**
+     * This container's id when a root shell is obtainable through the Docker
+     * daemon, or {@code null} for "that route is not open".
+     *
+     * <p>Preferred over {@code sudo} when both are available, and not only
+     * because it is the one-click route every Docker UI uses. It needs
+     * <b>nothing in the image</b>: no sudo, no setuid binary, not even
+     * {@code script(1)}. The pty comes from the daemon rather than being
+     * borrowed from a session recorder, resize is a real API call instead of an
+     * {@code stty} typed at the shell, and the shell is the daemon's child — so
+     * closing it works whether it is root or not, which the sudo route cannot
+     * manage at all.</p>
+     *
+     * <p>Every condition is checked by <b>doing</b> it, never by inspecting
+     * configuration: we are in Docker, we know our own container id, the socket
+     * is readable AND writable, and the daemon answers about that container and
+     * says it is running. A socket that exists and refuses us is
+     * indistinguishable from one that works until you try it.</p>
+     *
+     * <p>Not cached, for the same reason the sudo probe is not: it costs
+     * milliseconds against an action a user takes by hand, and caching would
+     * make a gateway that gained or lost the mount keep reporting the state it
+     * had at startup.</p>
+     */
+    public static String dockerContainerForElevation() {
+        if (!boolProperty(PROP_PRIVILEGED, true) || !boolProperty(PROP_DOCKER, true)) {
+            return null;
+        }
+        String containerId = ContainerIdentity.selfContainerId();
+        if (containerId == null) {
+            return null;
+        }
+        return DockerExec.available(containerId) ? containerId : null;
     }
 
     /**

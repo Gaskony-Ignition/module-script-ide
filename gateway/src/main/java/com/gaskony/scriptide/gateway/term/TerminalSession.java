@@ -82,7 +82,11 @@ public class TerminalSession {
 
     private final String id;
     private final String username;
+    /** Null on a Docker-backed terminal: the shell is the daemon's child, not ours. */
     private final Process process;
+    /** Null on a process-backed terminal. Exactly one of these two is set. */
+    private final DockerExec.Session docker;
+    /** Null on a Docker-backed terminal, which writes through its own session. */
     private final OutputStream toShell;
     private final Path ttyFile;
     private final boolean pty;
@@ -90,14 +94,20 @@ public class TerminalSession {
     private volatile long lastActivity = System.currentTimeMillis();
     private volatile boolean closed;
 
-    private TerminalSession(String id, String username, Process process, Path ttyFile,
-                            boolean pty) {
+    private TerminalSession(String id, String username, Process process,
+                            DockerExec.Session docker, Path ttyFile, boolean pty) {
         this.id = id;
         this.username = username;
         this.process = process;
-        this.toShell = process.getOutputStream();
+        this.docker = docker;
+        this.toShell = process != null ? process.getOutputStream() : null;
         this.ttyFile = ttyFile;
         this.pty = pty;
+    }
+
+    /** How this shell is being run — for the audit line and the UI. */
+    public String route() {
+        return docker != null ? "docker-exec" : "process";
     }
 
     public String id() {
@@ -114,7 +124,10 @@ public class TerminalSession {
     }
 
     public boolean isAlive() {
-        return !closed && process.isAlive();
+        if (closed) {
+            return false;
+        }
+        return docker != null ? docker.isAlive() : process.isAlive();
     }
 
     /**
@@ -156,6 +169,37 @@ public class TerminalSession {
             throws IOException {
         int safeCols = clamp(cols, MIN_COLS, MAX_COLS);
         int safeRows = clamp(rows, MIN_ROWS, MAX_ROWS);
+
+        // ---- route 1: ask the Docker daemon ------------------------------
+        //
+        // Preferred where it is available, and the reason is not only that it
+        // is the one-click route every Docker UI uses. It needs NOTHING in the
+        // image — no sudo, no setuid binary, not even `script(1)` — it gets a
+        // real pty from the daemon rather than borrowing one from script(1),
+        // resize is an API call instead of an `stty` typed at the shell, and
+        // the shell is the daemon's child, so closing it works whether it is
+        // root or not. The sudo route cannot signal a root child at all.
+        String container = TerminalPolicy.dockerContainerForElevation();
+        if (container != null) {
+            try {
+                DockerExec.Session session = DockerExec.start(
+                    container, shell,
+                    workingDir != null ? workingDir.toString() : null,
+                    safeCols, safeRows);
+                TerminalSession terminal =
+                    new TerminalSession(id, username, null, session, null, true);
+                terminal.pump(session.output(), onData, onExit);
+                return terminal;
+            } catch (IOException e) {
+                // Fall through rather than fail. The socket answered `available`
+                // a moment ago, so this is a race or a daemon hiccup, and a
+                // working unprivileged shell beats an error dialog.
+                logger.warn("Docker exec failed for terminal {}; falling back to a local "
+                    + "shell: {}", id, e.toString());
+            }
+        }
+
+        // ---- route 2 and 3: a local process ------------------------------
         String scriptBinary = resolve(SCRIPT_CANDIDATES);
         boolean pty = scriptBinary != null;
 
@@ -218,7 +262,8 @@ public class TerminalSession {
         env.put("GIT_PAGER", "cat");
 
         Process process = builder.start();
-        TerminalSession session = new TerminalSession(id, username, process, ttyFile, pty);
+        TerminalSession session =
+            new TerminalSession(id, username, process, null, ttyFile, pty);
         session.pump(process.getInputStream(), onData, onExit);
         return session;
     }
@@ -256,11 +301,20 @@ public class TerminalSession {
                 logger.debug("Terminal {} read ended: {}", id, e.toString());
             } finally {
                 int code;
-                try {
-                    code = process.waitFor();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    code = -1;
+                if (docker != null) {
+                    // The shell is not this JVM's child, so there is nothing to
+                    // wait for — the daemon holds the exit status and hands it
+                    // over on request. Null means it somehow outlived its own
+                    // stream, which is not a code we can honestly report.
+                    Integer status = docker.exitCode();
+                    code = status != null ? status : 0;
+                } else {
+                    try {
+                        code = process.waitFor();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        code = -1;
+                    }
                 }
                 cleanUp();
                 onExit.accept(id, code);
@@ -271,7 +325,10 @@ public class TerminalSession {
 
         // The slave path appears a moment after the child starts. Read it on a
         // background thread rather than blocking the socket callback.
-        if (pty) {
+        // Never on the Docker route: there is no tty file to read, because the
+        // pty came from the daemon rather than from script(1), and resizing goes
+        // through the API instead of an stty against a slave path.
+        if (pty && ttyFile != null) {
             final Path probeFile = ttyFile;
             Thread probe = new Thread(() -> {
                 for (int attempt = 0; attempt < 40 && slavePath == null && isAlive(); attempt++) {
@@ -302,8 +359,12 @@ public class TerminalSession {
         }
         lastActivity = System.currentTimeMillis();
         try {
-            toShell.write(data);
-            toShell.flush();
+            if (docker != null) {
+                docker.write(data);
+            } else {
+                toShell.write(data);
+                toShell.flush();
+            }
         } catch (IOException e) {
             logger.debug("Terminal {} write failed: {}", id, e.toString());
             close();
@@ -319,12 +380,19 @@ public class TerminalSession {
      * failing loudly here would be noise.</p>
      */
     public void resize(int cols, int rows) {
-        String path = slavePath;
-        if (!pty || path == null || closed) {
+        if (closed) {
             return;
         }
         int safeCols = clamp(cols, MIN_COLS, MAX_COLS);
         int safeRows = clamp(rows, MIN_ROWS, MAX_ROWS);
+        if (docker != null) {
+            docker.resize(safeCols, safeRows);
+            return;
+        }
+        String path = slavePath;
+        if (!pty || path == null) {
+            return;
+        }
         String stty = resolve(STTY_CANDIDATES);
         if (stty == null) {
             return;
@@ -345,6 +413,15 @@ public class TerminalSession {
             return;
         }
         closed = true;
+        if (docker != null) {
+            // Closing the hijacked stream hangs up the container-side pty and
+            // the shell exits on SIGHUP. No uid problem to work around: the
+            // process belongs to the daemon, not to this JVM.
+            docker.close();
+            cleanUp();
+            logger.debug("Terminal {} closed for '{}' (docker-exec)", id, username);
+            return;
+        }
         // Descendants first: destroying `script` alone can leave the shell it
         // spawned running with nobody reading its output.
         //

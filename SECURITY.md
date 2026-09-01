@@ -62,7 +62,8 @@ keep the Script Console and refuse the shell:
 | `com.gaskony.scriptide.terminal.shell` | first of `/bin/bash`, `/usr/bin/bash`, `/bin/sh` | absolute path to the shell |
 | `com.gaskony.scriptide.terminal.maxPerSession` | `3` | shells one browser tab may hold open, capped at 8 |
 | `com.gaskony.scriptide.terminal.idleMinutes` | `120` | a silent shell is closed after this |
-| `com.gaskony.scriptide.terminal.privileged` | `true` | try `sudo -n` first — see Elevation below |
+| `com.gaskony.scriptide.terminal.privileged` | `true` | try for a root shell — see Elevation below |
+| `com.gaskony.scriptide.terminal.docker` | `true` | `false` refuses the Docker route, keeping sudo |
 
 `terminal.requireAdmin=false` needs `terminal.acknowledgeRisk=true` alongside it,
 the same two-flag shape as execution, and warns on every open.
@@ -119,8 +120,39 @@ Three specifics:
   shell" are different events to whoever reads the log later, and the answer is
   decided by the host rather than by anything the user sent.
 
-Set `terminal.privileged=false` to refuse elevation outright, on a gateway whose
-host does grant the sudoers rule. Nothing else in the module changes.
+### Two routes, and they are NOT the same risk (1.4.2)
+
+Elevation is tried in this order, and both are proved by *doing* them rather than
+by reading configuration:
+
+| Route | What the host must already allow | What it grants |
+| --- | --- | --- |
+| **Docker daemon** (preferred) | its socket mounted and writable by the Gateway's user | root **in this container** |
+| **sudo** | a passwordless sudoers rule for the Gateway's user | root **in this container** |
+| neither | — | the ordinary shell |
+
+They arrive at the same place, so it is easy to treat them as interchangeable.
+They are not, and the difference is about the *host*, not the terminal:
+
+- The **sudoers rule** is bounded by the container. It is also permanent and
+  broad within it — every process running as that user can become root,
+  including Jython from the Script Console.
+- The **Docker socket** is the daemon's full API, running as **root on the
+  host**. Anything that can reach it can start a privileged container that
+  mounts `/` and own the machine, whatever this module chooses to do with it.
+  `DockerExec` deliberately implements nothing but exec-into-one-container, but
+  that is a self-imposed limit, not a security boundary.
+
+So the socket is the **larger** grant, not the smaller one, even though it is
+the tidier mechanism. Mount it only where you would already accept host-root
+exposure. `terminal.docker=false` refuses that route from the gateway side while
+keeping sudo; `terminal.privileged=false` refuses both.
+
+What the Docker route is genuinely better at, once you have accepted it: nothing
+has to be installed in the image, the pty comes from the daemon rather than
+being borrowed from `script(1)`, resize is an API call rather than an `stty`
+typed at the shell, and closing works — the shell is the daemon's child, where a
+`sudo`-elevated root shell is a process this JVM cannot signal at all.
 
 ## Turning it off
 

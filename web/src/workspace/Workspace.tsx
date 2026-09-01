@@ -534,6 +534,41 @@ export default function Workspace({ session }: WorkspaceProps) {
     () => tree?.scripts.find((entry) => entry.path === activeDoc?.path),
     [tree, activeDoc]
   );
+  /**
+   * The inheritance state, as one line for the settings row.
+   *
+   * The Designer says this with a `(Read-Only)` suffix on the editor header and
+   * puts the remedy in a context menu you have to know is there. Said here
+   * instead: the state, where the script actually comes from, and the one
+   * button that changes it — but on a row that already exists, not a new one.
+   */
+  const inheritanceNotice = activeDoc && activeLocked ? (
+    <span className="inherited-note" role="status">
+      <span className="inherited-note-text">
+        Read-only — inherited from <strong>{activeEntry?.owner ?? 'a parent project'}</strong>
+      </span>
+      {!readOnly && (
+        <button
+          type="button"
+          className="inherited-note-action"
+          onClick={() => overrideDoc(activeDoc.uri)}
+        >
+          Override in {project}
+        </button>
+      )}
+    </span>
+  ) : activeDoc?.overridden && activeDoc.origin === 'inherited' ? (
+    // Overridden but not yet saved. The local copy does not exist on the
+    // gateway until the save, so saying "overridden" alone would claim a
+    // resource that is not there.
+    <span className="inherited-note is-override" role="status">
+      <span className="inherited-note-text">
+        Overriding <strong>{activeEntry?.owner ?? 'the parent'}</strong>&rsquo;s copy — the local
+        copy is created when you save
+      </span>
+    </span>
+  ) : undefined;
+
   const attrsDirty = activeAttrs
     ? // Both objects are built from the same server response and only ever have
       // their values replaced, so key order is stable and a JSON compare is a
@@ -893,6 +928,11 @@ export default function Workspace({ session }: WorkspaceProps) {
             />
             {activeUri && activeAttrs && (
               <ConfigStrip
+                // The inheritance state shares the settings row rather than
+                // taking one of its own. Two chrome rows above the code cost
+                // ~70px for two short sentences that are never both true
+                // (Nigel, 02/09/2026).
+                leading={inheritanceNotice}
                 editable={activeAttrs.editable}
                 attributes={activeAttrs.attributes}
                 onChange={(name, value) => changeAttribute(activeUri, name, value)}
@@ -910,38 +950,6 @@ export default function Workspace({ session }: WorkspaceProps) {
                     : undefined
                 }
               />
-            )}
-            {/* The inherited-script bar.
-                The Designer says this with a `(Read-Only)` suffix on the editor
-                header and puts the remedy in a context menu you have to know is
-                there. Said here instead: the state, where the script actually
-                comes from, and the one button that changes it. */}
-            {activeDoc && activeLocked && (
-              <div className="inherited-bar" role="status">
-                <span className="inherited-bar-text">
-                  Read-only — inherited from <strong>{activeEntry?.owner ?? 'a parent project'}</strong>.
-                </span>
-                {!readOnly && (
-                  <button
-                    type="button"
-                    className="inherited-bar-action"
-                    onClick={() => overrideDoc(activeDoc.uri)}
-                  >
-                    Override in {project}
-                  </button>
-                )}
-              </div>
-            )}
-            {/* Overridden but not yet saved. The local copy does not exist on
-                the gateway until the save, so saying "overridden" alone would
-                claim a resource that is not there. */}
-            {activeDoc?.overridden && activeDoc.origin === 'inherited' && (
-              <div className="inherited-bar is-override" role="status">
-                <span className="inherited-bar-text">
-                  Overriding <strong>{activeEntry?.owner ?? 'the parent'}</strong>&rsquo;s copy. The
-                  local copy is created when you save; the parent is not changed.
-                </span>
-              </div>
             )}
             {docs.length === 0 && (
               <p className="code-editor-empty">Choose a script on the left to start editing.</p>

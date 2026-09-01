@@ -9,13 +9,22 @@
 
 /* One 30px strip. It carries the project, the save action and the layout
    glyphs, and nothing on it should be taller than the tab bar under it. */
+/*
+ * ONE rule for this bar. There were two, forty lines apart, and the later one
+ * silently won on gap and padding while the earlier one kept the height — so
+ * the bar was 30px with 2px of vertical padding and the Save button ran into
+ * the border. Duplicated declarations in one stylesheet are not harmless: the
+ * reader cannot tell which is in force without opening the browser.
+ *
+ * 34px, so a 24px control has 5px of air above and below it.
+ */
 .workspace-toolbar {
   display: flex;
   align-items: center;
-  flex: 0 0 30px;
-  height: 30px;
+  flex: 0 0 34px;
+  height: 34px;
   gap: var(--space-3);
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-3);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-light);
 }
@@ -28,7 +37,8 @@
 }
 
 .workspace-project select {
-  padding: 1px var(--space-2);
+  height: var(--control-height);
+  padding: 0 var(--space-2);
   max-width: 220px;
   background: var(--bg-primary);
   border: 1px solid var(--border-light);
@@ -37,7 +47,13 @@
   font: inherit;
 }
 
+/* Matches the selects beside it. A button sized by its padding and a select
+   sized by its own never line up, which is what "squished" looked like. */
 .workspace-toolbar .button {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
   cursor: pointer;
 }
 
@@ -178,68 +194,54 @@
   color: var(--text-secondary);
 }
 
-.workspace-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  border-bottom: 1px solid var(--border-light);
-  background: var(--bg-secondary);
-  flex: 0 0 auto;
-}
-
 .workspace-toolbar .button[aria-pressed='true'] {
   background: var(--accent-primary-bg);
   color: var(--text-primary);
 }
 
-/* ---- the inherited-script bar (v1.4.0) ----------------------------------
+/* ---- the inheritance note (v1.4.2) --------------------------------------
  *
- * Sits between the tab strip and the editor, where the Designer puts its
- * `(Read-Only)` header suffix. A bar rather than a suffix because it has to
- * carry a button: the Designer's override lives in a context menu, which is
- * discoverable only if you already know it is there.
+ * Was its own bar under the settings strip in 1.4.0. Two chrome rows stacked
+ * above the code cost the editor ~70px to say two short sentences that are
+ * never both true at once, so it moved INTO the settings row as its leading
+ * element (Nigel, 02/09/2026).
  *
- * Warning-coloured, not error-coloured. An inherited script is a normal,
- * healthy state — most of a site project's library is inherited — so red would
- * mark the common case as broken.
+ * Warning-coloured on the left border, not error-coloured. An inherited script
+ * is a normal, healthy state — most of a site project's library is inherited —
+ * so red would mark the common case as broken.
  */
-.inherited-bar {
+.inherited-note {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  flex: 0 0 auto;
-  min-height: var(--tab-height);
-  padding: 0 var(--space-3);
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-light);
+  /* Shrinks before the settings do: the settings are controls with a minimum
+     useful width, this is a sentence that can ellipsize. */
+  min-width: 0;
+  flex: 0 1 auto;
+  padding-left: var(--space-2);
   border-left: 2px solid var(--warning);
-  font-size: var(--font-size-base);
   color: var(--text-secondary);
 }
 
-.inherited-bar strong {
+.inherited-note.is-override {
+  border-left-color: var(--accent-primary);
+}
+
+.inherited-note strong {
   color: var(--text-primary);
   font-weight: 600;
 }
 
-/* Already overridden: the state is now normal, so the accent stops shouting. */
-.inherited-bar.is-override {
-  border-left-color: var(--accent-primary);
-}
-
-.inherited-bar-text {
+.inherited-note-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Pushed to the right edge — it is the one action on the row, and putting it
-   hard against the text makes the sentence look like it continues into it. */
-.inherited-bar-action {
-  margin-left: auto;
+.inherited-note-action {
   flex: 0 0 auto;
-  padding: 2px var(--space-3);
+  height: var(--control-height);
+  padding: 0 var(--space-3);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
@@ -248,8 +250,8 @@
   cursor: pointer;
 }
 
-.inherited-bar-action:hover,
-.inherited-bar-action:focus-visible {
+.inherited-note-action:hover,
+.inherited-note-action:focus-visible {
   background: var(--accent-primary-bg);
   border-color: var(--accent-primary);
   color: var(--accent-primary);

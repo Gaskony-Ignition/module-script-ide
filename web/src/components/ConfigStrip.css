@@ -3,8 +3,12 @@
   align-items: center;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-4);
+  gap: var(--space-3);
+  /* 34px, matching the toolbar, so a 24px control has air around it. The
+     min-height rather than a fixed one: the docs variant of this strip is a
+     paragraph and has to be allowed to grow. */
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-light);
 }
@@ -23,7 +27,8 @@
 .config-field input[type='number'],
 .config-field select,
 .config-field input[type='text'] {
-  padding: var(--space-1) var(--space-2);
+  height: var(--control-height);
+  padding: 0 var(--space-2);
   background: var(--bg-primary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
@@ -37,6 +42,11 @@
 
 .config-save {
   margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
   cursor: pointer;
 }
 
@@ -152,5 +162,5 @@
 /* Tighter than the strip's other controls on purpose: the size IS the signal
    that this is a rarely-touched setting rather than part of the script. */
 .config-field-trailing select {
-  padding: 1px var(--space-2);
+  padding: 0 var(--space-2);
 }

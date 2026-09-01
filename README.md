@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.4.1 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.4.2 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 

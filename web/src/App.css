@@ -18,7 +18,10 @@
   gap: var(--space-3);
   height: var(--header-height);
   flex: 0 0 var(--header-height);
-  padding: 0 var(--space-3);
+  /* More room on the right than the left: the theme select and the username sit
+     there, and at var(--space-3) the select ran to the very edge with `admin`
+     crowded against it. */
+  padding: 0 var(--space-4) 0 var(--space-3);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-light);
 }
@@ -117,14 +120,18 @@
 }
 
 .theme-picker select {
+  height: var(--control-height);
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
-  padding: 1px var(--space-2);
+  padding: 0 var(--space-2);
   font-family: var(--font-sans);
   font-size: var(--font-size-xs);
-  max-width: 190px;
+  /* Was 190px, which truncated "Newsprint — Night Edition" and left the theme
+     unreadable in the one control whose whole job is naming it. Wide enough for
+     the longest name in the set, and it still shrinks on a narrow window. */
+  max-width: 230px;
 }
 
 /* Visually hidden but still read by a screen reader — the select has a visible

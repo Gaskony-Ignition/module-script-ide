@@ -90,9 +90,13 @@ public class TerminalService {
         // shell" and "opened a root shell" are different events to whoever reads
         // this log afterwards, and the answer is decided by the host rather than
         // by anything the user sent, so it cannot be inferred from the request.
-        boolean elevated = TerminalPolicy.sudoForElevation() != null;
-        logger.info("Gateway terminal opened by '{}' from {} (shell={}, elevated={}, id={})",
-            username, remoteHost, shell, elevated, id);
+        // The ROUTE, not just a boolean: "root via the Docker daemon" and "root
+        // via a sudoers rule" are different facts about the host, and someone
+        // reading this log after an incident needs to know which door was open.
+        String elevation = TerminalPolicy.dockerContainerForElevation() != null ? "docker-exec"
+            : TerminalPolicy.sudoForElevation() != null ? "sudo" : "none";
+        logger.info("Gateway terminal opened by '{}' from {} (shell={}, elevation={}, id={})",
+            username, remoteHost, shell, elevation, id);
 
         try {
             // The id is minted here, so the callback is bound to it here too —

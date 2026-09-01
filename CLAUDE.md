@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.4.1 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.4.2 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -87,12 +87,29 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   CLI, not a second implementation.
 
 - **The terminal tries to be root, and cannot force it** (Nigel, 01/09/2026).
-  `terminal.privileged` defaults true, but elevation only happens where
-  `sudo -n true` already succeeds for the Gateway's own OS user — a fact about
-  the IMAGE, not about this module. `modules/dockers/ignition/Dockerfile.test`
-  grants it on the test rig, deliberately and with the consequences written out;
-  do not lift that stanza into an image anyone else logs into. `-n` is
-  load-bearing: without it a prompting host hangs the shell.
+  `terminal.privileged` defaults true, but a process cannot raise its own
+  privilege — only something already more privileged can create a privileged
+  process for it. Two routes, both proved by DOING them, never by reading
+  config, and both decided by the HOST:
+  1. **The Docker daemon** (preferred, 02/09/2026) — `DockerExec` asks it for an
+     exec with `User:"0"`. Needs nothing in the image, gets a real pty, resizes
+     through the API, and closes cleanly because the shell is the daemon's child.
+  2. **`sudo -n`** where the host grants it. `-n` is load-bearing: without it a
+     prompting host hangs the shell.
+- **The two routes are NOT the same risk, and must keep separate switches.**
+  sudo grants root inside this container; the Docker socket is the daemon's full
+  API as root ON THE HOST. The socket is the LARGER grant despite being the
+  tidier mechanism. `terminal.docker=false` refuses it while keeping sudo.
+- **Never identify this container by hostname.** The rig runs with
+  `network_mode: host`, so `hostname` returns the workstation's name and a
+  caller that trusted it would exec into a container named after the laptop.
+  `/proc/self/cgroup` is `0::/` on cgroup v2 and equally useless.
+  `ContainerIdentity` reads `/proc/self/mountinfo`, which carries the full
+  64-hex id — verified against `docker inspect -f '{{.Id}}'`.
+- **`Tty: true` on a Docker exec does two jobs.** It gives the shell a real pty
+  AND makes the attached stream raw; with `Tty: false` the daemon multiplexes
+  stdout and stderr behind an 8-byte frame header, which reaches xterm.js as
+  garbage every few hundred bytes.
 
 ## Build, deploy, verify
 

@@ -24,6 +24,7 @@ class TerminalPolicyTest {
         System.clearProperty(TerminalPolicy.PROP_SHELL);
         System.clearProperty(TerminalPolicy.PROP_MAX_PER_SESSION);
         System.clearProperty(TerminalPolicy.PROP_PRIVILEGED);
+        System.clearProperty(TerminalPolicy.PROP_DOCKER);
     }
 
     @Test
@@ -110,10 +111,42 @@ class TerminalPolicyTest {
     @DisplayName("turning privileged off skips the probe entirely and never elevates")
     void privilegedOffNeverElevates() {
         System.setProperty(TerminalPolicy.PROP_PRIVILEGED, "false");
-        // Unconditional: this must hold on a developer machine that DOES have
-        // passwordless sudo, which is exactly where a broken opt-out would look
-        // like it worked.
+        // Unconditional: these must hold on a machine that DOES have passwordless
+        // sudo or a mounted Docker socket, which is exactly where a broken
+        // opt-out would look like it worked.
         assertThat(TerminalPolicy.sudoForElevation()).isNull();
+        assertThat(TerminalPolicy.dockerContainerForElevation()).isNull();
+    }
+
+    @Test
+    @DisplayName("the Docker route can be refused on its own, without losing sudo")
+    void dockerCanBeRefusedWithoutLosingSudo() {
+        // The two are NOT the same risk and must not share a switch. sudo grants
+        // root inside THIS container; the Docker socket is the daemon's full API
+        // running as root on the HOST, and anyone reaching it can start a
+        // privileged container that mounts `/`. A site must be able to keep the
+        // narrow route without giving up elevation altogether.
+        System.setProperty(TerminalPolicy.PROP_DOCKER, "false");
+        assertThat(TerminalPolicy.dockerContainerForElevation()).isNull();
+        assertThat(TerminalPolicy.sudoForElevation())
+            .isEqualTo(TerminalPolicy.sudoForElevation());
+    }
+
+    @Test
+    @DisplayName("the Docker probe answers promptly and never invents a container")
+    void dockerProbeIsHonest() {
+        System.setProperty(TerminalPolicy.PROP_PRIVILEGED, "true");
+        long start = System.nanoTime();
+        String container = TerminalPolicy.dockerContainerForElevation();
+        long millis = (System.nanoTime() - start) / 1_000_000;
+        assertThat(millis).isLessThan(10_000);
+        // As with sudo, the answer is a property of the machine this runs on, so
+        // the invariant is the SHAPE: a full 64-hex container id, or nothing.
+        // Never a hostname — the estate's own gateway runs with host networking,
+        // so its hostname is the workstation's, and that is the trap this guards.
+        if (container != null) {
+            assertThat(container).matches("[0-9a-f]{64}");
+        }
     }
 
     @Test

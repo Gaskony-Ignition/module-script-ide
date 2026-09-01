@@ -94,6 +94,17 @@
   /* One row height for the tree, the outline and every list, so the eye has a
      single rhythm to follow. VS Code uses 22px. */
   --row-height: 22px;
+  /*
+   * One height for every control in the chrome — selects, small buttons.
+   *
+   * Added 1.4.2 because there wasn't one: each control carried its own
+   * `padding: 1px var(--space-2)` and no height, so the browser sized them from
+   * their content. A <select> and a <button> with the same padding come out
+   * different heights, and in a 30px bar both looked squashed and the button
+   * touched the border (Nigel, 02/09/2026: "squished... bleeding into the
+   * edges"). Set the height, not the padding.
+   */
+  --control-height: 24px;
   --header-height: 35px;
   --tab-height: 35px;
   --panel-tab-height: 35px;
