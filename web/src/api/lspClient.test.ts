@@ -382,3 +382,37 @@ describe('language features', () => {
     await expect(help).resolves.toBeNull();
   });
 });
+
+/**
+ * Document identity for a resource that holds more than one script.
+ *
+ * Found in the browser on 01/09/2026: the doPost tab of a Web Dev endpoint
+ * displayed doGet's OUTLINE, because both scripts live at one resource path and
+ * the URI was built from the path alone. The same collision would have put
+ * diagnostics on the wrong buffer.
+ */
+describe('lspUri', () => {
+  it('keys a multi-script resource by its data key', () => {
+    const get = lspUri('P', 'com.inductiveautomation.webdev/resources/admin', 'doGet.py');
+    const post = lspUri('P', 'com.inductiveautomation.webdev/resources/admin', 'doPost.py');
+    expect(get).not.toEqual(post);
+  });
+
+  it('leaves an ordinary script URI unchanged', () => {
+    // Every other resource has exactly one script, always `code.py` or its
+    // per-type equivalent, so its URI must stay byte-identical to before —
+    // otherwise every open document changes identity on upgrade.
+    expect(lspUri('P', 'ignition/script-python/util/helpers')).toBe(
+      'ignition://P/ignition/script-python/util/helpers'
+    );
+    expect(lspUri('P', 'ignition/script-python/util/helpers', 'code.py')).toBe(
+      'ignition://P/ignition/script-python/util/helpers'
+    );
+  });
+
+  it('is stable for the same document', () => {
+    const a = lspUri('P', 'x/y/z', 'doPut.py');
+    const b = lspUri('P', 'x/y/z', 'doPut.py');
+    expect(a).toBe(b);
+  });
+});

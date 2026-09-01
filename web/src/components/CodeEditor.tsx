@@ -34,7 +34,7 @@ import { lspExtension } from './lspExtension';
 import { attachDiagnostics } from './lspDiagnostics';
 import { lspUri } from '../api/lspClient';
 import { lintGutter } from '@codemirror/lint';
-import { byteFidelity, editorTheme, pythonSurface } from './editorCore';
+import { byteFidelity, editorTheme, findAndReplace, pythonSurface } from './editorCore';
 import './CodeEditor.css';
 
 export interface CodeEditorProps {
@@ -121,7 +121,7 @@ export default function CodeEditor({ docs, activeUri, readOnly, onChange, onSave
       // every diagnostic is silently dropped and the editor looks clean however
       // broken the code is.
       const detachDiagnostics = client
-        ? attachDiagnostics(view, client, lspUri(doc.project, doc.path))
+        ? attachDiagnostics(view, client, lspUri(doc.project, doc.path, doc.scriptKey))
         : undefined;
       views.set(doc.uri, { host, view, readOnlySwitch, detachDiagnostics });
     }
@@ -248,6 +248,7 @@ function baseExtensions(
   const uri = doc.uri;
   return [
     ...pythonSurface,
+    ...findAndReplace,
 
     // ---- byte fidelity ---- see editorCore. Shared with the Script Console, so
     // a tab means the same thing in both.
@@ -278,7 +279,7 @@ function baseExtensions(
     // the line separator are not negotiable.
     // The gutter marker matters as much as the inline squiggle: an error several
     // hundred lines away is otherwise invisible until you scroll onto it.
-    ...(lsp ? [lintGutter(), lspExtension(lsp, { project: doc.project, path: doc.path })] : []),
+    ...(lsp ? [lintGutter(), lspExtension(lsp, { project: doc.project, path: doc.path, scriptKey: doc.scriptKey })] : []),
 
     EditorView.updateListener.of((update) => {
       if (!update.docChanged) return;

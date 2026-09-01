@@ -12,35 +12,41 @@
 :root {
   color-scheme: dark;
 
-  --bg-primary: #1e1e2e;
-  --bg-secondary: #181825;
-  --bg-tertiary: #313244;
-  --surface: #232334;
+  /* Default palette: VS Code Dark+ rather than a bespoke one.
+     A theme from themes.generated.css overrides every token below via
+     :root[data-theme="..."] — identical specificity to :root would lose on
+     source order, which is why those blocks are :root-qualified. */
+  --bg-primary: #1f1f1f;      /* editor */
+  --bg-secondary: #181818;    /* side bar */
+  --bg-tertiary: #2a2d2e;     /* hovered row, active line */
+  --surface: #252526;         /* panels, dialogs */
 
-  --text-primary: #cdd6f4;
-  --text-secondary: #a6adc8;
-  --text-muted: #7f849c;
+  --text-primary: #cccccc;
+  --text-secondary: #9d9d9d;
+  --text-muted: #8b8b8b;
 
-  --border-light: #45475a;
+  --border-light: #2b2b2b;
 
-  --accent-primary: #89b4fa;
-  --accent-primary-bg: rgba(137, 180, 250, 0.16);
+  --accent-primary: #0078d4;
+  --accent-primary-bg: rgba(0, 120, 212, 0.28);
 
-  --success: #a6e3a1;
-  --warning: #f9e2af;
-  --error: #f38ba8;
+  --success: #89d185;
+  --warning: #cca700;
+  --error: #f14c4c;
 
-  /* Syntax colours for the editor. Named by role, not by hue, so a future light
-     theme can redefine them without touching CodeEditor.tsx. */
-  --syntax-keyword: #cba6f7;
-  --syntax-string: #a6e3a1;
-  --syntax-number: #fab387;
-  --syntax-comment: #6c7086;
-  --syntax-function: #89b4fa;
-  --syntax-type: #f9e2af;
+  /* Syntax colours by ROLE, not hue, so a theme can redefine them without
+     touching the editor. Values are VS Code Dark+. */
+  --syntax-keyword: #569cd6;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-comment: #6a9955;
+  --syntax-function: #dcdcaa;
+  --syntax-type: #4ec9b0;
 
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+  /* VS Code's own stacks. The mono stack matters: the editor, the console and
+     the output pane must agree on a character cell or columns do not line up. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Ubuntu", "Droid Sans", sans-serif;
+  --font-mono: "Droid Sans Mono", "Monaco", "Consolas", "Ubuntu Mono", "Courier New", monospace;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -49,7 +55,15 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  --radius: 6px;
+  /* Nearly square. VS Code's chrome is flat; rounded corners read as a web app
+     dropped into a tool, which is exactly the impression to avoid here. */
+  --radius: 3px;
+
+  /* Fixed chrome dimensions, referenced by both the layout and its JS. */
+  --activity-bar-width: 48px;
+  --rail-min-width: 170px;
+  --rail-default-width: 260px;
+  --outline-default-width: 240px;
 }
 
 * {
@@ -69,4 +83,175 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
+}
+
+/* ---- VS Code chrome (v1.2.0) --------------------------------------------
+ *
+ * The controls were browser defaults with a border. This is the smallest set of
+ * rules that makes the app read as a tool rather than a form: flat surfaces,
+ * one accent, a visible focus ring, and no rounded pills.
+ */
+
+body {
+  /* VS Code sits at 13px, and the density of a file tree depends on it. */
+  font-size: 13px;
+}
+
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:hover:not(:disabled),
+.button:hover:not(:disabled) {
+  background: var(--accent-primary-bg);
+}
+
+button:disabled,
+.button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button.primary,
+.button.primary {
+  background: var(--accent-primary);
+  color: #ffffff;
+}
+
+button.primary:hover:not(:disabled) {
+  /* Lighten the accent itself rather than switching to a second colour, so the
+     hover works for all ten themes without a per-theme token. */
+  filter: brightness(1.15);
+}
+
+/* One visible focus ring everywhere. Keyboard users are the whole reason the
+   tree, the outline and the tab strip are buttons rather than divs. */
+:where(button, .button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -1px;
+}
+
+input,
+select,
+textarea {
+  padding: 3px 6px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+/* Scrollbars, VS Code style: no track, a thumb that only shows on the surface
+   it overlays. Firefox gets the two-property form. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: content-box;
+}
+
+/* ---- CodeMirror find/replace panel --------------------------------------
+ *
+ * The panel ships with light-theme defaults, so on every dark theme it rendered
+ * as a white bar with invisible controls. Restated in tokens so all ten themes
+ * work.
+ */
+.cm-panels {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.cm-panels.cm-panels-top {
+  border-bottom: 1px solid var(--border-light);
+}
+
+.cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.cm-search input[type='text'] {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+}
+
+.cm-search button {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.cm-search button:hover {
+  background: var(--accent-primary-bg);
+}
+
+.cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-secondary);
+}
+
+.cm-button {
+  background-image: none;
+}
+
+/* Match highlighting: the current match must be distinguishable from the rest,
+   or "find next" gives no feedback that anything moved. */
+.cm-searchMatch {
+  background: color-mix(in srgb, var(--warning) 34%, transparent);
+}
+
+.cm-searchMatch.cm-searchMatch-selected {
+  background: color-mix(in srgb, var(--accent-primary) 55%, transparent);
+}
+
+.cm-selectionMatch {
+  background: color-mix(in srgb, var(--text-muted) 26%, transparent);
 }

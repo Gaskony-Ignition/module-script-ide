@@ -50,6 +50,13 @@ export interface LspDocumentRef {
   project: string;
   /** Resource path, as `scripts.ts` uses it. */
   path: string;
+  /**
+   * The resource's data key, when the resource holds more than one script.
+   *
+   * Part of the LSP document identity — a Web Dev endpoint is one path with up
+   * to eight scripts, and without this they share a server-side document.
+   */
+  scriptKey?: string;
 }
 
 /**
@@ -439,7 +446,7 @@ const lspTheme = EditorView.theme({
  * @param ref which script this view holds
  */
 export function lspExtension(client: LspClient, ref: LspDocumentRef): Extension {
-  const uri = lspUri(ref.project, ref.path);
+  const uri = lspUri(ref.project, ref.path, ref.scriptKey);
   return [
     autocompletion({
       activateOnTyping: true,

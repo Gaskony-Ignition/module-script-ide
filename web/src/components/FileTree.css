@@ -185,3 +185,117 @@
   background: var(--accent-primary-bg);
   color: var(--text-primary);
 }
+
+/* ---- VS Code tree (v1.2.0) ---------------------------------------------- */
+
+.file-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.file-tree-icon {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.file-tree-item.is-selected .file-tree-icon,
+.file-tree-item:hover .file-tree-icon {
+  color: var(--text-secondary);
+}
+
+/* Rows are 22px like VS Code's, which is what makes a long tree scannable. */
+.file-tree-item,
+.file-tree-package,
+.file-tree-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 22px;
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-tree-item:hover,
+.file-tree-package:hover,
+.file-tree-header:hover {
+  background: var(--bg-tertiary);
+}
+
+.file-tree-item.is-selected {
+  background: var(--accent-primary-bg);
+}
+
+/* Section headings read as headings: uppercase, dimmer, and bold — the level
+   above a folder rather than another row in the list. */
+.file-tree-header {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* A non-interactive heading (the Web Dev list has no collapse). */
+.file-tree-static {
+  cursor: default;
+}
+
+.file-tree-static:hover {
+  background: none;
+}
+
+/* Script Console is a peer of Gateway Events and Project Library, so it gets the
+   same heading treatment rather than looking like a file that lost its folder. */
+.file-tree-leaf {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  gap: var(--space-2);
+}
+
+.file-tree-leaf.is-selected {
+  color: var(--text-primary);
+}
+
+.file-tree-chevron {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.file-tree-count {
+  margin-left: auto;
+  padding-left: var(--space-2);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* A method an endpoint does not implement yet: visible, but clearly not there. */
+.file-tree-item.is-absent {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.file-tree-method {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.file-tree-empty {
+  padding: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: 12px;
+}

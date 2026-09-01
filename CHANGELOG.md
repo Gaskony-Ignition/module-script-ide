@@ -2,6 +2,54 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] — 2026-09-01
+
+A VS Code-shaped shell, and Web Dev as a first-class view.
+
+### Fixed
+- **Five of the ten themes were illegible**, measured in the browser rather than
+  reported. The cause was a design error: the generator mapped Perspective's
+  SEMANTIC surfaces onto the IDE's lightness ramp, and a Perspective "sidebar" is
+  branded chrome — dark navy in `finance-ledger` even though that theme is light,
+  and `rgba(255,255,255,0.06)` in the glass themes, which is not a colour at all.
+  Body text landed on it at 1.7–2.1:1. The generator's own check passed
+  throughout because it measured against `--bg-primary` while the app paints most
+  of its text on `--bg-secondary`.
+  The neutrals are now DERIVED from each pack's page colour, VS Code style; the
+  pack supplies the accent and syntax hues, each chosen by measured contrast
+  against every surface it can land on. **All ten now pass at 4.5:1.**
+- **A Web Dev endpoint's tabs shared one language-server document.** Eight
+  scripts live at one resource path, and both the tab key and the LSP URI were
+  built from the path alone, so opening `doPost` showed `doGet`'s outline and
+  would have put diagnostics on the wrong buffer. Both are keyed by data key now.
+
+### Added
+- **Activity bar** (Scripting / Web Dev / Search / Console). Clicking the active
+  view collapses the side bar to the icon strip and clicking it again restores
+  it, as VS Code does.
+- **Resizable, hideable panels.** Drag or arrow-key the side bar and the outline;
+  widths are remembered per viewer. The outline has its own close button.
+- **Web Dev** as a full view: endpoints, their eight HTTP methods, add a method
+  to an existing endpoint, create and delete endpoints, and a settings dialog
+  carrying every field the Designer shows — enabled, require-auth, require-https,
+  required roles, user source, retry count. Measured off a real gateway: a Web
+  Dev resource has NO editable `resource.json` attributes, so its settings live
+  in a `config.json` data file and get their own route. Writes are per method and
+  preserve unknown keys, so a field a newer Ignition adds is not deleted by an
+  older build of this module.
+- **Find and replace** (Ctrl+F / Ctrl+H) in both the editor and the console,
+  with the panel restyled in tokens — it ships light-themed and was a white bar
+  with invisible controls on every dark theme.
+- **Gateway event scripts can be created and deleted like the Designer's.**
+  Every event folder is listed even when empty, because an empty folder is the
+  only place to create the first script of a kind. Singletons offer no "new".
+- **Icons throughout the tree**, per resource type, and Script Console reads as
+  the top-level heading it is rather than a stray file.
+- **The console output is its own titled panel** with a header and a rule, so it
+  no longer reads as more editor.
+- **VS Code look**: 13px, flat chrome, 3px radii, one accent, a real focus ring,
+  22px tree rows and overlay scrollbars.
+
 ## [1.1.0] — 2026-09-01
 
 The IDE most of 1.0's backend was already built for. 1.0 shipped an execution

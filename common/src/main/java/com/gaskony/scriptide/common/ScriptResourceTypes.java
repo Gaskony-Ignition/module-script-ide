@@ -2,6 +2,7 @@ package com.gaskony.scriptide.common;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +48,35 @@ public final class ScriptResourceTypes {
 
     public static final String TYPE_SCRIPT_PYTHON = "script-python";
     public static final String TYPE_TIMER = "timer";
+
+    /**
+     * Web Dev endpoints, which live under a DIFFERENT module id.
+     *
+     * <p>Measured 01/09/2026 on a real gateway: the resource path is
+     * {@code com.inductiveautomation.webdev/resources/<name>} and the directory
+     * holds a {@code config.json} plus one {@code do<Method>.py} per HTTP verb
+     * that exists. There are no editable {@code resource.json} attributes at all
+     * — everything a Designer shows (enabled, require-auth, require-https,
+     * required roles, user source, retry count) lives INSIDE {@code config.json},
+     * which is a data file, not an attribute. That is why Web Dev has its own
+     * config route rather than going through the attributes one.</p>
+     */
+    public static final String WEBDEV_MODULE = "com.inductiveautomation.webdev";
+    public static final String TYPE_WEBDEV = "resources";
+    /** The data file holding a Web Dev endpoint's per-method settings. */
+    public static final String WEBDEV_CONFIG_KEY = "config.json";
+
+    /**
+     * The eight HTTP methods a Web Dev endpoint can implement, in the order the
+     * Designer lists them. Each maps to a {@code do<Method>.py} data key.
+     */
+    public static final List<String> WEBDEV_METHODS = List.of(
+        "doGet", "doPost", "doPut", "doDelete", "doHead", "doOptions", "doTrace", "doPatch");
+
+    /** Per-method settings the config file carries, measured off a real resource. */
+    public static final Set<String> WEBDEV_METHOD_SETTINGS = Set.of(
+        "enabled", "max-retry-attempts", "require-auth", "require-https",
+        "required-roles", "user-source");
     public static final String TYPE_MESSAGE = "message";
     public static final String TYPE_SCHEDULED = "scheduled";
     public static final String TYPE_TAG_CHANGE = "tag-change";
@@ -149,6 +179,11 @@ public final class ScriptResourceTypes {
         // workspace with designer-drive, then fill this in.
         m.put(TYPE_TAG_CHANGE, new ScriptType(
             TYPE_TAG_CHANGE, "Tag Change", "onTagChange.py", false, new LinkedHashSet<>()));
+        // Web Dev. Its allowlist is EMPTY and that is not a "not yet measured"
+        // case like tag-change: this resource genuinely has no editable
+        // resource.json attributes. Its settings are in config.json.
+        m.put(TYPE_WEBDEV, new ScriptType(
+            TYPE_WEBDEV, "Web Dev", "doGet.py", false, new LinkedHashSet<>()));
         TYPES = Collections.unmodifiableMap(m);
     }
 
@@ -164,7 +199,26 @@ public final class ScriptResourceTypes {
 
     /** True when {@code moduleId/typeId} is a script resource this IDE edits. */
     public static boolean isEditable(String moduleId, String typeId) {
-        return IGNITION_MODULE.equals(moduleId) && TYPES.containsKey(typeId);
+        if (WEBDEV_MODULE.equals(moduleId)) {
+            // Scoped deliberately: the webdev module could gain other resource
+            // types, and this IDE only understands `resources`.
+            return TYPE_WEBDEV.equals(typeId);
+        }
+        // The webdev type id is the generic word "resources", so it must NOT be
+        // reachable under the ignition module id — that would let a caller
+        // address `ignition/resources` and get a Web Dev handler.
+        return IGNITION_MODULE.equals(moduleId) && !TYPE_WEBDEV.equals(typeId)
+            && TYPES.containsKey(typeId);
+    }
+
+    /** True for a Web Dev endpoint resource. */
+    public static boolean isWebDev(String moduleId, String typeId) {
+        return WEBDEV_MODULE.equals(moduleId) && TYPE_WEBDEV.equals(typeId);
+    }
+
+    /** The data key holding one HTTP method's script, e.g. {@code doGet.py}. */
+    public static String webDevKeyFor(String method) {
+        return method + ".py";
     }
 
     /**

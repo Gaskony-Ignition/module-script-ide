@@ -14,12 +14,15 @@
  * `tag-change` attribute writes refused.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { validateScriptName } from '../api/scripts';
+import { validateScriptName, type ScriptTypeId } from '../api/scripts';
 import './NewScriptDialog.css';
 
 export interface NewScriptDialogProps {
-  /** Existing library script names, so a collision is caught before the round trip. */
+  /** Existing names of this type, so a collision is caught before the round trip. */
   existingNames: string[];
+  /** What is being created. Drives the label, the hint and the naming rules. */
+  typeId: ScriptTypeId;
+  typeLabel: string;
   busy?: boolean;
   error?: string | null;
   onCreate: (name: string) => void;
@@ -28,11 +31,14 @@ export interface NewScriptDialogProps {
 
 export default function NewScriptDialog({
   existingNames,
+  typeId,
+  typeLabel,
   busy = false,
   error = null,
   onCreate,
   onCancel,
 }: NewScriptDialogProps) {
+  const isLibrary = typeId === 'script-python';
   const [name, setName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -45,7 +51,7 @@ export default function NewScriptDialog({
     if (!name) {
       return null; // Don't scold an empty field the user has not filled in yet.
     }
-    const invalid = validateScriptName(name);
+    const invalid = validateScriptName(name, typeId);
     if (invalid) {
       return invalid;
     }
@@ -53,7 +59,7 @@ export default function NewScriptDialog({
       return `${name} already exists in this project`;
     }
     return null;
-  }, [name, taken]);
+  }, [name, taken, typeId]);
 
   const canCreate = name.trim().length > 0 && problem === null && !busy;
 
@@ -80,7 +86,7 @@ export default function NewScriptDialog({
           }
         }}
       >
-        <h2 id="newscript-title">New library script</h2>
+        <h2 id="newscript-title">New {typeLabel.toLowerCase()} script</h2>
         <label className="newscript-label" htmlFor="newscript-name">
           Name
         </label>
@@ -91,16 +97,24 @@ export default function NewScriptDialog({
           value={name}
           spellCheck={false}
           autoComplete="off"
-          placeholder="util/helpers"
+          placeholder={isLibrary ? 'util/helpers' : 'MyHandler'}
           aria-describedby="newscript-hint"
           aria-invalid={problem ? 'true' : undefined}
           onChange={(event) => setName(event.target.value)}
           disabled={busy}
         />
         <p id="newscript-hint" className="newscript-hint muted">
-          Use <code>/</code> for packages — <code>util/helpers</code> becomes
-          {' '}
-          <code>project.util.helpers</code>. The script starts empty.
+          {isLibrary ? (
+            <>
+              Use <code>/</code> for packages — <code>util/helpers</code> becomes{' '}
+              <code>project.util.helpers</code>. The script starts empty.
+            </>
+          ) : (
+            <>
+              The name identifies this handler on the gateway. Spaces are allowed;
+              the script starts with its handler stub.
+            </>
+          )}
         </p>
 
         {problem && (

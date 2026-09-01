@@ -29,6 +29,11 @@
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
     <Match>
+        <Class name="com.gaskony.scriptide.gateway.routes.WebDevConfigRouteHandler" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+
+    <Match>
         <Class name="com.gaskony.scriptide.gateway.routes.ScriptAttributesRouteHandler" />
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>

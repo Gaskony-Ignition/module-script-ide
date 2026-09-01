@@ -24,69 +24,16 @@ import json
 import pathlib
 import sys
 
-# IDE token  <-  pack token. A missing pack token falls back to the next entry.
+# ---- colour primitives ----------------------------------------------------
 #
-# The syntax colours have no pack equivalent — Perspective has no code editor —
-# so they are derived from the pack's own accents rather than invented per
-# theme, which keeps a light pack readable and a dark pack consistent.
-MAPPING: dict[str, tuple[str, ...]] = {
-    "--bg-primary": ("surface.page",),
-    "--bg-secondary": ("surface.sidebar", "surface.card"),
-    "--bg-tertiary": ("surface.status-neutral", "surface.chip"),
-    "--surface": ("surface.card",),
-    "--border-light": ("border.card", "border.sidebar"),
-    "--text-primary": ("text.body",),
-    "--text-secondary": ("text.table-header", "text.muted"),
-    "--text-muted": ("text.muted",),
-    "--accent-primary": ("accent.primary", "text.status-info", "accent.alarm-low"),
-    # NOT accent.danger / accent.alarm-*: in a Perspective pack those are the
-    # colours of a badge's SURFACE or of the text sitting ON that badge, so in
-    # several packs accent.danger is literally #ffffff. The `text.status-*`
-    # family is the one meant to be read against a page, which is what this IDE
-    # does with it. Measured 01/09/2026 — finance-ledger and industrial-day-cyan
-    # both produced a white error colour on a white page before this changed.
-    "--error": ("text.status-alarm", "accent.alarm-high", "border.danger", "accent.delta-down", "accent.alarm-urgent", "accent.danger"),
-    "--warning": ("text.status-warn", "text.readout-value-warn", "accent.alarm-med", "text.readout-unit-warn"),
-    "--success": ("text.status-ok", "accent.delta-up", "surface.pill-dot"),
-    "--font-sans": ("font.body",),
-    # Syntax
-    "--syntax-keyword": ("accent.primary", "text.status-info", "accent.alarm-low"),
-    "--syntax-string": ("text.status-ok", "accent.delta-up", "surface.pill-dot"),
-    "--syntax-comment": ("text.muted",),
-    "--syntax-number": ("text.status-warn", "text.readout-value-warn", "accent.alarm-med", "text.readout-unit-warn"),
-    "--syntax-type": ("accent.progress", "text.status-info", "accent.primary"),
-    "--syntax-function": ("text.status-info", "accent.alarm-low", "accent.primary"),
-}
+# sRGB in 0-1 throughout, and WCAG relative luminance for contrast. Everything
+# else in this file is built on these four.
 
 
-def resolve(tokens: dict, names: tuple[str, ...]) -> str | None:
-    for name in names:
-        value = tokens.get(name)
-        # "transparent" is a real Perspective value and a useless page
-        # background — a transparent body lets the host's colour through, which
-        # is exactly the auto-dark trap the estate rule warns about.
-        if value and value != "transparent":
-            return value
-    return None
-
-
-# ---- contrast ------------------------------------------------------------
-#
-# The estate has been here before: ignition-themes v1.5.1 shipped five themes
-# whose --error was illegible against their own background, and the fix was to
-# gate the token on measured contrast rather than to trust the palette. A pack's
-# accent is chosen to sit on a Perspective CARD; this IDE paints it on the PAGE,
-# which is a different colour, so a token that is fine there can fail here.
-#
-# WCAG relative luminance, and a 3:1 floor — the non-text threshold, which is
-# the right one for a syntax colour or a border, and the same one the themes
-# repo settled on.
-
-MIN_CONTRAST = 3.0
-
-
-def _parse(colour: str) -> tuple[float, float, float] | None:
-    """Return sRGB 0-1, or None for anything not a plain hex or rgb()."""
+def _parse(colour: str):
+    """sRGB 0-1 from a hex or rgb()/rgba() string, or None if it is neither."""
+    if not colour:
+        return None
     c = colour.strip()
     if c.startswith("#"):
         c = c[1:]
@@ -95,152 +42,238 @@ def _parse(colour: str) -> tuple[float, float, float] | None:
         if len(c) != 6:
             return None
         try:
-            return tuple(int(c[i:i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore
+            return tuple(int(c[i:i + 2], 16) / 255 for i in (0, 2, 4))
         except ValueError:
             return None
     if c.startswith("rgba(") or c.startswith("rgb("):
         body = c[c.index("(") + 1:c.rindex(")")]
-        parts = [p.strip() for p in body.split(",")]
+        parts = [x.strip() for x in body.replace("/", ",").split(",")]
         if len(parts) < 3:
             return None
         try:
-            return tuple(float(p) / 255 for p in parts[:3])  # type: ignore
+            return tuple(float(x) / 255 for x in parts[:3])
         except ValueError:
             return None
     return None
 
 
-def _luminance(rgb: tuple[float, float, float]) -> float:
+def _luminance(rgb) -> float:
     def channel(v: float) -> float:
         return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
     r, g, b = (channel(v) for v in rgb)
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
-def contrast(a: str, b: str) -> float | None:
-    """Contrast ratio, or None when either colour cannot be measured."""
-    ca, cb = _parse(a), _parse(b)
-    if ca is None or cb is None:
-        return None
-    la, lb = _luminance(ca), _luminance(cb)
-    hi, lo = max(la, lb), min(la, lb)
-    return (hi + 0.05) / (lo + 0.05)
-
-
-def _mix(rgb: tuple[float, float, float], towards: tuple[float, float, float], amount: float):
+def _mix(rgb, towards, amount: float):
     return tuple(c + (t - c) * amount for c, t in zip(rgb, towards))
 
 
-def _hex(rgb: tuple[float, float, float]) -> str:
+def _hex(rgb) -> str:
     return "#" + "".join(f"{max(0, min(255, round(c * 255))):02x}" for c in rgb)
-
-
-def legible(colour: str, background: str, dark: bool) -> tuple[str, bool]:
-    """
-    Nudge `colour` towards white (dark theme) or black (light) until it clears
-    MIN_CONTRAST against `background`.
-
-    Returns the colour and whether it had to be changed, so the build can REPORT
-    every adjustment. A silent correction would hide a bad pack; the point is to
-    ship something legible AND to know the pack needs attention.
-    """
-    ratio = contrast(colour, background)
-    if ratio is None or ratio >= MIN_CONTRAST:
-        return colour, False
-    rgb = _parse(colour)
-    bg = _parse(background)
-    if rgb is None or bg is None:
-        return colour, False
-    target = (1.0, 1.0, 1.0) if dark else (0.0, 0.0, 0.0)
-    for step in range(1, 21):
-        candidate = _mix(rgb, target, step * 0.05)
-        if (_luminance(candidate) + 0.05) / (_luminance(bg) + 0.05) >= MIN_CONTRAST or \
-           (_luminance(bg) + 0.05) / (_luminance(candidate) + 0.05) >= MIN_CONTRAST:
-            return _hex(candidate), True
-    return _hex(_mix(rgb, target, 1.0)), True
 
 
 def accent_bg(hex_colour: str, dark: bool) -> str:
     """A translucent wash of the accent, for selections and active rows."""
-    return f"color-mix(in srgb, {hex_colour} {'28' if dark else '18'}%, transparent)"
+    return f"color-mix(in srgb, {hex_colour} {'30' if dark else '20'}%, transparent)"
 
 
-# Tokens painted ON the page background, which must therefore be legible
-# against it. Backgrounds, borders and the text colours themselves are excluded:
-# a border is meant to be low contrast, and forcing --text-muted to 3:1 would
-# make "muted" indistinguishable from "primary".
-FOREGROUND_TOKENS = frozenset({
-    "--accent-primary",
-    "--error",
-    "--warning",
-    "--success",
-    "--syntax-keyword",
-    "--syntax-string",
-    "--syntax-number",
-    "--syntax-type",
-    "--syntax-function",
-})
+# ---------------------------------------------------------------------------
+# Why the IDE's neutrals are DERIVED, not mapped.
+#
+# The first version of this file mapped Perspective's surfaces straight onto the
+# IDE's scale: surface.page -> --bg-primary, surface.sidebar -> --bg-secondary,
+# surface.card -> --surface. It rendered five of the ten themes ILLEGIBLE, and
+# the generator's own contrast check passed throughout, because it measured
+# tokens against --bg-primary while the app paints most of its text on
+# --bg-secondary.
+#
+# The mistake was treating a SEMANTIC palette as a lightness ramp. Perspective's
+# "sidebar" is branded chrome, not "slightly off the page": in finance-ledger it
+# is dark navy in a light theme, so dark body text landed on it at 2.07:1. The
+# glass themes are worse — their surfaces are `rgba(255,255,255,0.06)`, which is
+# not a colour at all and cannot be reasoned about without compositing.
+#
+# So: the neutral ramp is COMPUTED from the page colour, the way VS Code's own
+# themes are built (editor, then sidebar a step off it, then borders). The pack
+# supplies what a palette is actually for — the accent and the syntax hues — and
+# every one of those is checked against every surface it can land on.
+# ---------------------------------------------------------------------------
+
+# Accent roles, and the pack tokens that might carry them, best first. The
+# resolver picks the first that is LEGIBLE, not the first that exists — see
+# pick_legible.
+ACCENT_SOURCES: dict[str, tuple[str, ...]] = {
+    "--accent-primary": ("accent.primary", "text.status-info", "accent.alarm-low"),
+    "--error": ("text.status-alarm", "accent.alarm-high", "border.danger",
+                "accent.delta-down", "accent.danger"),
+    "--warning": ("text.status-warn", "text.readout-value-warn", "accent.alarm-med"),
+    "--success": ("text.status-ok", "accent.delta-up", "surface.pill-dot"),
+    "--syntax-keyword": ("accent.primary", "text.status-info", "accent.alarm-low"),
+    "--syntax-string": ("text.status-ok", "accent.delta-up", "surface.pill-dot"),
+    "--syntax-number": ("text.status-warn", "text.readout-value-warn", "accent.alarm-med"),
+    "--syntax-type": ("accent.progress", "text.status-info", "accent.primary"),
+    "--syntax-function": ("text.status-info", "accent.alarm-low", "accent.primary"),
+    "--syntax-comment": ("text.muted",),
+}
+
+# How far each neutral sits from the page, as a fraction toward white (dark
+# themes) or black (light themes). Modelled on VS Code's own steps: the side bar
+# is a small lift off the editor, the panel/active row a little more, and the
+# border is the first step that must be visible on its own.
+DARK_RAMP = {"secondary": 0.05, "tertiary": 0.11, "surface": 0.07, "border": 0.18}
+LIGHT_RAMP = {"secondary": 0.045, "tertiary": 0.10, "surface": 0.02, "border": 0.20}
+
+# Text is placed by TARGET CONTRAST rather than by hue, so "muted" means the same
+# thing in every theme instead of meaning whatever the pack happened to hold.
+TEXT_TARGETS = {"primary": 13.0, "secondary": 7.0, "muted": 4.6}
+
+# Every surface a foreground can land on. A colour must clear the bar on ALL of
+# them, because the same token paints the tree (secondary), the editor (primary)
+# and a hovered row (tertiary).
+SURFACE_KEYS = ("--bg-primary", "--bg-secondary", "--bg-tertiary")
+
+MIN_ACCENT_CONTRAST = 4.5
+MIN_TEXT_CONTRAST = 4.5
+
+
+def opaque_page(tokens: dict, dark: bool) -> tuple[float, float, float]:
+    """
+    The page colour, guaranteed opaque.
+
+    A translucent or missing value is not usable as a ramp base — the glass
+    themes' surfaces are `rgba(255,255,255,0.06)` — so it falls back to a neutral
+    of the right polarity rather than propagating an unusable value.
+    """
+    raw = tokens.get("surface.page")
+    parsed = _parse(raw) if raw else None
+    if parsed is None or (raw and raw.strip().startswith("rgba")):
+        parsed = _parse(raw) if raw and not raw.strip().startswith("rgba") else None
+    if parsed is None:
+        return (0.12, 0.12, 0.14) if dark else (0.98, 0.98, 0.98)
+    return parsed
+
+
+def step(base: tuple[float, float, float], amount: float, dark: bool):
+    """Move a colour off the page: lighter in a dark theme, darker in a light one."""
+    target = (1.0, 1.0, 1.0) if dark else (0.0, 0.0, 0.0)
+    return _mix(base, target, amount)
+
+
+def text_at(page: tuple[float, float, float], target: float, dark: bool) -> str:
+    """
+    The text colour that hits `target` contrast against the page.
+
+    Computed rather than taken from the pack: it is the only way "muted" means
+    the same thing in all ten themes, and the packs disagree wildly about which
+    token is meant to be read against a page at all.
+    """
+    ink = (1.0, 1.0, 1.0) if dark else (0.0, 0.0, 0.0)
+    best, best_gap = ink, 1e9
+    for i in range(0, 101):
+        candidate = _mix(page, ink, i / 100)
+        ratio = _ratio(candidate, page)
+        gap = abs(ratio - target)
+        if gap < best_gap:
+            best, best_gap = candidate, gap
+    return _hex(best)
+
+
+def _ratio(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    la, lb = _luminance(a), _luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def pick_legible(tokens: dict, names: tuple[str, ...], surfaces: list, dark: bool,
+                 minimum: float) -> tuple[str, bool]:
+    """
+    First candidate legible on EVERY surface; else the best one, nudged.
+
+    Returns (colour, wasAdjusted).
+    """
+    fallback = None
+    for name in names:
+        raw = tokens.get(name)
+        if not raw or raw == "transparent":
+            continue
+        rgb = _parse(raw)
+        if rgb is None:
+            continue
+        if fallback is None:
+            fallback = rgb
+        if all(_ratio(rgb, s) >= minimum for s in surfaces):
+            return _hex(rgb), False
+    if fallback is None:
+        return _hex((0.5, 0.5, 0.5)), True
+    ink = (1.0, 1.0, 1.0) if dark else (0.0, 0.0, 0.0)
+    for i in range(1, 101):
+        candidate = _mix(fallback, ink, i / 100)
+        if all(_ratio(candidate, s) >= minimum for s in surfaces):
+            return _hex(candidate), True
+    return _hex(ink), True
 
 
 def block(pack: dict, report: list[str]) -> str:
     tokens = pack["tokens"]
     dark = pack["dark"]
+    ramp = DARK_RAMP if dark else LIGHT_RAMP
+
+    page = opaque_page(tokens, dark)
+    secondary = step(page, ramp["secondary"], dark)
+    tertiary = step(page, ramp["tertiary"], dark)
+    surface = step(page, ramp["surface"], dark)
+    border = step(page, ramp["border"], dark)
+    surfaces = [page, secondary, tertiary]
+
+    out = {
+        "--bg-primary": _hex(page),
+        "--bg-secondary": _hex(secondary),
+        "--bg-tertiary": _hex(tertiary),
+        "--surface": _hex(surface),
+        "--border-light": _hex(border),
+        "--text-primary": text_at(page, TEXT_TARGETS["primary"], dark),
+        "--text-secondary": text_at(page, TEXT_TARGETS["secondary"], dark),
+        "--text-muted": text_at(page, TEXT_TARGETS["muted"], dark),
+    }
+
+    # --text-muted is measured against the PAGE, but it also paints on the tree
+    # (secondary) and hovered rows (tertiary), which are closer to it. Push it
+    # until it clears the bar on the worst of them.
+    muted = _parse(out["--text-muted"])
+    ink = (1.0, 1.0, 1.0) if dark else (0.0, 0.0, 0.0)
+    for i in range(0, 101):
+        candidate = _mix(muted, ink, i / 100)
+        if all(_ratio(candidate, s) >= MIN_TEXT_CONTRAST for s in surfaces):
+            out["--text-muted"] = _hex(candidate)
+            break
+
+    font = tokens.get("font.body")
+    if font:
+        out["--font-sans"] = font
+
+    for role, names in ACCENT_SOURCES.items():
+        minimum = 3.0 if role == "--syntax-comment" else MIN_ACCENT_CONTRAST
+        colour, adjusted = pick_legible(tokens, names, surfaces, dark, minimum)
+        out[role] = colour
+        if adjusted:
+            report.append(f'  {pack["id"]}: {role} nudged to {colour} '
+                          f'(no pack token cleared {minimum}:1 on all surfaces)')
+
+    accent = out["--accent-primary"]
+    out["--accent-primary-bg"] = accent_bg(accent, dark)
+
     lines = [f'/* {pack["label"]} — {"dark" if dark else "light"} */']
     # `:root[data-theme=...]`, not a bare attribute selector. `:root` and
-    # `[data-theme]` have IDENTICAL specificity, so a bare attribute selector
-    # only wins on source order — and index.css's `:root` block is bundled after
-    # this file, so the theme was silently overridden. Measured in the browser
-    # 01/09/2026: data-theme changed, every colour did not.
+    # `[data-theme]` have IDENTICAL specificity, so a bare selector only wins on
+    # source order — and index.css is bundled after this file, so the theme was
+    # silently overridden. Measured in the browser 01/09/2026: data-theme
+    # changed and not one colour did.
     lines.append(f':root[data-theme="{pack["id"]}"] {{')
     # color-scheme is not decoration. Without it Chrome's "auto dark mode for
     # web contents" repaints the page's own colours, and no headless check can
     # reproduce it. This has cost the estate four releases.
     lines.append(f'  color-scheme: {"dark" if dark else "light"};')
-
-    page = resolve(tokens, MAPPING["--bg-primary"]) or ("#000000" if dark else "#ffffff")
-    accent = None
-    for ide_token, pack_names in MAPPING.items():
-        value = resolve(tokens, pack_names)
-        if value is None:
-            continue
-        if ide_token in FOREGROUND_TOKENS:
-            # Take the first candidate that is actually LEGIBLE on the page,
-            # not merely the first that exists.
-            #
-            # The packs are not consistent about which token family is meant to
-            # be read against a page: in finance-ledger the readable red is
-            # `text.status-alarm` and `accent.danger` is white, while in
-            # leather-night-tan `text.status-alarm` is itself an on-badge colour
-            # and near-black on a near-black page. Preferring by NAME therefore
-            # cannot work for all ten, and preferring by measured contrast does.
-            chosen = None
-            for candidate_name in pack_names:
-                candidate = tokens.get(candidate_name)
-                if not candidate or candidate == "transparent":
-                    continue
-                ratio = contrast(candidate, page)
-                if ratio is not None and ratio >= MIN_CONTRAST:
-                    chosen = candidate
-                    break
-            if chosen is not None:
-                value = chosen
-            else:
-                # Nothing in the pack works here. Nudge the first candidate and
-                # SAY SO — the pack has no page-legible colour for this role.
-                fixed, changed = legible(value, page, dark)
-                if changed:
-                    ratio = contrast(value, page)
-                    report.append(
-                        f'  {pack["id"]}: {ide_token} {value} -> {fixed} '
-                        f'(no pack token cleared {MIN_CONTRAST}:1 on {page}; '
-                        f'best was {ratio:.2f}:1)'
-                    )
-                    value = fixed
-        if ide_token == "--accent-primary":
-            accent = value
-        lines.append(f"  {ide_token}: {value};")
-    if accent:
-        lines.append(f"  --accent-primary-bg: {accent_bg(accent, dark)};")
+    for key, value in out.items():
+        lines.append(f"  {key}: {value};")
     lines.append("}")
     return "\n".join(lines)
 
@@ -257,13 +290,17 @@ def generate(packs_dir: pathlib.Path) -> str:
         " * Do not edit by hand — edit the pack and regenerate, or the IDE and the\n"
         " * Perspective sessions beside it drift apart.\n"
         " *\n"
+        " * The NEUTRALS are derived from each pack's page colour, not mapped from\n"
+        " * its surfaces: Perspective's surfaces are semantic (a 'sidebar' is branded\n"
+        " * chrome, dark even in a light theme) and mapping them onto a lightness\n"
+        " * ramp made five of these ten themes illegible. The pack supplies the\n"
+        " * accent and syntax hues, each checked against every surface it lands on.\n"
+        " *\n"
         f" * {len(packs)} themes.\n"
         " */\n"
     )
     css = header + "\n\n".join(block(p, report) for p in packs) + "\n"
     if report:
-        # Printed, never swallowed: an adjusted token means the PACK is wrong for
-        # a full-page background, and somebody should look at it.
         print(f"Contrast adjustments ({len(report)}):", file=sys.stderr)
         for line in report:
             print(line, file=sys.stderr)

@@ -15,6 +15,8 @@ import { apiUrl } from './urls';
 /** Resource types this IDE edits. Mirrors ScriptResourceTypes. */
 export type ScriptTypeId =
   | 'script-python'
+  /** Web Dev endpoint. NOTE: a different module id — com.inductiveautomation.webdev. */
+  | 'resources'
   | 'timer'
   | 'message'
   | 'scheduled'
@@ -54,6 +56,13 @@ export interface ScriptEntry {
   origin: ScriptOrigin;
   /** Project that defines the resource — differs from the open one when inherited. */
   owner: string;
+  /**
+   * For a Web Dev endpoint: the HTTP methods it actually implements.
+   *
+   * Absent for every other type. Sent on the LISTING so the tree can show an
+   * endpoint's verbs without a request per endpoint.
+   */
+  methods?: string[];
 }
 
 export interface ScriptTree {
@@ -307,6 +316,8 @@ export function saveScriptAttributes(request: SaveAttributesRequest): Promise<Sa
 export async function createScript(request: {
   project: string;
   path: string;
+  /** Initial body. Empty for a library script; a handler stub for an event. */
+  source?: string;
   csrfToken?: string;
 }): Promise<SaveResult> {
   const headers: Record<string, string> = {
@@ -322,10 +333,8 @@ export async function createScript(request: {
       method: 'POST',
       credentials: 'same-origin',
       headers,
-      // No baseSignature: absent means create. Empty source, not a template —
-      // a comment header would be this module inventing house style for
-      // somebody else's codebase.
-      body: JSON.stringify({ source: '' }),
+      // No baseSignature: absent means create.
+      body: JSON.stringify({ source: request.source ?? '' }),
     }
   );
   if (!response.ok) {
@@ -376,7 +385,50 @@ export async function deleteScript(request: {
  * `util/helpers` is an ordinary package path, but each segment must independently
  * be a valid identifier.
  */
-export function validateScriptName(name: string): string | null {
+export function validateScriptName(name: string, typeId: ScriptTypeId = 'script-python'): string | null {
+  // Gateway event scripts are named RESOURCES, not modules. The Designer's own
+  // fixture is called "Probe Scheduled" — with a space — so applying the Python
+  // identifier rule to them would refuse names the Designer creates every day.
+  // Only the project library's names become import paths.
+  if (typeId !== 'script-python') {
+    return validateEventScriptName(name);
+  }
+  return validateLibraryName(name);
+}
+
+/**
+ * A gateway event script name.
+ *
+ * Permissive on purpose — the name becomes a directory on the gateway, and the
+ * platform accepts spaces. What is refused is what would break the addressing:
+ * a path separator (the route matches one segment), a leading or trailing space
+ * (invisible, and it round-trips into a directory name nobody can retype), and
+ * control characters.
+ */
+function validateEventScriptName(name: string): string | null {
+  if (!name || !name.trim()) {
+    return 'Enter a name';
+  }
+  if (name !== name.trim()) {
+    return 'Name cannot start or end with a space';
+  }
+  if (name.includes('/') || name.includes('\\')) {
+    return 'Name cannot contain "/" or "\\"';
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(name)) {
+    return 'Name cannot contain control characters';
+  }
+  if (name === '.' || name === '..') {
+    return 'That name is reserved';
+  }
+  if (name.length > 120) {
+    return 'Name is too long';
+  }
+  return null;
+}
+
+function validateLibraryName(name: string): string | null {
   if (!name || !name.trim()) {
     return 'Enter a name';
   }

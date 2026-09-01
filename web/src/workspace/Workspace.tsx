@@ -23,6 +23,7 @@ import {
   type ProjectSummary,
   type ScriptEntry,
   type ScriptTree,
+  type ScriptTypeId,
 } from '../api/scripts';
 import { lspUri, sharedLspClient } from '../api/lspClient';
 import { sharedTransport } from '../api/lspTransport';
@@ -30,7 +31,11 @@ import type { SessionInfo } from '../api/session';
 import CodeEditor from '../components/CodeEditor';
 import ConfigStrip from '../components/ConfigStrip';
 import ConflictDialog from '../components/ConflictDialog';
+import ActivityBar, { type ViewId } from '../components/ActivityBar';
 import FileTree from '../components/FileTree';
+import Resizer from '../components/Resizer';
+import WebDevConfigDialog from '../components/WebDevConfigDialog';
+import WebDevTree from '../components/WebDevTree';
 import NewScriptDialog from '../components/NewScriptDialog';
 import OutlinePanel from '../components/OutlinePanel';
 import ScriptConsole from '../components/ScriptConsole';
@@ -64,6 +69,31 @@ interface Conflict {
 type Notice = { kind: 'error' | 'info'; text: string } | null;
 
 /**
+ * A remembered panel width.
+ *
+ * localStorage throws outright in a private window or with site data blocked,
+ * so every access is wrapped — a layout preference must never be the thing that
+ * stops the IDE loading.
+ */
+function storedWidth(key: string, fallback: number): number {
+  try {
+    const raw = window.localStorage.getItem(`scriptide.width.${key}`);
+    const value = raw ? Number(raw) : NaN;
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function rememberWidth(key: string, value: number) {
+  try {
+    window.localStorage.setItem(`scriptide.width.${key}`, String(Math.round(value)));
+  } catch {
+    /* not remembered; the session still works */
+  }
+}
+
+/**
  * How much of the editing area the console occupies.
  *
  * `split` is the default when the console is opened from the rail, because the
@@ -87,10 +117,18 @@ export default function Workspace({ session }: WorkspaceProps) {
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [consoleMode, setConsoleMode] = useState<ConsoleMode>('hidden');
   const [outlineOpen, setOutlineOpen] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [view, setView] = useState<ViewId>('scripts');
+  // The side bar collapses to the activity strip, VS Code style. Its width and
+  // the outline's are remembered per viewer; a pane you have to re-drag every
+  // visit is worse than one that is not resizable.
+  const [railOpen, setRailOpen] = useState(true);
+  const [railWidth, setRailWidth] = useState(() => storedWidth('rail', 260));
+  const [outlineWidth, setOutlineWidth] = useState(() => storedWidth('outline', 240));
+  const [creating, setCreating] = useState<ScriptTypeId | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ScriptEntry | null>(null);
+  const [configEntry, setConfigEntry] = useState<ScriptEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   // Bumped on every edit so the outline re-requests. A counter rather than the
   // text itself: the effect only needs to know THAT it changed.
@@ -167,7 +205,7 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   const openScript = useCallback(
     async (entry: ScriptEntry) => {
-      const uri = docUri(project, entry.path);
+      const uri = docUri(project, entry.path, entry.scriptKey);
       if (docsRef.current.some((d) => d.uri === uri)) {
         setActiveUri(uri);
         return;
@@ -287,7 +325,7 @@ export default function Workspace({ session }: WorkspaceProps) {
         // a future diagnostics pass will hang off, and sending it is free. Note
         // the LSP document URI is NOT this workspace `uri`: documents are keyed
         // `ignition://<project>/<path>` on the wire and `project::path` here.
-        lsp.didSave(lspUri(doc.project, doc.path));
+        lsp.didSave(lspUri(doc.project, doc.path, doc.scriptKey));
         setConflict(null);
         setNotice({ kind: 'info', text: `Saved ${doc.label}.` });
       } catch (e: unknown) {
@@ -397,6 +435,44 @@ export default function Workspace({ session }: WorkspaceProps) {
   // The tree entry behind the open tab, for its resource type. Looked up rather
   // than stored on the doc: the tree is re-read after every create and delete,
   // and a copy on the doc would go stale the first time that happened.
+  /**
+   * Web Dev endpoints, from the SAME listing as the scripts.
+   *
+   * They arrive together because the tree endpoint filters on "is this a script
+   * resource this IDE edits", and Web Dev now is one. Splitting them client-side
+   * costs a filter and saves a second round trip and a second cache to
+   * invalidate after every create and delete.
+   */
+  const webDevEndpoints = useMemo(
+    () => (tree?.scripts ?? []).filter((entry) => entry.typeId === 'resources'),
+    [tree]
+  );
+
+  /** Create one more handler script on an existing endpoint. */
+  const addWebDevMethod = useCallback(
+    async (entry: ScriptEntry, method: string) => {
+      try {
+        await saveScriptContent({
+          project,
+          path: entry.path,
+          key: `${method}.py`,
+          source: WEBDEV_STUBS[method] ?? 'def ' + method + '(request, session):\n\t',
+          baseSignature: entry.signature,
+          csrfToken: session.csrfToken,
+        });
+        const refreshed = await fetchScriptTree(project);
+        setTree(refreshed);
+        const updated = refreshed.scripts.find((e) => e.path === entry.path);
+        if (updated) {
+          await openScript({ ...updated, scriptKey: `${method}.py` });
+        }
+      } catch (e) {
+        setNotice({ kind: 'error', text: describe(e) });
+      }
+    },
+    [openScript, project, session.csrfToken]
+  );
+
   const activeEntry = useMemo(
     () => tree?.scripts.find((entry) => entry.path === activeDoc?.path),
     [tree, activeDoc]
@@ -412,12 +488,22 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   const doCreate = useCallback(
     async (name: string) => {
+      const typeId = creating ?? 'script-python';
       setCreateBusy(true);
       setCreateError(null);
-      const path = `ignition/script-python/${name}`;
+      // Web Dev lives under a DIFFERENT module id, so the path cannot be built
+      // from the type alone. Getting this wrong creates `ignition/resources/x`,
+      // which the platform accepts as a resource nothing will ever serve.
+      const moduleId = typeId === 'resources' ? 'com.inductiveautomation.webdev' : 'ignition';
+      const path = `${moduleId}/${typeId}/${name}`;
       try {
-        await createScript({ project, path, csrfToken: session.csrfToken });
-        setCreating(false);
+        await createScript({
+          project,
+          path,
+          source: handlerStub(typeId),
+          csrfToken: session.csrfToken,
+        });
+        setCreating(null);
         // Re-read the tree rather than splicing the new entry in: the server
         // decides the signature and the data key, and inventing either here
         // would give the first save a base it never agreed to.
@@ -434,7 +520,7 @@ export default function Workspace({ session }: WorkspaceProps) {
         setCreateBusy(false);
       }
     },
-    [openScript, project, session.csrfToken]
+    [creating, openScript, project, session.csrfToken]
   );
 
   // ---- delete ----------------------------------------------------------
@@ -453,7 +539,12 @@ export default function Workspace({ session }: WorkspaceProps) {
       setPendingDelete(null);
       // Close the tab too — leaving an editor open on a resource that no longer
       // exists means the next Ctrl+S recreates it, silently undoing the delete.
-      closeDoc(docUri(project, entry.path));
+      // Close every tab on this resource, not just one: a Web Dev endpoint has
+      // up to eight, and leaving the others open means the next Ctrl+S recreates
+      // the resource we just deleted.
+      docsRef.current
+        .filter((doc) => doc.project === project && doc.path === entry.path)
+        .forEach((doc) => closeDoc(doc.uri));
       setTree(await fetchScriptTree(project));
       setNotice({ kind: 'info', text: `Deleted ${entry.name || entry.typeLabel}.` });
     } catch (e) {
@@ -483,6 +574,30 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   const openConsole = useCallback(() => {
     setConsoleMode((current) => (current === 'hidden' ? 'split' : current));
+  }, []);
+
+  /**
+   * Activity-bar click.
+   *
+   * Clicking the ACTIVE view collapses the side bar; clicking any other opens
+   * it on that view. That is VS Code's behaviour, and it is the only way one
+   * strip both switches views and toggles the panel.
+   */
+  const selectView = useCallback((next: ViewId) => {
+    if (next === 'console') {
+      // The console is a pane, not a side-bar view — the rail has nothing to
+      // show for it, so the icon toggles the pane instead.
+      setConsoleMode((current) => (current === 'hidden' ? 'split' : 'hidden'));
+      return;
+    }
+    setView((current) => {
+      if (current === next) {
+        setRailOpen((open) => !open);
+        return current;
+      }
+      setRailOpen(true);
+      return next;
+    });
   }, []);
 
   /** Open the console in its own browser tab, on the current project. */
@@ -570,37 +685,80 @@ export default function Workspace({ session }: WorkspaceProps) {
       </div>
 
       <div className="workspace-body">
+        <ActivityBar
+          active={consoleMode !== 'hidden' && view === 'scripts' ? 'console' : view}
+          expanded={railOpen}
+          onSelect={selectView}
+        />
+
         {/* The rail is a column, not just the tree: the tree scrolls inside it
             and the footer stays pinned to the bottom edge, so a project with
             eight scripts no longer leaves half the rail as bare background. */}
-        <div className="workspace-rail">
-          {tree ? (
-            <FileTree
-              scripts={tree.scripts}
-              selectedPath={activeDoc?.path ?? null}
-              onSelect={(entry) => void openScript(entry)}
-              consoleSelected={consoleMode !== 'hidden'}
-              onSelectSpecial={openConsole}
-              // Create and delete are offered only when the session can actually
-              // perform them. A visible button that always 403s teaches people
-              // the tool is broken rather than that they lack a role.
-              onCreate={readOnly ? undefined : () => { setCreateError(null); setCreating(true); }}
-              onDelete={readOnly ? undefined : (entry) => setPendingDelete(entry)}
+        {railOpen && (
+          <>
+            <div className="workspace-rail" style={{ width: railWidth, flex: `0 0 ${railWidth}px` }}>
+              <div className="rail-title">{view === 'webdev' ? 'Web Dev' : 'Scripting'}</div>
+              {view === 'webdev' ? (
+                <WebDevTree
+                  endpoints={webDevEndpoints}
+                  selectedPath={activeDoc?.path ?? null}
+                  selectedMethod={activeDoc?.scriptKey?.replace(/\.py$/, '') ?? null}
+                  // A Web Dev row opens ONE method's script, so the data key is
+                  // chosen by the row rather than by the resource's default.
+                  onOpen={(entry, method) =>
+                    void openScript({ ...entry, scriptKey: `${method}.py` })
+                  }
+                  onCreate={readOnly ? undefined : () => {
+                    setCreateError(null);
+                    setCreating('resources');
+                  }}
+                  onDelete={readOnly ? undefined : (entry) => setPendingDelete(entry)}
+                  onAddMethod={readOnly ? undefined : (entry, method) => {
+                    void addWebDevMethod(entry, method);
+                  }}
+                  onEditConfig={(entry) => setConfigEntry(entry)}
+                />
+              ) : tree ? (
+                <FileTree
+                  scripts={tree.scripts}
+                  selectedPath={activeDoc?.path ?? null}
+                  onSelect={(entry) => void openScript(entry)}
+                  consoleSelected={consoleMode !== 'hidden'}
+                  onSelectSpecial={openConsole}
+                  // Create and delete are offered only when the session can
+                  // actually perform them. A visible button that always 403s
+                  // teaches people the tool is broken rather than that they
+                  // lack a role.
+                  onCreate={
+                    readOnly
+                      ? undefined
+                      : (typeId) => { setCreateError(null); setCreating(typeId); }
+                  }
+                  onDelete={readOnly ? undefined : (entry) => setPendingDelete(entry)}
+                />
+              ) : (
+                <nav className="file-tree" aria-label="Scripts">
+                  <p className="file-tree-empty muted">
+                    {treeError ? treeError : 'Loading scripts…'}
+                  </p>
+                </nav>
+              )}
+              <StatusFooter scripts={tree?.scripts ?? []} transport={transport} />
+            </div>
+            <Resizer
+              value={railWidth}
+              min={170}
+              max={520}
+              side="left"
+              label="Resize the side bar"
+              onChange={(width) => {
+                setRailWidth(width);
+                rememberWidth('rail', width);
+              }}
             />
-          ) : (
-            <nav className="file-tree" aria-label="Scripts">
-              <p className="file-tree-empty muted">
-                {treeError ? treeError : 'Loading scripts…'}
-              </p>
-            </nav>
-          )}
-          <StatusFooter scripts={tree?.scripts ?? []} transport={transport} />
-        </div>
+          </>
+        )}
 
-        {/* The editor half is ALWAYS mounted, even when the console is full
-            width — it owns every CodeMirror instance, and unmounting it would
-            destroy the undo history and scroll position of every open tab. It
-            is hidden with a class instead. */}
         <div className={`workspace-panes pane-mode-${consoleMode}`}>
           <section className="workspace-editor">
             <TabStrip
@@ -689,26 +847,49 @@ export default function Workspace({ session }: WorkspaceProps) {
         </div>
 
         {outlineOpen && (
-          <OutlinePanel
-            uri={activeUri ? lspUri(activeDoc?.project ?? project, activeDoc?.path ?? '') : null}
-            revision={docRevision}
-            lsp={lsp}
-            onJump={jumpToLine}
-          />
+          <>
+            <Resizer
+              value={outlineWidth}
+              min={160}
+              max={520}
+              side="right"
+              label="Resize the outline"
+              onChange={(width) => {
+                setOutlineWidth(width);
+                rememberWidth('outline', width);
+              }}
+            />
+            <OutlinePanel
+              uri={activeUri
+                ? lspUri(activeDoc?.project ?? project, activeDoc?.path ?? '', activeDoc?.scriptKey)
+                : null}
+              revision={docRevision}
+              lsp={lsp}
+              onJump={jumpToLine}
+              width={outlineWidth}
+              onClose={() => setOutlineOpen(false)}
+            />
+          </>
         )}
       </div>
 
       {creating && (
         <NewScriptDialog
+          typeId={creating}
+          typeLabel={
+            tree?.scripts.find((entry) => entry.typeId === creating)?.typeLabel
+              ?? TYPE_LABELS[creating]
+              ?? creating
+          }
           existingNames={
             tree?.scripts
-              .filter((entry) => entry.typeId === 'script-python')
+              .filter((entry) => entry.typeId === creating)
               .map((entry) => entry.name) ?? []
           }
           busy={createBusy}
           error={createError}
           onCreate={(name) => void doCreate(name)}
-          onCancel={() => setCreating(false)}
+          onCancel={() => setCreating(null)}
         />
       )}
 
@@ -737,6 +918,17 @@ export default function Workspace({ session }: WorkspaceProps) {
         </div>
       )}
 
+      {configEntry && (
+        <WebDevConfigDialog
+          project={project}
+          path={configEntry.path}
+          name={configEntry.name}
+          csrfToken={session.csrfToken}
+          readOnly={readOnly}
+          onClose={() => setConfigEntry(null)}
+        />
+      )}
+
       {conflict && (
         <ConflictDialog
           label={conflict.label}
@@ -750,6 +942,68 @@ export default function Workspace({ session }: WorkspaceProps) {
       )}
     </main>
   );
+}
+
+/**
+ * The handler stub a new event script starts with.
+ *
+ * The Designer names the FILE after the handler function — `handleTimerEvent.py`
+ * holds `def handleTimerEvent():` — and seeds a single tab-indented body line.
+ * Measured for timer, message and startup (web-designer SCRIPTING.md §5.1–5.3);
+ * scheduled and tag-change follow the same naming rule rather than a
+ * measurement, which is safe because it is the BODY, not a resource attribute:
+ * a wrong stub is visible and editable, where a wrong attribute is silent.
+ *
+ * A tab, never spaces — see the byte-fidelity rule in CodeEditor.
+ */
+const HANDLER_STUBS: Record<string, string> = {
+  timer: 'def handleTimerEvent():\n\t',
+  message: 'def handleMessage(payload):\n\t',
+  scheduled: 'def handleScheduleEvent():\n\t',
+  'tag-change': 'def onTagChange(tagPath, previousValue, currentValue, initialChange, missedEvents):\n\t',
+  startup: 'def onStartup():\n\t',
+  shutdown: 'def onShutdown():\n\t',
+  update: 'def onUpdate():\n\t',
+};
+
+/**
+ * The stub a new Web Dev handler starts with.
+ *
+ * `def doGet(request, session):` is the signature every Ignition Web Dev example
+ * uses, and the file is named after the function exactly as the gateway event
+ * scripts are. As with those stubs this is the BODY, not a resource attribute:
+ * a wrong stub is visible and editable where a wrong attribute is silent.
+ */
+const WEBDEV_STUBS: Record<string, string> = Object.fromEntries(
+  ['doGet', 'doPost', 'doPut', 'doDelete', 'doHead', 'doOptions', 'doTrace', 'doPatch'].map(
+    (method) => [method, `def ${method}(request, session):\n\treturn {'json': {'ok': True}}`]
+  )
+);
+
+/** Fallback labels, for a type the current tree happens to hold none of. */
+const TYPE_LABELS: Record<string, string> = {
+  'script-python': 'Library',
+  timer: 'Timer',
+  message: 'Message Handler',
+  scheduled: 'Scheduled',
+  'tag-change': 'Tag Change',
+  startup: 'Startup',
+  shutdown: 'Shutdown',
+  update: 'Update',
+  resources: 'Web Dev',
+};
+
+function handlerStub(typeId: string): string {
+  // The project library starts EMPTY, matching the zero-byte code.py the
+  // Designer writes — a stub there would be this module inventing house style
+  // for somebody else's codebase.
+  if (typeId === 'script-python') {
+    return '';
+  }
+  if (typeId === 'resources') {
+    return WEBDEV_STUBS.doGet;
+  }
+  return HANDLER_STUBS[typeId] ?? '';
 }
 
 /** Human-readable text for anything thrown by the client. */

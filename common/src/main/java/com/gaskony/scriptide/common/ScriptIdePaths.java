@@ -97,6 +97,18 @@ public final class ScriptIdePaths {
      */
     public static final String ROUTE_SCRIPT_ATTRIBUTES = "/api/scripts/attributes/:path";
 
+    /**
+     * {@code GET|POST /api/webdev/config/:path?project=X} — a Web Dev endpoint's
+     * per-method settings.
+     *
+     * <p>Separate from the attributes route because a Web Dev resource has NO
+     * editable {@code resource.json} attributes. Everything the Designer shows
+     * for an endpoint — enabled, require-auth, require-https, required roles,
+     * user source, retry count, per HTTP method — is inside a {@code config.json}
+     * DATA FILE. Measured on a real gateway 01/09/2026.</p>
+     */
+    public static final String ROUTE_WEBDEV_CONFIG = "/api/webdev/config/:path";
+
     // ==================== Servlets (NOT under /data) ====================
 
     /**

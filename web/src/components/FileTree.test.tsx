@@ -204,7 +204,35 @@ describe('FileTree', () => {
     // library scripts is ordinary. One global "nothing here" would be wrong for
     // it in both directions.
     render(<FileTree scripts={[]} selectedPath={null} onSelect={vi.fn()} />);
-    expect(screen.getByText('None in this project.')).toBeInTheDocument();
+    // Every event folder is still listed — the Designer shows them when empty,
+    // and an empty folder is the only place to create the first script of that
+    // kind. So the message is per FOLDER, not one for the whole section.
+    expect(screen.getAllByText('None yet.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Not defined in this project.').length).toBe(3);
     expect(screen.getByText('No library scripts yet.')).toBeInTheDocument();
+  });
+
+  it('lists every gateway event folder even when the project has none of that type', () => {
+    // Filtering empty folders out made it impossible to create the FIRST script
+    // of a kind — there was nothing to click "new" on.
+    render(<FileTree scripts={[]} selectedPath={null} onSelect={vi.fn()} onCreate={vi.fn()} />);
+    for (const label of ['Timer', 'Message Handler', 'Scheduled', 'Tag Change']) {
+      // The folder header carries a count; the sibling "+" carries the same
+      // label, hence getAllBy — the assertion is that the folder EXISTS.
+      expect(screen.getAllByRole('button', { name: new RegExp(label) }).length)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  it('offers "new" per event type, but never for a singleton', () => {
+    const onCreate = vi.fn();
+    render(<FileTree scripts={[]} selectedPath={null} onSelect={vi.fn()} onCreate={onCreate} />);
+    fireEvent.click(screen.getByRole('button', { name: 'New Timer script' }));
+    expect(onCreate).toHaveBeenCalledWith('timer');
+    // Startup/shutdown/update are ONE resource each; a second is not a thing
+    // that can exist, and the Designer offers no "new" for them either.
+    expect(screen.queryByRole('button', { name: 'New Startup script' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New Shutdown script' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New Update script' })).toBeNull();
   });
 });

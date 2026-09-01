@@ -137,3 +137,62 @@
   white-space: pre-wrap;
   color: var(--text-secondary);
 }
+
+/* ---- output as a defined panel (v1.2.0) ---------------------------------
+ *
+ * The output used to be a bare scrolling region directly under the editor, and
+ * it read as more editor — there was no line telling you where your script
+ * ended and its result began. It is now a titled panel with its own header,
+ * rule and inset background, which is the same treatment VS Code gives its
+ * Output and Terminal views.
+ */
+
+.console-output-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 55%;
+  min-height: 0;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+}
+
+.console-output-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-tertiary);
+}
+
+.console-output-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.console-output-count {
+  font-size: 11px;
+}
+
+.console-running {
+  font-size: 11px;
+  color: var(--accent-primary);
+}
+
+/* Overrides the flex share declared earlier — the panel owns it now. */
+.console-output {
+  flex: 1 1 auto;
+  border-top: none;
+  background: transparent;
+}
+
+/* Each block gets a rule between runs, so consecutive runs are visibly separate
+   rather than one continuous stream. */
+.console-block + .console-block {
+  border-top: 1px dashed var(--border-light);
+  padding-top: var(--space-2);
+}

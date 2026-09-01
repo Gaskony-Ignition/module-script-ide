@@ -1,0 +1,41 @@
+.activity-bar {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 var(--activity-bar-width);
+  width: var(--activity-bar-width);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-light);
+}
+
+.activity-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--activity-bar-width);
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  /* The active marker is a left border drawn in the transparent state too, so
+     activating an item does not shift its icon by 2px. */
+  border-left: 2px solid transparent;
+}
+
+.activity-item:hover {
+  color: var(--text-primary);
+  background: none;
+}
+
+.activity-item.is-active {
+  color: var(--text-primary);
+  border-left-color: var(--accent-primary);
+  background: none;
+}
+
+.activity-item:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -2px;
+}

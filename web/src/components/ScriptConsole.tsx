@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
-import { byteFidelity, editorTheme, pythonKeymap, pythonSurface } from './editorCore';
+import { byteFidelity, editorTheme, findAndReplace, pythonKeymap, pythonSurface } from './editorCore';
 import { sharedExecClient, type ExecError, type ExecEvent, type ExecResult } from '../api/execClient';
 import './ScriptConsole.css';
 
@@ -205,6 +205,7 @@ export default function ScriptConsole({
         extensions: [
           ...pythonSurface,
           ...byteFidelity,
+          ...findAndReplace,
           keymap.of([
             {
               key: 'Mod-Enter',
@@ -284,15 +285,30 @@ export default function ScriptConsole({
 
       <div className="console-editor" ref={hostRef} />
 
-      <div className="console-output" ref={outputRef} aria-live="polite" aria-label="Output">
-        {entries.length === 0 ? (
-          <p className="muted console-empty">No output yet.</p>
-        ) : (
-          entries.map((entry) => (
-            <OutputBlock key={entry.id} entry={entry} onOpenFrame={onOpenFrame} />
-          ))
-        )}
-      </div>
+      {/* The output is its own titled panel, not a region below the editor.
+          Without the header and the rule it read as more editor, and people
+          could not tell where their script stopped and its output began. */}
+      <section className="console-output-panel" aria-label="Output">
+        <header className="console-output-head">
+          <span className="console-output-title">Output</span>
+          {running && <span className="console-running" aria-live="polite">running…</span>}
+          <span className="console-spacer" />
+          <span className="console-output-count muted">
+            {entries.length === 0 ? '' : `${entries.length} block${entries.length === 1 ? '' : 's'}`}
+          </span>
+        </header>
+        <div className="console-output" ref={outputRef} aria-live="polite">
+          {entries.length === 0 ? (
+            <p className="muted console-empty">
+              Nothing yet. Ctrl+Enter runs the buffer above on the Gateway.
+            </p>
+          ) : (
+            entries.map((entry) => (
+              <OutputBlock key={entry.id} entry={entry} onOpenFrame={onOpenFrame} />
+            ))
+          )}
+        </div>
+      </section>
     </section>
   );
 }

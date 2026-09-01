@@ -13,7 +13,22 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { LspClient, SymbolInformation } from '../api/lspClient';
+import { IconClose } from './Icons';
 import './OutlinePanel.css';
+
+function CloseButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button
+      type="button"
+      className="outline-close"
+      aria-label="Hide the outline"
+      title="Hide the outline"
+      onClick={onClose}
+    >
+      <IconClose size={13} />
+    </button>
+  );
+}
 
 export interface OutlinePanelProps {
   /** URI of the document to outline, or null when nothing is open. */
@@ -22,6 +37,9 @@ export interface OutlinePanelProps {
   revision?: number;
   lsp?: LspClient | null;
   onJump: (line: number, character: number) => void;
+  /** Set by the workspace's splitter. Remembered per viewer. */
+  width?: number;
+  onClose?: () => void;
 }
 
 /** LSP SymbolKind values the server emits. */
@@ -61,7 +79,14 @@ export function toOutlineRows(symbols: SymbolInformation[]): OutlineRow[] {
   }));
 }
 
-export default function OutlinePanel({ uri, revision = 0, lsp, onJump }: OutlinePanelProps) {
+export default function OutlinePanel({
+  uri,
+  revision = 0,
+  lsp,
+  onJump,
+  width,
+  onClose,
+}: OutlinePanelProps) {
   const [symbols, setSymbols] = useState<SymbolInformation[]>([]);
   const [filter, setFilter] = useState('');
   const [failed, setFailed] = useState(false);
@@ -102,19 +127,28 @@ export default function OutlinePanel({ uri, revision = 0, lsp, onJump }: Outline
     return all.filter((row) => row.symbol.name.toLowerCase().includes(needle));
   }, [symbols, filter]);
 
+  const style = width ? { width, flex: `0 0 ${width}px` } : undefined;
+
   if (!uri) {
     return (
-      <aside className="outline" aria-label="Outline">
+      <aside className="outline" aria-label="Outline" style={style}>
+        <div className="outline-head">
+          <span className="outline-title">Outline</span>
+          <span className="outline-spacer" />
+          {onClose && <CloseButton onClose={onClose} />}
+        </div>
         <p className="outline-empty muted">Open a script to see its outline.</p>
       </aside>
     );
   }
 
   return (
-    <aside className="outline" aria-label="Outline">
+    <aside className="outline" aria-label="Outline" style={style}>
       <div className="outline-head">
         <span className="outline-title">Outline</span>
         <span className="outline-count muted">{symbols.length}</span>
+        <span className="outline-spacer" />
+        {onClose && <CloseButton onClose={onClose} />}
       </div>
       <input
         className="outline-filter"

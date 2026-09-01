@@ -188,11 +188,33 @@ public final class ScriptResourceRouteHandler {
         // the type's create-time default: a resource written by an older Designer
         // can legitimately differ, and writing to the wrong key silently creates a
         // second key instead of updating the script.
+        boolean webdev = ScriptResourceTypes.isWebDev(type.moduleId(), type.typeId());
         ScriptResourceTypes.byTypeId(type.typeId()).ifPresent(st -> {
-            String actual = resource.getDataKeys().stream()
-                .filter(k -> k.endsWith(".py"))
-                .findFirst()
-                .orElse(st.createKey());
+            String actual;
+            if (webdev) {
+                // A Web Dev endpoint has up to EIGHT .py files, so "the first
+                // one" is whatever order the platform happened to return —
+                // alphabetically that is doDelete.py, which is nobody's idea of
+                // the main handler. Prefer doGet, then the declared order.
+                java.util.Set<String> present = new java.util.LinkedHashSet<>(resource.getDataKeys());
+                actual = ScriptResourceTypes.WEBDEV_METHODS.stream()
+                    .map(ScriptResourceTypes::webDevKeyFor)
+                    .filter(present::contains)
+                    .findFirst()
+                    .orElse(st.createKey());
+                // Which verbs this endpoint actually implements, so the tree can
+                // list them without a round trip per endpoint.
+                JsonArray methods = new JsonArray();
+                ScriptResourceTypes.WEBDEV_METHODS.stream()
+                    .filter(m -> present.contains(ScriptResourceTypes.webDevKeyFor(m)))
+                    .forEach(methods::add);
+                out.add("methods", methods);
+            } else {
+                actual = resource.getDataKeys().stream()
+                    .filter(k -> k.endsWith(".py"))
+                    .findFirst()
+                    .orElse(st.createKey());
+            }
             out.addProperty("scriptKey", actual);
             out.addProperty("typeLabel", st.label());
             out.addProperty("singleton", st.singleton());

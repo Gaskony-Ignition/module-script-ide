@@ -29,6 +29,19 @@ final class HandlerSupport {
     /** Shared, thread-safe Gson instance. */
     static final Gson GSON = new Gson();
 
+    /**
+     * For writing a JSON DATA FILE back to a resource.
+     *
+     * Pretty-printed because the platform writes these files that way. A compact
+     * rewrite of a Web Dev config.json is semantically identical and shows every
+     * endpoint as fully rewritten in the next diff, which is exactly the
+     * diff-noise the byte-fidelity rule exists to prevent for script bodies.
+     */
+    static final Gson PRETTY_GSON = new com.google.gson.GsonBuilder()
+        .setPrettyPrinting()
+        .disableHtmlEscaping()
+        .create();
+
     /** HTTP 428 Precondition Required — not a constant in the servlet API. */
     static final int SC_PRECONDITION_REQUIRED = 428;
 

@@ -105,3 +105,28 @@
   padding: var(--space-3);
   font-size: 12px;
 }
+
+/* The panel's width is set inline by the splitter, so the fixed values above are
+   only a starting point — this stops the flex basis from fighting it. */
+.outline {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.outline-spacer {
+  flex: 1 1 auto;
+}
+
+.outline-close {
+  padding: 0 2px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.outline-close:hover {
+  color: var(--text-primary);
+  background: none;
+}

@@ -1,0 +1,198 @@
+/**
+ * The icon set.
+ *
+ * Inline SVG, not an icon font and not a package: the gateway may be air-gapped
+ * (offlineAssets.test.ts forbids any external asset host), and a dozen glyphs do
+ * not justify a dependency. Each is a 16×16 viewBox using `currentColor`, so an
+ * icon takes its colour from the row it sits in and every theme works for free.
+ *
+ * Shapes follow VS Code's Codicons closely enough to be recognisable, because
+ * the point of an icon here is that someone already knows what it means.
+ */
+export interface IconProps {
+  /** Rendered size in px. 16 matches the tree row height. */
+  size?: number;
+  className?: string;
+}
+
+function svg(path: React.ReactNode, { size = 16, className }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      // Decorative: every icon in this app sits beside a text label or inside a
+      // control with an aria-label, so announcing it would only add noise.
+      aria-hidden="true"
+      focusable="false"
+      className={className}
+    >
+      {path}
+    </svg>
+  );
+}
+
+/** Activity bar: the scripting explorer. */
+export const IconFiles = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M9.5 1.5H3.5v13h9V4.5z" />
+      <path d="M9.5 1.5v3h3" />
+    </>,
+    p
+  );
+
+/** Activity bar: Web Dev. */
+export const IconGlobe = (p: IconProps) =>
+  svg(
+    <>
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M1.8 8h12.4M8 1.8c1.7 1.9 2.6 4 2.6 6.2S9.7 12.3 8 14.2C6.3 12.3 5.4 10.2 5.4 8S6.3 3.7 8 1.8z" />
+    </>,
+    p
+  );
+
+/** Activity bar: search. */
+export const IconSearch = (p: IconProps) =>
+  svg(
+    <>
+      <circle cx="6.8" cy="6.8" r="4.6" />
+      <path d="M10.2 10.2 14 14" />
+    </>,
+    p
+  );
+
+/** Activity bar / tree: the console. */
+export const IconTerminal = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
+      <path d="M4 6l2.2 2L4 10M8.4 10.4h3.4" />
+    </>,
+    p
+  );
+
+/** A Python module in the project library. */
+export const IconScript = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M9 1.6H4a1 1 0 0 0-1 1v10.8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.6z" />
+      <path d="M9 1.6v4h4" />
+      <path d="M5.6 9.2h4.8M5.6 11.4h3" />
+    </>,
+    p
+  );
+
+/** A package/folder in the tree. */
+export const IconFolder = (p: IconProps) =>
+  svg(<path d="M1.6 12.6V3.4h4.2l1.4 1.6h7.2v7.6a.8.8 0 0 1-.8.8H2.4a.8.8 0 0 1-.8-.8z" />, p);
+
+/** Timer event script. */
+export const IconClock = (p: IconProps) =>
+  svg(
+    <>
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 4.4V8l2.6 1.6" />
+    </>,
+    p
+  );
+
+/** Message handler. */
+export const IconMail = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="1.6" y="3.4" width="12.8" height="9.2" rx="1" />
+      <path d="m1.6 4.4 6.4 4.4 6.4-4.4" />
+    </>,
+    p
+  );
+
+/** Scheduled (cron) event script. */
+export const IconCalendar = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="1.8" y="3" width="12.4" height="11.2" rx="1" />
+      <path d="M1.8 6.4h12.4M5.2 1.6v2.8M10.8 1.6v2.8" />
+    </>,
+    p
+  );
+
+/** Tag change event script. */
+export const IconTag = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M8.2 1.8H14v5.8l-6.4 6.4a1 1 0 0 1-1.4 0L1.8 9.6a1 1 0 0 1 0-1.4z" />
+      <circle cx="11.2" cy="4.8" r="1" />
+    </>,
+    p
+  );
+
+/** Startup / shutdown / update — a lifecycle event. */
+export const IconPower = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M8 1.8v6.4" />
+      <path d="M11.9 4.1a5.5 5.5 0 1 1-7.8 0" />
+    </>,
+    p
+  );
+
+export const IconPlay = (p: IconProps) => svg(<path d="M4.4 2.6 13 8l-8.6 5.4z" />, p);
+export const IconStop = (p: IconProps) => svg(<rect x="3.6" y="3.6" width="8.8" height="8.8" rx="1" />, p);
+export const IconPlus = (p: IconProps) => svg(<path d="M8 3.2v9.6M3.2 8h9.6" />, p);
+export const IconTrash = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M2.6 4.2h10.8M6 4.2V2.8h4v1.4M4 4.2l.7 9.2a.8.8 0 0 0 .8.8h5a.8.8 0 0 0 .8-.8l.7-9.2" />
+    </>,
+    p
+  );
+export const IconClose = (p: IconProps) => svg(<path d="M3.6 3.6l8.8 8.8M12.4 3.6l-8.8 8.8" />, p);
+export const IconSplit = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="1.6" y="2.6" width="12.8" height="10.8" rx="1" />
+      <path d="M8 2.6v10.8" />
+    </>,
+    p
+  );
+export const IconExternal = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M9.4 2.4H13.6v4.2" />
+      <path d="M13.6 2.4 7.6 8.4" />
+      <path d="M12 9.2v3.6a.8.8 0 0 1-.8.8H3.4a.8.8 0 0 1-.8-.8V4.8a.8.8 0 0 1 .8-.8H7" />
+    </>,
+    p
+  );
+export const IconList = (p: IconProps) =>
+  svg(<path d="M5.4 4h8.2M5.4 8h8.2M5.4 12h8.2M2.4 4h.01M2.4 8h.01M2.4 12h.01" />, p);
+export const IconChevronRight = (p: IconProps) => svg(<path d="M6 3.5 10.5 8 6 12.5" />, p);
+export const IconChevronDown = (p: IconProps) => svg(<path d="M3.5 6 8 10.5 12.5 6" />, p);
+
+/** The icon for a script resource type, by typeId. */
+export function iconForType(typeId: string, props: IconProps = {}) {
+  switch (typeId) {
+    case 'timer':
+      return <IconClock {...props} />;
+    case 'message':
+      return <IconMail {...props} />;
+    case 'scheduled':
+      return <IconCalendar {...props} />;
+    case 'tag-change':
+      return <IconTag {...props} />;
+    case 'startup':
+    case 'shutdown':
+    case 'update':
+      return <IconPower {...props} />;
+    case 'webdev':
+      return <IconGlobe {...props} />;
+    default:
+      return <IconScript {...props} />;
+  }
+}

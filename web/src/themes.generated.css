@@ -3,254 +3,260 @@
  * Do not edit by hand — edit the pack and regenerate, or the IDE and the
  * Perspective sessions beside it drift apart.
  *
+ * The NEUTRALS are derived from each pack's page colour, not mapped from
+ * its surfaces: Perspective's surfaces are semantic (a 'sidebar' is branded
+ * chrome, dark even in a light theme) and mapping them onto a lightness
+ * ramp made five of these ten themes illegible. The pack supplies the
+ * accent and syntax hues, each checked against every surface it lands on.
+ *
  * 10 themes.
  */
 /* Glass Aurora — Teal — dark */
 :root[data-theme="aurora-teal"] {
   color-scheme: dark;
   --bg-primary: #1a1233;
-  --bg-secondary: rgba(255,255,255,0.06);
-  --bg-tertiary: rgba(255,255,255,0.14);
-  --surface: rgba(255,255,255,0.10);
-  --border-light: rgba(255,255,255,0.22);
-  --text-primary: #f5f3ff;
-  --text-secondary: #c7c2e0;
-  --text-muted: #c7c2e0;
-  --accent-primary: #0f766e;
+  --bg-secondary: #251e3d;
+  --bg-tertiary: #332c49;
+  --surface: #2a2341;
+  --border-light: #433d58;
+  --text-primary: #dddbe0;
+  --text-secondary: #a3a0ad;
+  --text-muted: #9996a5;
+  --font-sans: ui-sans-serif, Inter, system-ui, "Segoe UI", sans-serif;
+  --accent-primary: #a5e4fb;
   --error: #fca5a5;
   --warning: #fde08a;
   --success: #86efc9;
-  --font-sans: ui-sans-serif, Inter, system-ui, "Segoe UI", sans-serif;
-  --syntax-keyword: #0f766e;
+  --syntax-keyword: #a5e4fb;
   --syntax-string: #86efc9;
-  --syntax-comment: #c7c2e0;
   --syntax-number: #fde08a;
   --syntax-type: #14b8a6;
   --syntax-function: #a5e4fb;
-  --accent-primary-bg: color-mix(in srgb, #0f766e 28%, transparent);
+  --syntax-comment: #c7c2e0;
+  --accent-primary-bg: color-mix(in srgb, #a5e4fb 30%, transparent);
 }
 
 /* Glass Aurora — Violet — dark */
 :root[data-theme="aurora-violet"] {
   color-scheme: dark;
   --bg-primary: #1a1233;
-  --bg-secondary: rgba(255,255,255,0.06);
-  --bg-tertiary: rgba(255,255,255,0.14);
-  --surface: rgba(255,255,255,0.10);
-  --border-light: rgba(255,255,255,0.22);
-  --text-primary: #f5f3ff;
-  --text-secondary: #c7c2e0;
-  --text-muted: #c7c2e0;
-  --accent-primary: #8558ec;
+  --bg-secondary: #251e3d;
+  --bg-tertiary: #332c49;
+  --surface: #2a2341;
+  --border-light: #433d58;
+  --text-primary: #dddbe0;
+  --text-secondary: #a3a0ad;
+  --text-muted: #9996a5;
+  --font-sans: ui-sans-serif, Inter, system-ui, "Segoe UI", sans-serif;
+  --accent-primary: #a5e4fb;
   --error: #fca5a5;
   --warning: #fde08a;
   --success: #86efc9;
-  --font-sans: ui-sans-serif, Inter, system-ui, "Segoe UI", sans-serif;
-  --syntax-keyword: #8558ec;
+  --syntax-keyword: #a5e4fb;
   --syntax-string: #86efc9;
-  --syntax-comment: #c7c2e0;
   --syntax-number: #fde08a;
-  --syntax-type: #8b5cf6;
+  --syntax-type: #a5e4fb;
   --syntax-function: #a5e4fb;
-  --accent-primary-bg: color-mix(in srgb, #8558ec 28%, transparent);
+  --syntax-comment: #c7c2e0;
+  --accent-primary-bg: color-mix(in srgb, #a5e4fb 30%, transparent);
 }
 
 /* Finance Ledger — light */
 :root[data-theme="finance-ledger"] {
   color-scheme: light;
   --bg-primary: #eef1f0;
-  --bg-secondary: #0b3d5c;
-  --bg-tertiary: #eaf0ee;
-  --surface: #ffffff;
-  --border-light: #d3dbd8;
-  --text-primary: #16232e;
-  --text-secondary: #16232e;
-  --text-muted: #5b6b74;
+  --bg-secondary: #e3e6e5;
+  --bg-tertiary: #d6d9d8;
+  --surface: #e9eceb;
+  --border-light: #bec1c0;
+  --text-primary: #282929;
+  --text-secondary: #515252;
+  --text-muted: #5e5f5f;
+  --font-sans: "Segoe UI", ui-sans-serif, system-ui, -apple-system, Arial, sans-serif;
   --accent-primary: #0b3d5c;
   --error: #9e2a2a;
-  --warning: #9a5100;
-  --success: #0f7a4a;
-  --font-sans: "Segoe UI", ui-sans-serif, system-ui, -apple-system, Arial, sans-serif;
+  --warning: #914c00;
+  --success: #0d6d42;
   --syntax-keyword: #0b3d5c;
-  --syntax-string: #0f7a4a;
-  --syntax-comment: #5b6b74;
-  --syntax-number: #9a5100;
-  --syntax-type: #0f7a4a;
+  --syntax-string: #0d6d42;
+  --syntax-number: #914c00;
+  --syntax-type: #2a5f7a;
   --syntax-function: #2a5f7a;
-  --accent-primary-bg: color-mix(in srgb, #0b3d5c 18%, transparent);
+  --syntax-comment: #5b6b74;
+  --accent-primary-bg: color-mix(in srgb, #0b3d5c 20%, transparent);
 }
 
 /* Industrial — Control Room Cyan — dark */
 :root[data-theme="industrial-control-cyan"] {
   color-scheme: dark;
-  --bg-primary: #070B10;
-  --bg-secondary: #0F161E;
-  --bg-tertiary: #1E2935;
-  --surface: #0F161E;
-  --border-light: #26333F;
-  --text-primary: #E8EFF5;
-  --text-secondary: #7E93A3;
-  --text-muted: #7E93A3;
-  --accent-primary: #2BB3D6;
-  --error: #FF7A7A;
-  --warning: #F6B93B;
-  --success: #35D39A;
+  --bg-primary: #070b10;
+  --bg-secondary: #13171c;
+  --bg-tertiary: #22262a;
+  --surface: #181c21;
+  --border-light: #34373b;
+  --text-primary: #d0d1d2;
+  --text-secondary: #999b9d;
+  --text-muted: #8a8c8f;
   --font-sans: "Inter", "Roboto", "Segoe UI", Helvetica, Arial, sans-serif;
-  --syntax-keyword: #2BB3D6;
-  --syntax-string: #35D39A;
-  --syntax-comment: #7E93A3;
-  --syntax-number: #F6B93B;
-  --syntax-type: #2BB3D6;
-  --syntax-function: #62A8FF;
-  --accent-primary-bg: color-mix(in srgb, #2BB3D6 28%, transparent);
+  --accent-primary: #2bb3d6;
+  --error: #ff7a7a;
+  --warning: #f6b93b;
+  --success: #35d39a;
+  --syntax-keyword: #2bb3d6;
+  --syntax-string: #35d39a;
+  --syntax-number: #f6b93b;
+  --syntax-type: #2bb3d6;
+  --syntax-function: #62a8ff;
+  --syntax-comment: #7e93a3;
+  --accent-primary-bg: color-mix(in srgb, #2bb3d6 30%, transparent);
 }
 
 /* Industrial — Day Cyan — light */
 :root[data-theme="industrial-day-cyan"] {
   color-scheme: light;
-  --bg-primary: #EEF0F3;
-  --bg-secondary: #DDE1E7;
-  --bg-tertiary: #DDE1E7;
-  --surface: #FFFFFF;
-  --border-light: #B0B8C4;
-  --text-primary: #1F2937;
-  --text-secondary: #374151;
-  --text-muted: #666d7a;
-  --accent-primary: #33556E;
-  --error: #DC2626;
-  --warning: #92400E;
-  --success: #6B7280;
+  --bg-primary: #eef0f3;
+  --bg-secondary: #e3e5e8;
+  --bg-tertiary: #d6d8db;
+  --surface: #e9ebee;
+  --border-light: #bec0c2;
+  --text-primary: #262627;
+  --text-secondary: #515253;
+  --text-muted: #5d5e5f;
   --font-sans: "Roboto", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-  --syntax-keyword: #33556E;
-  --syntax-string: #6B7280;
+  --accent-primary: #33556e;
+  --error: #374151;
+  --warning: #92400e;
+  --success: #374151;
+  --syntax-keyword: #33556e;
+  --syntax-string: #374151;
+  --syntax-number: #92400e;
+  --syntax-type: #33556e;
+  --syntax-function: #1e40af;
   --syntax-comment: #666d7a;
-  --syntax-number: #92400E;
-  --syntax-type: #33556E;
-  --syntax-function: #1E40AF;
-  --accent-primary-bg: color-mix(in srgb, #33556E 18%, transparent);
+  --accent-primary-bg: color-mix(in srgb, #33556e 20%, transparent);
 }
 
 /* Leather Journal — Night Tan — dark */
 :root[data-theme="leather-night-tan"] {
   color-scheme: dark;
   --bg-primary: #1c1410;
-  --bg-secondary: #120d09;
-  --bg-tertiary: #2b1f16;
-  --surface: #241a13;
-  --border-light: #3d2c1e;
-  --text-primary: #ece0cb;
-  --text-secondary: #ab9578;
-  --text-muted: #ab9578;
-  --accent-primary: #c08a4a;
-  --error: #f85149;
+  --bg-secondary: #27201c;
+  --bg-tertiary: #352e2a;
+  --surface: #2c2421;
+  --border-light: #453e3b;
+  --text-primary: #dbd9d9;
+  --text-secondary: #a4a19f;
+  --text-muted: #999694;
+  --font-sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --accent-primary: #8fb4c9;
+  --error: #e08a7a;
   --warning: #ddb35c;
   --success: #8cc08e;
-  --font-sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --syntax-keyword: #c08a4a;
+  --syntax-keyword: #8fb4c9;
   --syntax-string: #8cc08e;
-  --syntax-comment: #ab9578;
   --syntax-number: #ddb35c;
-  --syntax-type: #c08a4a;
+  --syntax-type: #8fb4c9;
   --syntax-function: #8fb4c9;
-  --accent-primary-bg: color-mix(in srgb, #c08a4a 28%, transparent);
+  --syntax-comment: #ab9578;
+  --accent-primary-bg: color-mix(in srgb, #8fb4c9 30%, transparent);
 }
 
 /* Leather Journal — Parchment Tan — light */
 :root[data-theme="leather-parchment-tan"] {
   color-scheme: light;
   --bg-primary: #faf8f5;
-  --bg-secondary: #2f2016;
-  --bg-tertiary: #efe4cc;
-  --surface: #fdfdfc;
-  --border-light: #e6d6b8;
-  --text-primary: #2b2620;
-  --text-secondary: #5a4d3c;
-  --text-muted: #5a4d3c;
-  --accent-primary: #8a5a2b;
-  --error: #dc2626;
-  --warning: #96690f;
-  --success: #3d6b3a;
+  --bg-secondary: #efedea;
+  --bg-tertiary: #e1dfdc;
+  --surface: #f5f3f0;
+  --border-light: #c8c6c4;
+  --text-primary: #2d2d2c;
+  --text-secondary: #555453;
+  --text-muted: #646362;
   --font-sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --syntax-keyword: #8a5a2b;
+  --accent-primary: #3d5a73;
+  --error: #a3352c;
+  --warning: #65625d;
+  --success: #3d6b3a;
+  --syntax-keyword: #3d5a73;
   --syntax-string: #3d6b3a;
-  --syntax-comment: #5a4d3c;
-  --syntax-number: #96690f;
-  --syntax-type: #8a5a2b;
+  --syntax-number: #65625d;
+  --syntax-type: #3d5a73;
   --syntax-function: #3d5a73;
-  --accent-primary-bg: color-mix(in srgb, #8a5a2b 18%, transparent);
+  --syntax-comment: #5a4d3c;
+  --accent-primary-bg: color-mix(in srgb, #3d5a73 20%, transparent);
 }
 
 /* Newsprint — Night — dark */
 :root[data-theme="newsprint-night"] {
   color-scheme: dark;
   --bg-primary: #211f1c;
-  --bg-secondary: #2a2723;
-  --bg-tertiary: #302c26;
-  --surface: #2a2723;
-  --border-light: #3a3630;
-  --text-primary: #e8e2d6;
-  --text-secondary: #a8a196;
-  --text-muted: #a8a196;
+  --bg-secondary: #2c2a27;
+  --bg-tertiary: #393835;
+  --surface: #312f2c;
+  --border-light: #494745;
+  --text-primary: #e4e4e4;
+  --text-secondary: #abaaa9;
+  --text-muted: #a2a1a0;
+  --font-sans: Georgia, "Source Serif Pro", "Source Serif 4", serif;
   --accent-primary: #e8e2d6;
   --error: #e8a8a8;
   --warning: #dabb5f;
   --success: #8fcf9e;
-  --font-sans: Georgia, "Source Serif Pro", "Source Serif 4", serif;
   --syntax-keyword: #e8e2d6;
   --syntax-string: #8fcf9e;
-  --syntax-comment: #a8a196;
   --syntax-number: #dabb5f;
-  --syntax-type: #c23b3b;
+  --syntax-type: #8fc1e0;
   --syntax-function: #8fc1e0;
-  --accent-primary-bg: color-mix(in srgb, #e8e2d6 28%, transparent);
+  --syntax-comment: #a8a196;
+  --accent-primary-bg: color-mix(in srgb, #e8e2d6 30%, transparent);
 }
 
 /* Nord — Dark Frost — dark */
 :root[data-theme="nord-dark-frost"] {
   color-scheme: dark;
   --bg-primary: #2e3540;
-  --bg-secondary: #3b4452;
-  --bg-tertiary: #424f64;
-  --surface: #3b4452;
-  --border-light: #4c566a;
-  --text-primary: #e5e9f0;
-  --text-secondary: #d8dee9;
-  --text-muted: #d8dee9;
+  --bg-secondary: #383f4a;
+  --bg-tertiary: #454b55;
+  --surface: #3d434d;
+  --border-light: #545962;
+  --text-primary: #ffffff;
+  --text-secondary: #c0c2c6;
+  --text-muted: #b8babe;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --accent-primary: #b4d7e1;
   --error: #dfb0b4;
   --warning: #ebcb8b;
   --success: #c5d6b6;
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --syntax-keyword: #b4d7e1;
   --syntax-string: #c5d6b6;
-  --syntax-comment: #d8dee9;
   --syntax-number: #ebcb8b;
-  --syntax-type: #88c0d0;
+  --syntax-type: #b4d7e1;
   --syntax-function: #b4d7e1;
-  --accent-primary-bg: color-mix(in srgb, #b4d7e1 28%, transparent);
+  --syntax-comment: #d8dee9;
+  --accent-primary-bg: color-mix(in srgb, #b4d7e1 30%, transparent);
 }
 
 /* Nord — Light Frost — light */
 :root[data-theme="nord-light-frost"] {
   color-scheme: light;
   --bg-primary: #ecf0f4;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #ecf0f5;
-  --surface: #ffffff;
-  --border-light: #d8dee9;
-  --text-primary: #3b4252;
-  --text-secondary: #4c566a;
-  --text-muted: #4c566a;
-  --accent-primary: #55749b;
-  --error: #8a464c;
-  --warning: #966151;
-  --success: #657657;
+  --bg-secondary: #e1e5e9;
+  --bg-tertiary: #d4d8dc;
+  --surface: #e7ebef;
+  --border-light: #bdc0c3;
+  --text-primary: #262627;
+  --text-secondary: #505253;
+  --text-muted: #5c5e60;
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --syntax-keyword: #55749b;
-  --syntax-string: #657657;
+  --accent-primary: #465f7f;
+  --error: #8a464c;
+  --warning: #805245;
+  --success: #546248;
+  --syntax-keyword: #465f7f;
+  --syntax-string: #546248;
+  --syntax-number: #805245;
+  --syntax-type: #45626a;
+  --syntax-function: #46607f;
   --syntax-comment: #4c566a;
-  --syntax-number: #966151;
-  --syntax-type: #506e92;
-  --syntax-function: #506e92;
-  --accent-primary-bg: color-mix(in srgb, #55749b 18%, transparent);
+  --accent-primary-bg: color-mix(in srgb, #465f7f 20%, transparent);
 }

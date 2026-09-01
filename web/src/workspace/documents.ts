@@ -13,7 +13,10 @@ export interface OpenDoc {
   uri: string;
   project: string;
   path: string;
-  /** The `.py` data key to write back to — the resource's own, from the listing. */
+  /**
+   * The `.py` data key to write back to — the resource's own, from the listing.
+   * Part of the document's identity: see docUri.
+   */
   scriptKey: string;
   typeLabel: string;
   /** Short name for the tab strip. */
@@ -28,11 +31,20 @@ export interface OpenDoc {
 }
 
 /**
- * Documents are keyed by project AND path: the same `ignition/startup` exists in
- * every project, and keying on the path alone would silently alias them.
+ * Documents are keyed by project, path AND data key.
+ *
+ * Project, because the same `ignition/startup` exists in every project and
+ * keying on the path alone would silently alias them.
+ *
+ * The DATA KEY, because a Web Dev endpoint is one resource path holding up to
+ * eight scripts — `doGet.py`, `doPost.py` and so on. Without it, opening doPost
+ * on an endpoint whose doGet is already open finds the existing tab, shows the
+ * WRONG script, and the next save writes doGet's buffer over doPost. Every other
+ * resource has exactly one script, so its key never varies and the third segment
+ * is stable for them.
  */
-export function docUri(project: string, path: string): string {
-  return `${project}::${path}`;
+export function docUri(project: string, path: string, scriptKey?: string): string {
+  return scriptKey ? `${project}::${path}::${scriptKey}` : `${project}::${path}`;
 }
 
 /** True when the buffer differs from what the gateway last agreed to. */
@@ -45,13 +57,19 @@ export function isDirty(doc: OpenDoc): boolean {
  * type label is the only thing that identifies it.
  */
 export function labelFor(entry: ScriptEntry): string {
+  // A Web Dev endpoint's tabs must say WHICH handler they are, or eight tabs on
+  // one endpoint all read the same.
+  if (entry.typeId === 'resources') {
+    const method = entry.scriptKey.replace(/\.py$/, '');
+    return `${entry.name}/${method}`;
+  }
   return entry.name && entry.name.length > 0 ? entry.name : entry.typeLabel;
 }
 
 /** Build a document from a tree entry and the body just read for it. */
 export function newDoc(entry: ScriptEntry, project: string, text: string, etag: string): OpenDoc {
   return {
-    uri: docUri(project, entry.path),
+    uri: docUri(project, entry.path, entry.scriptKey),
     project,
     path: entry.path,
     scriptKey: entry.scriptKey,

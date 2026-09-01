@@ -1,0 +1,24 @@
+/* A 1px visual divider with a 5px grab area straddling it — a true 1px target
+   is unhittable, and padding it out on both sides keeps the layout honest. */
+.resizer {
+  flex: 0 0 1px;
+  width: 1px;
+  position: relative;
+  background: var(--border-light);
+  cursor: col-resize;
+  /* Never let a fast drag select the text either side of the divider. */
+  touch-action: none;
+  user-select: none;
+}
+
+.resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 -2px;
+}
+
+.resizer:hover,
+.resizer:focus-visible {
+  background: var(--accent-primary);
+  outline: none;
+}

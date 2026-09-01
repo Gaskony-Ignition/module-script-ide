@@ -152,8 +152,18 @@ export interface InitializeResult {
  * server, so nothing here percent-encodes it: the REST layer has to, because
  * the route matches a single path segment, and the socket does not.
  */
-export function lspUri(project: string, resourcePath: string): string {
-  return `ignition://${project}/${resourcePath}`;
+export function lspUri(project: string, resourcePath: string, scriptKey?: string): string {
+  // The DATA KEY is part of the identity, for the same reason it is part of a
+  // document's: a Web Dev endpoint is ONE resource path holding up to eight
+  // scripts. Without it, doGet.py and doPost.py share a server-side document —
+  // opening the second silently replaces the first's content, the outline shows
+  // the wrong file's symbols, and diagnostics land on the wrong buffer.
+  //
+  // Appended as a fragment so the URI is still a valid one and the base path is
+  // unchanged for every resource that has only one script (their key never
+  // varies, so omitting it keeps those URIs byte-identical to before).
+  const base = `ignition://${project}/${resourcePath}`;
+  return scriptKey && scriptKey !== 'code.py' ? `${base}#${scriptKey}` : base;
 }
 
 /** CodeMirror document offset → LSP position. Clamped, so a stale offset cannot throw. */

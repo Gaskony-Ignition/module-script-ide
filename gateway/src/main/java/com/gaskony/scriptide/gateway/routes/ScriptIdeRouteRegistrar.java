@@ -38,6 +38,7 @@ public class ScriptIdeRouteRegistrar {
     private final AuthRouteHandler authRouteHandler;
     private final ScriptResourceRouteHandler scriptResourceRouteHandler;
     private final ScriptAttributesRouteHandler scriptAttributesRouteHandler;
+    private final WebDevConfigRouteHandler webDevConfigRouteHandler;
 
     public ScriptIdeRouteRegistrar(GatewayContext context) {
         this.spaAssetRouteHandler = new SpaAssetRouteHandler();
@@ -48,6 +49,7 @@ public class ScriptIdeRouteRegistrar {
         this.scriptResourceRouteHandler = new ScriptResourceRouteHandler(projectManager);
         this.scriptAttributesRouteHandler =
             new ScriptAttributesRouteHandler(projectManager, scriptResourceRouteHandler);
+        this.webDevConfigRouteHandler = new WebDevConfigRouteHandler(projectManager);
     }
 
     /**
@@ -124,6 +126,24 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_JSON)
             .accessControl(admin)
             .handler(scriptAttributesRouteHandler::write)
+            .mount();
+
+        // ==================== Web Dev endpoint config ====================
+        // Its own route because a Web Dev endpoint has NO editable resource.json
+        // attributes — everything the Designer shows lives in a config.json data
+        // file. See WebDevConfigRouteHandler.
+
+        routes.newRoute(ScriptIdePaths.ROUTE_WEBDEV_CONFIG)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(webDevConfigRouteHandler::read)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_WEBDEV_CONFIG)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(webDevConfigRouteHandler::write)
             .mount();
 
         // ==================== SPA static assets (catch-all) ====================

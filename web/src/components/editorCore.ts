@@ -24,6 +24,7 @@ import {
   highlightSpecialChars,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { tags } from '@lezer/highlight';
 
 /**
@@ -92,6 +93,22 @@ export const byteFidelity: Extension[] = [
   // on any of CR, LF or CRLF and rejoins with \n — so opening and saving a file
   // with CRLF endings rewrites every line, invisibly.
   EditorState.lineSeparator.of('\n'),
+];
+
+/**
+ * Find and replace: Ctrl+F, Ctrl+H, F3, and match highlighting.
+ *
+ * CodeMirror's own panel rather than a hand-rolled one — it already handles
+ * regex, case sensitivity, whole-word, replace-all and the wrap-around, and each
+ * of those is a small bug waiting to happen if reimplemented.
+ *
+ * `top: true` puts the panel above the editor, where VS Code's is; the default
+ * is the bottom, which on this layout collides with the console pane.
+ */
+export const findAndReplace: Extension[] = [
+  search({ top: true }),
+  highlightSelectionMatches(),
+  keymap.of(searchKeymap),
 ];
 
 /** Editing surface, syntax and history — everything but keymaps and fidelity. */
