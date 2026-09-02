@@ -118,7 +118,15 @@ public final class DockerExec {
                 && info.has("State")
                 && info.getAsJsonObject("State").get("Running").getAsBoolean();
         } catch (Exception e) {
-            logger.debug("Docker socket present but unusable: {}", e.toString());
+            // WARN, not debug. Somebody deliberately mounted this socket, and
+            // the only symptom of it not working is an unprivileged shell —
+            // which looks exactly like a gateway where it was never mounted at
+            // all. This was logged at debug in the first version and cost a
+            // whole diagnosis: `SocketChannel.socket()` throws
+            // UnsupportedOperationException on a Unix-domain channel, so every
+            // request failed, and the route reported itself simply absent.
+            logger.warn("The Docker socket at {} is mounted but not usable, so the terminal "
+                + "will not be able to elevate: {}", socket, e.toString());
             return false;
         }
     }
@@ -301,37 +309,81 @@ public final class DockerExec {
 
     private static JsonObject get(Path socket, String path, String method) throws IOException {
         try (SocketChannel channel = connect(socket)) {
-            OutputStream out = Channels.newOutputStream(channel);
-            out.write((method + " " + path + " HTTP/1.1\r\nHost: docker\r\n"
-                + "Content-Length: 0\r\nConnection: close\r\n\r\n")
-                .getBytes(StandardCharsets.UTF_8));
-            out.flush();
-            return readJsonResponse(Channels.newInputStream(channel));
+            java.util.concurrent.ScheduledFuture<?> watchdog = withTimeout(channel);
+            try {
+                OutputStream out = Channels.newOutputStream(channel);
+                out.write((method + " " + path + " HTTP/1.1\r\nHost: docker\r\n"
+                    + "Content-Length: 0\r\nConnection: close\r\n\r\n")
+                    .getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                return readJsonResponse(Channels.newInputStream(channel));
+            } finally {
+                watchdog.cancel(false);
+            }
         }
     }
 
     private static JsonObject post(Path socket, String path, JsonObject body) throws IOException {
         byte[] payload = GSON.toJson(body).getBytes(StandardCharsets.UTF_8);
         try (SocketChannel channel = connect(socket)) {
-            OutputStream out = Channels.newOutputStream(channel);
-            out.write(("POST " + path + " HTTP/1.1\r\nHost: docker\r\n"
-                + "Content-Type: application/json\r\n"
-                + "Content-Length: " + payload.length + "\r\nConnection: close\r\n\r\n")
-                .getBytes(StandardCharsets.UTF_8));
-            out.write(payload);
-            out.flush();
-            return readJsonResponse(Channels.newInputStream(channel));
+            java.util.concurrent.ScheduledFuture<?> watchdog = withTimeout(channel);
+            try {
+                OutputStream out = Channels.newOutputStream(channel);
+                out.write(("POST " + path + " HTTP/1.1\r\nHost: docker\r\n"
+                    + "Content-Type: application/json\r\n"
+                    + "Content-Length: " + payload.length + "\r\nConnection: close\r\n\r\n")
+                    .getBytes(StandardCharsets.UTF_8));
+                out.write(payload);
+                out.flush();
+                return readJsonResponse(Channels.newInputStream(channel));
+            } finally {
+                watchdog.cancel(false);
+            }
         }
     }
 
+    /**
+     * A daemon-thread watchdog, so a wedged Docker daemon cannot hang a caller.
+     *
+     * <p>One thread for the whole module, and a daemon one so it never holds up
+     * JVM shutdown. Needed because a blocking channel has no read timeout of its
+     * own and the calling thread here is a user's terminal-open click.</p>
+     */
+    private static final java.util.concurrent.ScheduledExecutorService WATCHDOG =
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "script-ide-docker-watchdog");
+            thread.setDaemon(true);
+            return thread;
+        });
+
+    /**
+     * Open a control connection to the daemon.
+     *
+     * <p><b>Do not reintroduce {@code channel.socket().setSoTimeout(...)} here.</b>
+     * {@link SocketChannel#socket()} is specified to throw
+     * {@code UnsupportedOperationException} for a channel that is not IP-based,
+     * and a Unix-domain channel is not. The first version of this method called
+     * it, so every single control request threw, {@code available()} caught it
+     * as "the socket is unusable", and the whole Docker route reported itself
+     * absent — on a host where it was mounted and working. The only symptom was
+     * an unprivileged shell and one log line reading {@code elevation=none}.</p>
+     *
+     * <p>Timeouts come from {@link #withTimeout} instead: closing a blocked
+     * channel raises {@code AsynchronousCloseException} on the thread stuck in
+     * the read, which is the supported way to interrupt one.</p>
+     */
     private static SocketChannel connect(Path socket) throws IOException {
-        SocketChannel channel =
-            SocketChannel.open(UnixDomainSocketAddress.of(socket.toString()));
-        // A blocking channel has no connect/read timeout of its own, so a wedged
-        // daemon would hang the calling thread — which for `available()` is a
-        // user's terminal-open click.
-        channel.socket().setSoTimeout(CONTROL_TIMEOUT_MS);
-        return channel;
+        return SocketChannel.open(UnixDomainSocketAddress.of(socket.toString()));
+    }
+
+    /** Close {@code channel} after the control timeout, unblocking any read. */
+    private static java.util.concurrent.ScheduledFuture<?> withTimeout(SocketChannel channel) {
+        return WATCHDOG.schedule(() -> {
+            if (channel.isOpen()) {
+                logger.debug("Docker control request timed out; closing the connection");
+                closeQuietly(channel);
+            }
+        }, CONTROL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 
     // ---- HTTP, by hand -----------------------------------------------------

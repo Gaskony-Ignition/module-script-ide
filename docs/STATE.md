@@ -2,10 +2,10 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.4.2 · all phases complete · deployed, gate-green and live-validated on
+**Version 1.4.3 · all phases complete · deployed, gate-green and live-validated on
 `ignition-module-testing` (8.3.8) · 01/09/2026**
 
-1.1.0–1.4.2 are post-1.0 feature work driven by Nigel's review, not new phases.
+1.1.0–1.4.3 are post-1.0 feature work driven by Nigel's review, not new phases.
 1.3.0 added a **Gateway terminal**, moved the console into a **bottom panel**, and
 brought **Gateway Events** into line with the real Designer. 1.4.0 makes
 **inherited scripts read-only until overridden**, names and explains **Script Hint
@@ -43,6 +43,33 @@ remedy is one click from where you are.
 `Script Hint Scope` is the Designer's own control, on Project Library scripts
 only, top-right of the editor header. Its option order is **None · Designer ·
 Gateway · All** — measured, and NOT the bitmask order this module used.
+
+### 1.4.3 — the Docker route actually working, and a clipped last line
+
+- **`SocketChannel.socket()` throws on a Unix-domain channel.** 1.4.2's control
+  connections called it to set a read timeout, so every Docker API request threw,
+  `available()` caught it as "socket unusable", and the whole route reported
+  itself absent on a host where it was mounted and working. The only symptom was
+  an unprivileged shell and one log line reading `elevation=none`. Timeouts come
+  from a watchdog that closes the channel instead. **A mounted-but-unusable
+  socket now logs a WARN**, because the failure is otherwise indistinguishable
+  from never having mounted it.
+- **A fitted element must carry no vertical padding.** xterm's FitAddon sizes
+  from the computed height of the element the canvas sits in and does not
+  subtract that element's own padding, so 8px of `padding-top` fitted 11 rows
+  (220px) into a 216px content area and `overflow: hidden` ate the bottom of the
+  last line. Measured: host 224px, rows 220px. The inset moved to the wrapper.
+- **The rig runs a STOCK Ignition image** (Nigel, 02/09/2026: "We will not be
+  using custom ignition images"). The custom image built on 01/09 is gone, and so
+  is `Dockerfile.test`. git is `apt-get install -y git` from the root terminal.
+
+**Open, not resolved:** `validate_v13.py`'s terminal INPUT checks were removed
+because they stopped receiving any input in that suite's page state — not even a
+bare Enter — while the identical code in `validate_v14.py` types and reads back
+fine on the same build. Focus method, the customise-layout menu, panel
+visibility and duplicate xterm instances are all ruled out. The comment in
+`validate_v13.py` says so at the point it happened. If the terminal ever drops a
+user's input, start there.
 
 ### 1.4.2 — chrome sizing, one row, and a second route to root
 
@@ -124,7 +151,7 @@ line.
 delete without `If-Match` is 428 and with a stale one is 409; `enabled` round-trips
 on Shutdown and Update; a cron expression round-trips and a malformed one is a 400.
 
-**`validate_v14.py` — 23 checks, all in a real browser.** An inherited script
+**`validate_v14.py` — 25 checks, all in a real browser.** An inherited script
 opens with a bar naming the project it came from; **typing into it changes
 nothing** (2593 characters before, 2593 after — the same assertion that was made
 against the real Designer); Save is disabled and Ctrl+S does not fork the parent;
@@ -133,7 +160,7 @@ carries the Designer's name and option order, is the last thing on the strip and
 sits against its right edge; and the terminal reports `uid=0 root` with `git version 2.43.0` on the
 command line.
 
-**`validate_v13.py` — 25 checks, all in a real browser.** Gateway Events in the
+**`validate_v13.py` — 22 checks, all in a real browser.** Gateway Events in the
 Designer's order with the three singletons as rows rather than folders; the three
 layout toggles; the panel opening below the editor rather than beside it; a
 console run inside the panel; a terminal that shows a prompt, runs a command,
@@ -210,7 +237,7 @@ gutter marker.
   workspace has never been measured. Its tag-path list is the missing piece, and
   guessing the key would write a value the Designer never reads.
 - **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`; `v1.0.0`
-  through `v1.4.2` tagged 01–02/09/2026. The folder is gitignored by the workspace repo,
+  through `v1.4.3` tagged 01–02/09/2026. The folder is gitignored by the workspace repo,
   like every sibling module. There is **no GitHub release artefact** — the signed
   `.modl` is built locally and has not been attached to the tag.
 
