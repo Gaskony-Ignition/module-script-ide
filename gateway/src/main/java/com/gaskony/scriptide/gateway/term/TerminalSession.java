@@ -75,6 +75,15 @@ public class TerminalSession {
     private static final String THROTTLE_NOTE =
         "\r\n" + ESC + "[33m[output throttled]" + ESC + "[0m\r\n";
 
+    /**
+     * How long {@code script(1)} gets to go on SIGTERM before it is killed.
+     *
+     * <p>Short, because measured it never goes at all — it handles the signal —
+     * so this is the price of being polite to a well-behaved future version
+     * rather than a wait anybody depends on.</p>
+     */
+    private static final long TERM_GRACE_MILLIS = 300;
+
     public static final int MIN_COLS = 20;
     public static final int MAX_COLS = 500;
     public static final int MIN_ROWS = 5;
@@ -90,12 +99,15 @@ public class TerminalSession {
     private final OutputStream toShell;
     private final Path ttyFile;
     private final boolean pty;
+    /** How this shell actually got its privilege — see {@link #elevation()}. */
+    private final String elevation;
     private volatile String slavePath;
     private volatile long lastActivity = System.currentTimeMillis();
     private volatile boolean closed;
 
     private TerminalSession(String id, String username, Process process,
-                            DockerExec.Session docker, Path ttyFile, boolean pty) {
+                            DockerExec.Session docker, Path ttyFile, boolean pty,
+                            String elevation) {
         this.id = id;
         this.username = username;
         this.process = process;
@@ -103,11 +115,27 @@ public class TerminalSession {
         this.toShell = process != null ? process.getOutputStream() : null;
         this.ttyFile = ttyFile;
         this.pty = pty;
+        this.elevation = elevation;
     }
 
     /** How this shell is being run — for the audit line and the UI. */
     public String route() {
         return docker != null ? "docker-exec" : "process";
+    }
+
+    /**
+     * What actually elevated this shell: {@code docker-exec}, {@code sudo} or
+     * {@code none}.
+     *
+     * <p>The SAME three words {@code TerminalService} writes as
+     * {@code elevation=} on the open line, and that is the point of having this
+     * at all. The audit line is written before the shell starts, so it records
+     * what was <b>expected</b>; if the Docker route then fails and we fall back,
+     * only the session knows what really happened. Reading the audit and
+     * believing it without this would be reading a prediction as a fact.</p>
+     */
+    public String elevation() {
+        return elevation;
     }
 
     public String id() {
@@ -182,12 +210,16 @@ public class TerminalSession {
         String container = TerminalPolicy.dockerContainerForElevation();
         if (container != null) {
             try {
+                // The terminal id doubles as the session tag: it is a UUID this
+                // module minted, it is already unique per shell, and it means a
+                // process found in the sweep can be traced back to the audit
+                // line that opened it.
                 DockerExec.Session session = DockerExec.start(
                     container, shell,
                     workingDir != null ? workingDir.toString() : null,
-                    safeCols, safeRows);
+                    safeCols, safeRows, id);
                 TerminalSession terminal =
-                    new TerminalSession(id, username, null, session, null, true);
+                    new TerminalSession(id, username, null, session, null, true, "docker-exec");
                 terminal.pump(session.output(), onData, onExit);
                 return terminal;
             } catch (IOException e) {
@@ -262,8 +294,8 @@ public class TerminalSession {
         env.put("GIT_PAGER", "cat");
 
         Process process = builder.start();
-        TerminalSession session =
-            new TerminalSession(id, username, process, null, ttyFile, pty);
+        TerminalSession session = new TerminalSession(
+            id, username, process, null, ttyFile, pty, sudo != null ? "sudo" : "none");
         session.pump(process.getInputStream(), onData, onExit);
         return session;
     }
@@ -414,28 +446,49 @@ public class TerminalSession {
         }
         closed = true;
         if (docker != null) {
-            // Closing the hijacked stream hangs up the container-side pty and
-            // the shell exits on SIGHUP. No uid problem to work around: the
-            // process belongs to the daemon, not to this JVM.
+            // Sends the exit sequence, closes the stream and sweeps the
+            // container for anything still carrying this terminal's tag. Until
+            // 1.5.0 this was a bare stream close on the belief that it hung the
+            // pty up; it does not, and it left one root shell behind per
+            // terminal ever opened. DockerExec.Session.close() has the numbers.
             docker.close();
             cleanUp();
             logger.debug("Terminal {} closed for '{}' (docker-exec)", id, username);
             return;
         }
-        // Descendants first: destroying `script` alone can leave the shell it
-        // spawned running with nobody reading its output.
+
+        // ---- the script(1) routes ----------------------------------------
         //
-        // On an ELEVATED terminal those descendants are root and this JVM is
-        // not, so the destroy is a no-op the OS refuses silently — which is
-        // fine, and is why `script` itself is killed second rather than only.
-        // Killing it closes the pty master, the slave raises SIGHUP, and the
-        // root shell exits on the same mechanism that ends any hung-up session.
-        // The one thing we must not do is claim the descendant kill did the
-        // work: it is belt to the pty's braces, not the other way round.
+        // SIGTERM is not enough here, and 1.4.x's belief that it was is the same
+        // class of mistake as the Docker one. Measured 02/09/2026 on this host:
+        // `script` INSTALLS a SIGTERM handler and an interactive bash IGNORES
+        // SIGTERM outright, so `destroy()` on both left all four processes —
+        // script, the shell and two `sleep`s — running. SIGKILL on `script`
+        // alone cleared every one of them, because killing it closes the pty
+        // master, the slave raises SIGHUP, and bash hangs up its own jobs on the
+        // way out.
+        //
+        // So: ask politely, then insist. Descendants get the polite pass too
+        // (they are ordinary children and a `sleep` does go on SIGTERM), but on
+        // an ELEVATED terminal they are ROOT and this JVM is not, so the OS
+        // refuses those signals silently. That is exactly why `script` itself is
+        // killed rather than only its children: it is our own process, and the
+        // pty hang-up it causes is what actually reaches a root shell.
         process.descendants().forEach(ProcessHandle::destroy);
         process.destroy();
+        boolean gone = false;
+        try {
+            gone = process.waitFor(TERM_GRACE_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (!gone) {
+            process.descendants().forEach(ProcessHandle::destroyForcibly);
+            process.destroyForcibly();
+        }
         cleanUp();
-        logger.debug("Terminal {} closed for '{}'", id, username);
+        logger.debug("Terminal {} closed for '{}' (elevation={}, needed SIGKILL={})",
+            id, username, elevation, !gone);
     }
 
     private void cleanUp() {

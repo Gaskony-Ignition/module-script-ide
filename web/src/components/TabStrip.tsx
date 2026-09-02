@@ -5,7 +5,7 @@
  * separately — a dirty flag and a buffer drift apart, and the one place that
  * shows up is a tab that says "saved" over unsaved work.
  */
-import { isDirty, type OpenDoc } from '../workspace/documents';
+import { isDirty, isLockedByInheritance, type OpenDoc } from '../workspace/documents';
 import './TabStrip.css';
 
 export interface TabStripProps {
@@ -23,6 +23,12 @@ export default function TabStrip({ docs, activeUri, onSelect, onClose }: TabStri
       {docs.map((doc) => {
         const dirty = isDirty(doc);
         const active = doc.uri === activeUri;
+        // Measured off the real Designer (see documents.ts): an inherited,
+        // not-yet-overridden script opens headed "<name>  (Read-Only)". The
+        // editor already refuses every keystroke — see CodeEditor — but until
+        // now nothing on the TAB said so, and a tab strip with six scripts
+        // open gave no way to tell which one that was without clicking each.
+        const locked = isLockedByInheritance(doc);
         return (
           <div key={doc.uri} className={`tab${active ? ' is-active' : ''}`}>
             <button
@@ -33,7 +39,10 @@ export default function TabStrip({ docs, activeUri, onSelect, onClose }: TabStri
               title={`${doc.project} · ${doc.path}`}
               onClick={() => onSelect(doc.uri)}
             >
-              <span className="tab-name">{doc.label}</span>
+              <span className="tab-name">
+                {doc.label}
+                {locked && <span className="tab-readonly"> (Read-Only)</span>}
+              </span>
               {/* Rendered as a marker with a text alternative: a bare bullet is
                   invisible to a screen reader and to a test query alike. */}
               {dirty && (

@@ -66,6 +66,7 @@ function timer(name: string): ScriptEntry {
 
 describe('connection state', () => {
   it.each([
+    ['idle', 'idle', 'Language server idle'],
     ['open', 'connected', 'Language server connected'],
     ['connecting', 'reconnecting', 'Language server reconnecting…'],
     ['closed', 'offline', 'Language server offline'],
@@ -78,10 +79,13 @@ describe('connection state', () => {
     expect(line).toHaveClass(`is-${state}`);
   });
 
-  it('treats a socket nothing has ever opened as offline, not as connected', () => {
-    // `idle` is the state before the first script is opened. Anything but
-    // "offline" here would claim a language server that does not exist.
-    expect(connectionState('idle')).toBe('offline');
+  it('treats a socket nothing has ever opened as idle, not as offline', () => {
+    // The LSP connects lazily on the first script opened. Before this fix
+    // `idle` folded into `offline` and the landing page showed "Language
+    // server offline" in red before any document existed — a fault reading
+    // for a connection that was never even attempted. `offline` means a real
+    // attempt failed or a live connection dropped; neither has happened yet.
+    expect(connectionState('idle')).toBe('idle');
   });
 
   it('follows the transport when the socket drops and comes back', () => {
@@ -149,6 +153,17 @@ describe('counts', () => {
 
   it('says so plainly when the project has nothing in it', () => {
     expect(describeCounts([])).toBe('No scripts');
+  });
+
+  it('does not count an empty package folder as a script', () => {
+    // `isFolder` marks a placeholder row for an empty Project Library
+    // package (see FileTree/ScriptResourceRouteHandler#isPackageContainer) —
+    // it holds no code anyone wrote, and counting it would say "1 script"
+    // for a project that in fact has none.
+    const folder = library('MiningDemo');
+    folder.isFolder = true;
+    expect(describeCounts([folder])).toBe('No scripts');
+    expect(describeCounts([folder, library('helpers')])).toBe('1 script');
   });
 
   it('renders the count line, with the full text kept in the title', () => {

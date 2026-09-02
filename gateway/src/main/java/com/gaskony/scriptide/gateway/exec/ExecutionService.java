@@ -17,8 +17,12 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.LongConsumer;
 
 /**
  * Runs user scripts on a pool this module owns, and stops them as best it can.
@@ -44,6 +48,20 @@ import java.util.concurrent.atomic.AtomicLong;
  * then give up and mark the execution ABANDONED. You cannot kill a Java thread.
  * An abandoned thread permanently costs a pool slot, so it is counted and
  * surfaced rather than quietly tolerated.</p>
+ *
+ * <h2>{@link #submit} never blocks its caller, and that is the point</h2>
+ *
+ * <p>Until 1.5.0 this class had an {@code execute()} that waited on the worker's
+ * future. Its caller is a WebSocket frame handler, and {@code ScriptIdeSocket} is
+ * an {@code AutoDemanding} listener — one frame at a time, on the socket thread.
+ * So a running script held the whole connection: measured on 1.4.3, a Stop sent
+ * 1.5 s into a 20 s busy loop was not READ until the loop had finished, the loop
+ * ran its full 20.0 s, and every ping, LSP request and terminal keystroke queued
+ * behind it. The Stop button could not have worked, because nothing was listening.</p>
+ *
+ * <p>So the result now arrives through {@code onComplete} instead of a return
+ * value, the timeout ladder runs on the watchdog rather than a {@code future.get}
+ * with a deadline, and the socket thread is free the moment the work is accepted.</p>
  */
 public final class ExecutionService {
 
@@ -59,6 +77,24 @@ public final class ExecutionService {
     private final ThreadPoolExecutor pool;
     private final ScheduledExecutorService watchdog;
 
+    /**
+     * How a project name becomes a runner. Overridable for tests only.
+     *
+     * <p>See {@link ScriptRunner} for why the seam exists — the scheduling
+     * behaviour asserted around it has nothing to do with Jython, and proving it
+     * through a real interpreter would mean a unit test that boots one.</p>
+     */
+    private final Function<String, ScriptRunner> runnerFactory;
+
+    /**
+     * Step 1 of the stop ladder, as a seam.
+     *
+     * <p>{@code ScriptManager.interrupt} is a static on a platform class that does
+     * nothing useful outside a Gateway, so a test substitutes its own and the
+     * ladder itself stays exactly as measured.</p>
+     */
+    private final LongConsumer jythonInterrupt;
+
     /** In-flight executions by id. */
     private final Map<String, RunningExecution> running = new ConcurrentHashMap<>();
 
@@ -71,7 +107,19 @@ public final class ExecutionService {
     private final AtomicLong completedCount = new AtomicLong();
 
     public ExecutionService(GatewayContext context) {
+        this(context, null, ScriptManager::interrupt);
+    }
+
+    /** Test seam — see {@link #runnerFactory} and {@link #jythonInterrupt}. */
+    ExecutionService(Function<String, ScriptRunner> runnerFactory, LongConsumer jythonInterrupt) {
+        this(null, runnerFactory, jythonInterrupt);
+    }
+
+    private ExecutionService(GatewayContext context, Function<String, ScriptRunner> runnerFactory,
+                             LongConsumer jythonInterrupt) {
         this.context = context;
+        this.runnerFactory = runnerFactory == null ? this::runnerFor : runnerFactory;
+        this.jythonInterrupt = jythonInterrupt;
         int size = ExecPolicy.maxConcurrent();
         ThreadFactory factory = new ThreadFactory() {
             private final AtomicInteger n = new AtomicInteger(1);
@@ -125,15 +173,31 @@ public final class ExecutionService {
     }
 
     /**
-     * Submit a script for execution and wait for it, up to the configured timeout.
+     * Submit a script for execution and RETURN. The result arrives on a callback.
      *
-     * <p>Blocking by design: the caller is a WebSocket frame handler that wants a
-     * result to send back, and the pool is what provides the isolation.</p>
+     * <p>Non-blocking by design — see the class Javadoc. The caller is the socket
+     * thread and must be free to read the next frame, which is the only way a Stop
+     * can be heard at all.</p>
+     *
+     * <p>Callback order is guaranteed: {@code onStarted} once, on the worker thread
+     * immediately before the script runs; then any number of {@code output} chunks
+     * through {@code listener}; then {@code onComplete} exactly once. A client can
+     * therefore render output as it arrives and treat the completion as final.</p>
+     *
+     * @param onStarted run on the worker just before the script does — send the
+     *                  {@code started} frame here, not before the submit, so a
+     *                  rejection produces an error frame instead
+     * @param listener  where output goes as it is produced; whatever it receives is
+     *                  NOT repeated in the outcome
+     * @param onComplete the single completion, fired even when the script could not
+     *                  be stopped (the outcome then reports cancelled)
+     * @throws RejectedException when this session already has a script running, or
+     *                  the pool is full
      */
-    public PrivateStateRunner.Outcome execute(String executionId, String project, String source,
-                                              String fileName, PyObject locals,
-                                              String username, String sessionId)
-            throws InterruptedException {
+    public void submit(String executionId, String project, String source, String fileName,
+                       PyObject locals, String username, String sessionId,
+                       Runnable onStarted, ScriptRunner.OutputListener listener,
+                       Consumer<PrivateStateRunner.Outcome> onComplete) {
 
         String previous = executionBySession.putIfAbsent(sessionId, executionId);
         if (previous != null) {
@@ -144,39 +208,90 @@ public final class ExecutionService {
         RunningExecution execution = new RunningExecution(executionId, username, sessionId);
         running.put(executionId, execution);
 
-        try {
-            var future = pool.submit(() -> {
-                execution.thread = Thread.currentThread();
-                return runnerFor(project).run(source, fileName, locals);
-            });
-
-            long timeout = ExecPolicy.timeoutSeconds();
-            try {
-                return future.get(timeout, TimeUnit.SECONDS);
-            } catch (java.util.concurrent.TimeoutException e) {
-                logger.warn("Execution {} by '{}' exceeded {}s; stopping it",
-                    executionId, username, timeout);
-                requestStop(executionId);
-                // Give the ladder a moment to land before reporting back.
-                try {
-                    return future.get(ESCALATE_TO_THREAD_INTERRUPT_MS, TimeUnit.MILLISECONDS);
-                } catch (Exception ignored) {
-                    return new PrivateStateRunner.Outcome("", "", false,
-                        new IllegalStateException("Script exceeded the " + timeout
-                            + "s time limit and was stopped."), true);
-                }
-            } catch (java.util.concurrent.ExecutionException e) {
-                Throwable cause = e.getCause() == null ? e : e.getCause();
-                return new PrivateStateRunner.Outcome("", "", false, cause,
-                    PrivateStateRunner.isCancellation(cause));
+        // Exactly one of the worker and the timeout escalation gets to report.
+        AtomicBoolean reported = new AtomicBoolean();
+        Consumer<PrivateStateRunner.Outcome> report = outcome -> {
+            if (!reported.compareAndSet(false, true)) {
+                return;
             }
-        } catch (RejectedExecutionException e) {
-            throw new RejectedException(
-                "Too many scripts are running on this gateway right now. Try again shortly.");
-        } finally {
-            running.remove(executionId);
+            // The session slot is released on the REPORT, not on the thread
+            // actually ending: a script that cannot be stopped must not lock its
+            // owner out of the console for ever. The pool bound is what protects
+            // the gateway from the leaked thread, and abandonedCount() surfaces it.
             executionBySession.remove(sessionId, executionId);
             completedCount.incrementAndGet();
+            try {
+                onComplete.accept(outcome);
+            } catch (RuntimeException e) {
+                logger.debug("Completion callback for {} failed: {}", executionId, e.toString());
+            }
+        };
+
+        long timeout = ExecPolicy.timeoutSeconds();
+        try {
+            pool.execute(() -> {
+                execution.thread = Thread.currentThread();
+                try {
+                    onStarted.run();
+                } catch (RuntimeException e) {
+                    logger.debug("started callback for {} failed: {}", executionId, e.toString());
+                }
+                try {
+                    report.accept(runnerFactory.apply(project).run(source, fileName, locals,
+                        listener));
+                } catch (Throwable t) {
+                    // Throwable, not Exception: a Stop arrives as a Java Error.
+                    report.accept(new PrivateStateRunner.Outcome("", "", false, t,
+                        PrivateStateRunner.isCancellation(t)));
+                } finally {
+                    // Only here — while the entry is present, requestStop can still
+                    // climb its ladder and currentExecutions() tells the truth about
+                    // a thread that is genuinely still spinning.
+                    running.remove(executionId);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            running.remove(executionId);
+            executionBySession.remove(sessionId, executionId);
+            throw new RejectedException(
+                "Too many scripts are running on this gateway right now. Try again shortly.");
+        }
+
+        // The timeout, on the watchdog rather than a future.get deadline. Same
+        // ladder as before: ask it to stop, give the interrupt a moment to land,
+        // then report it as cancelled whether or not the thread actually died.
+        watchdog.schedule(() -> {
+            if (reported.get()) {
+                return;
+            }
+            logger.warn("Execution {} by '{}' exceeded {}s; stopping it",
+                executionId, username, timeout);
+            requestStop(executionId);
+            watchdog.schedule(() -> report.accept(new PrivateStateRunner.Outcome("", "", false,
+                    new IllegalStateException("Script exceeded the " + timeout
+                        + "s time limit and was stopped."), true)),
+                ESCALATE_TO_THREAD_INTERRUPT_MS, TimeUnit.MILLISECONDS);
+        }, timeout, TimeUnit.SECONDS);
+    }
+
+    /** Whether this execution is still in flight. */
+    public boolean isRunning(String executionId) {
+        return executionId != null && running.containsKey(executionId);
+    }
+
+    /**
+     * Stop whatever this session is running, if anything. Used when a socket closes.
+     *
+     * <p>Scans the in-flight set rather than reading the per-session slot, because
+     * the slot is released when a run is REPORTED and a run that timed out is
+     * reported while its thread is still spinning. Those are precisely the runs
+     * worth chasing when the browser has gone.</p>
+     */
+    public void stopAllFor(String sessionId) {
+        for (RunningExecution execution : running.values()) {
+            if (execution.sessionId.equals(sessionId)) {
+                requestStop(execution.id);
+            }
         }
     }
 
@@ -198,7 +313,7 @@ public final class ExecutionService {
 
         // Step 1 — the Jython interrupt. Fires at the next Python trace point.
         try {
-            ScriptManager.interrupt(thread.getId());
+            jythonInterrupt.accept(thread.getId());
         } catch (RuntimeException e) {
             logger.debug("ScriptManager.interrupt failed for {}: {}", executionId, e.getMessage());
         }
@@ -279,7 +394,8 @@ public final class ExecutionService {
         // resolves the project's current ScriptManager on every run, so a script the
         // user just saved is visible immediately. See PrivateStateRunner.
         return runnersByProject.computeIfAbsent(project, p ->
-            new PrivateStateRunner(() -> context.getProjectManager().getProjectScriptManager(p)));
+            new PrivateStateRunner(
+                () -> context.getProjectManager().getProjectScriptManager(p), watchdog));
     }
 
     /** A fresh locals map for the given project — the REPL state of one console. */

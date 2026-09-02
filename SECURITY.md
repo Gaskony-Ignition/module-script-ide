@@ -39,7 +39,9 @@ Specifics that matter:
   both read and write demand `moduleId == "ignition"` *and* a known script type. A
   Perspective view or a tag configuration cannot be written through them.
 - **Every execution is audited** before it runs, recording a SHA-256 of the source
-  plus its size — never the source itself. An audit table is not a code store, and
+  plus its size — never the source itself. Streaming the output back (1.5.0)
+  changed nothing here: the chunks go to the one socket that submitted the run and
+  are never retained by the module. An audit table is not a code store, and
   a credential typed into the console must not be copied into one.
 
 ## The terminal (1.3.0)
@@ -66,7 +68,9 @@ keep the Script Console and refuse the shell:
 | `com.gaskony.scriptide.terminal.docker` | `true` | `false` refuses the Docker route, keeping sudo |
 
 `terminal.requireAdmin=false` needs `terminal.acknowledgeRisk=true` alongside it,
-the same two-flag shape as execution, and warns on every open.
+the same two-flag shape as execution, and warns on every open. Every property
+here can be set as a `-D` at boot or in the live policy file — see "Turning it
+off".
 
 Three specifics:
 
@@ -84,14 +88,11 @@ Three specifics:
   keeping a transcript of everything typed, including anything pasted. Auditing
   the open is honest; auditing the session would be a credential store.
 
-Every shell is closed when its socket closes and when the module shuts down —
-process descendants first, since destroying `script` alone can leave the shell it
-spawned running with nobody reading its output.
-
 ### Elevation (1.4.0)
 
 `com.gaskony.scriptide.terminal.privileged` defaults to **`true`**, and when it is
-on a new terminal runs `sudo -n -H <shell> -i` instead of the shell directly.
+on a new terminal takes the Docker route if the host allows it and otherwise runs
+`sudo -n -H <shell> -i` instead of the shell directly.
 
 **This cannot make a gateway more privileged than its host already made it.** The
 module is Java inside a JVM that is already running as the Gateway's own
@@ -115,10 +116,17 @@ Three specifics:
   `sudo script` would give us a root process the JVM cannot kill, and the idle
   sweeper would be a promise the module could not keep. On an elevated terminal
   the descendant `destroy()` is refused by the OS and the shell exits on the
-  pty's SIGHUP instead — that is the mechanism, not a fallback.
-- **The audit line records `elevated=`.** "Opened a shell" and "opened a root
-  shell" are different events to whoever reads the log later, and the answer is
-  decided by the host rather than by anything the user sent.
+  pty's SIGHUP instead — that is the mechanism, not a fallback. Since 1.5.0
+  `script` is killed outright when it has not gone 300 ms after SIGTERM, because
+  it handles SIGTERM and an interactive bash ignores it.
+- **The audit line records `elevation=`**, one of `docker-exec`, `sudo` or
+  `none`. "Opened a shell" and "opened a root shell" are different events to
+  whoever reads the log later, and the answer is decided by the host rather than
+  by anything the user sent. The line is written before the shell starts, so it
+  records what was EXPECTED; since 1.5.0 the session reports what it actually
+  got, and a mismatch — the Docker route failing and the shell falling back to a
+  local one — is logged as a WARN naming both. A log that quietly overstates
+  privilege is worse than no log.
 
 ### Two routes, and they are NOT the same risk (1.4.2)
 
@@ -127,7 +135,7 @@ by reading configuration:
 
 | Route | What the host must already allow | What it grants |
 | --- | --- | --- |
-| **Docker daemon** (preferred) | its socket mounted and writable by the Gateway's user | root **in this container** |
+| **Docker daemon** (preferred) | its socket mounted and writable by the Gateway's user | a root shell in this container — and, to anything that can reach the socket, **root on the HOST** |
 | **sudo** | a passwordless sudoers rule for the Gateway's user | root **in this container** |
 | neither | — | the ordinary shell |
 
@@ -149,14 +157,54 @@ exposure. `terminal.docker=false` refuses that route from the gateway side while
 keeping sudo; `terminal.privileged=false` refuses both.
 
 What the Docker route is genuinely better at, once you have accepted it: nothing
-has to be installed in the image, the pty comes from the daemon rather than
-being borrowed from `script(1)`, resize is an API call rather than an `stty`
-typed at the shell, and closing works — the shell is the daemon's child, where a
-`sudo`-elevated root shell is a process this JVM cannot signal at all.
+has to be installed in the image, the pty comes from the daemon rather than being
+borrowed from `script(1)`, and resize is an API call rather than an `stty` typed
+at the shell.
+
+**Closing is not one of them.** Until 1.5.0 this section claimed the shell exits
+when the hijacked connection closes, because it is the daemon's child. Measured
+false on 02/09/2026: the Engine API has no "kill this exec", the daemon keeps the
+process running detached, and thirty-eight orphaned root `bash -i` processes were
+found in the test container — one for every terminal ever opened — with the
+120-minute idle reaper calling the same no-op. See "Ending a terminal" below.
+
+### Ending a terminal (1.5.0)
+
+Every shell is closed when its socket closes, when the idle sweeper fires, and
+when the module shuts down. Neither route ends by itself, and each needs its own
+sequence:
+
+- **The Docker route.** ETX (^C), then EOT (^D), then a literal `exit` for a
+  shell with `ignoreeof` set; the exec is then polled for `Running:false` for up
+  to 750 ms. That cannot reach a background job — `sleep 300 &` outlives its
+  shell by design — so a second, non-tty root exec ALWAYS runs afterwards and
+  walks `/proc/*/environ` for `SCRIPTIDE_TERM=<terminal id>`, sending `SIGHUP`,
+  waiting a second, then `SIGKILL`. The tag is the terminal id this module
+  minted, it is inherited by everything the shell starts, and it is matched
+  whole-line, so the sweep takes a shell's own jobs with it and nothing else. A
+  shell still running after both steps is logged as a WARN. The exec's own `Pid`
+  is not usable for any of this: the daemon reports it in the HOST pid namespace,
+  where this JVM can neither see nor signal it.
+- **The `script(1)` routes.** Descendants and `script` get `destroy()`, then
+  `destroyForcibly()` 300 ms later. `script` installs a SIGTERM handler and an
+  interactive bash ignores SIGTERM outright, so SIGTERM alone left every process
+  running; SIGKILL on `script` closes the pty master, the slave raises SIGHUP and
+  bash hangs up its own jobs on the way out. On an elevated terminal the
+  descendants are root and this JVM is not, so those signals are refused
+  silently — which is exactly why `script` itself is killed rather than only its
+  children.
+
+Module shutdown waits (bounded at 10 s) for the Docker sweeps it started, because
+they run on a daemon thread that the JVM would otherwise simply drop — leaving
+behind the root shells shutdown was closing.
 
 ## Turning it off
 
-Set in `data/ignition.conf` as `wrapper.java.additional.N=-D<key>=<value>`:
+Two places, and the file wins: a **live policy file** first, then a JVM system
+property set in `data/ignition.conf` as
+`wrapper.java.additional.N=-D<key>=<value>`, then the built-in default. Both
+`ExecPolicy` and `TerminalPolicy` read through the same source, so one file covers
+execution and the terminal alike:
 
 | Property | Default | Effect |
 | --- | --- | --- |
@@ -171,6 +219,37 @@ Two flags, because handing arbitrary Gateway-JVM execution to every authenticate
 user should not be reachable by one typo'd property.
 
 An unparseable boolean falls back to the **secure** value, never to `false`.
+
+### The live policy file (1.5.0)
+
+```
+<gateway data dir>/modules/scriptide/policy.properties
+
+# Standard java.util.Properties syntax. Keys are the SAME fully-qualified names
+# used as system properties, so a line can be copied straight out of
+# ignition.conf with the -D removed. Unknown keys are ignored.
+com.gaskony.scriptide.execution.enabled=true
+com.gaskony.scriptide.terminal.enabled=true
+com.gaskony.scriptide.terminal.privileged=true
+com.gaskony.scriptide.terminal.docker=true
+```
+
+Both policy classes already re-read their values on every call — and every value
+came from a system property, which is read once, when the JVM starts. So "turn
+the terminal off without restarting anything" was true of the code and false of
+the gateway: it meant editing `ignition.conf` and bouncing the gateway, which the
+estate's no-restart rule forbids. The file closes that gap; the system property
+stays, because it is the right way to state a fleet default at boot.
+
+- **The module never creates this file.** Absent means "no overrides", which is
+  where every existing gateway already is.
+- **Its permissions are a security control in their own right**, exactly as
+  `ignition.conf`'s are: it can turn the Administrator requirement off, so it must
+  be readable and writable by the Gateway's own operating-system user and by
+  nobody else.
+- **It is re-statted at most once every 2 seconds**, on mtime and size together —
+  not watched — so a change lands within two seconds without a thread, a
+  lifecycle or a shutdown hook.
 
 ## Isolation
 
@@ -187,6 +266,14 @@ against the live gateway on every release.
 
 ## Stopping a script is best-effort
 
+**Until 1.5.0 the Stop button could not work at all**, whatever the interpreter
+did: the socket's frame handler blocked inside the execution, and
+`ScriptIdeSocket` reads one frame at a time on the socket thread — so a stop sent
+into a running loop was not READ until the loop had ended, and the LSP and the
+terminal queued behind it too. Execution is submitted and returns now, and
+`started`, `output` and `finished` are sent from its callbacks.
+
+What the interpreter does is unchanged, and is still best-effort.
 `ScriptManager.interrupt()` fires at the next Python trace point. Measured: a 15 s
 busy loop stops in 3.0 s; an interrupted `time.sleep(10)` still runs the full
 10.06 s. A script blocked in a JDBC call, a socket read, or `time.sleep` **cannot

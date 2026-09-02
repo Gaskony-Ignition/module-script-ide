@@ -92,10 +92,29 @@ export class TermClient {
     });
   }
 
-  open(cols: number, rows: number, csrfToken?: string): boolean {
-    return this.transport.send('term', {
-      action: 'open', cols, rows, ...(csrfToken ? { csrfToken } : {}),
+  /**
+   * Ask for a shell. Returns a function that withdraws the request if it has
+   * not gone out yet.
+   *
+   * The terminal opens the moment its view mounts, and on a tab where nothing
+   * else has used the socket that moment is BEFORE the socket is open: the
+   * transport's `send()` starts the connection and then returns false, and the
+   * one frame that mattered is dropped — measured 02/09/2026, the xterm mounted
+   * and the prompt never came. So a frame that cannot go now is sent by the
+   * transport's next `onOpen`, once. The disposer exists because a view that
+   * unmounts in that window must not have a shell opened for it afterwards;
+   * nothing would ever close it.
+   */
+  open(cols: number, rows: number, csrfToken?: string): () => void {
+    const frame = { action: 'open', cols, rows, ...(csrfToken ? { csrfToken } : {}) };
+    if (this.transport.send('term', frame)) {
+      return () => {};
+    }
+    const unsubscribe = this.transport.onOpen(() => {
+      unsubscribe();
+      this.transport.send('term', frame);
     });
+    return unsubscribe;
   }
 
   input(id: string, data: string, csrfToken?: string): boolean {

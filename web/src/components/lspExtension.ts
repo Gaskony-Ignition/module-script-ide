@@ -165,8 +165,16 @@ async function infoDom(
     /* an unresolvable item still shows its detail line */
   }
   const body = documentationText(resolved.documentation);
-  if (!body && !resolved.detail && !deprecated) return null;
-  return textPanel([deprecated ? 'Deprecated.' : '', resolved.detail ?? '', body]);
+  // The server's resolved `documentation` markdown already OPENS with the
+  // signature as a fenced snippet (LanguageServer#markdownFor puts entry.detail()
+  // in a ```python fence before anything else), and that is the exact same
+  // string as `resolved.detail`. Rendering both blocks put the signature on
+  // screen twice — once as its own line, once as the first line of the body.
+  // Only show `detail` on its own when the body does not already start with it
+  // (a bare `detail` with no documentation at all, say).
+  const detail = resolved.detail && !body.startsWith(resolved.detail) ? resolved.detail : '';
+  if (!body && !detail && !deprecated) return null;
+  return textPanel([deprecated ? 'Deprecated.' : '', detail, body]);
 }
 
 /** A plain-text tooltip body. textContent only — never innerHTML. */

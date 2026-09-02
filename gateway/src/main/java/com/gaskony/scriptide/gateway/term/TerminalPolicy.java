@@ -9,9 +9,12 @@ import java.nio.file.Path;
 /**
  * The fleet-wide switches governing the Gateway terminal.
  *
- * <p>Read from system properties on EVERY call, exactly as {@code ExecPolicy} is,
- * so a gateway operator can turn the terminal off on a running gateway. Set them
- * in {@code data/ignition.conf} as {@code wrapper.java.additional.N=-Dkey=value}.</p>
+ * <p>Read on EVERY call, exactly as {@code ExecPolicy} is, from the LIVE policy
+ * file first ({@link PolicySource}), then a JVM system property set in
+ * {@code data/ignition.conf} as {@code wrapper.java.additional.N=-Dkey=value},
+ * then the built-in default. The file is what lets a gateway operator turn the
+ * terminal off on a RUNNING gateway; a system property cannot be changed without
+ * restarting the JVM, which the estate rule forbids.</p>
  *
  * <h2>Why this defaults to on</h2>
  *
@@ -109,6 +112,22 @@ public final class TerminalPolicy {
 
     private TerminalPolicy() { /* static config accessor */ }
 
+    /**
+     * Point the live overrides at a file.
+     *
+     * <p>Delegates: {@link PolicySource} is shared with {@code ExecPolicy} so one
+     * file covers both, and the module hook only has to call this once.</p>
+     */
+    public static void setPropertiesFile(java.nio.file.Path path) {
+        PolicySource.setPropertiesFile(path);
+    }
+
+    /** The live file first, then the system property. Null when neither sets it. */
+    private static String raw(String key) {
+        String live = PolicySource.value(key);
+        return live != null ? live : System.getProperty(key);
+    }
+
     public static boolean terminalEnabled() {
         return boolProperty(PROP_ENABLED, true);
     }
@@ -147,7 +166,7 @@ public final class TerminalPolicy {
      * refused and the built-in candidates are used instead.</p>
      */
     public static String shell() {
-        String configured = System.getProperty(PROP_SHELL);
+        String configured = raw(PROP_SHELL);
         if (configured != null && !configured.isBlank()) {
             String trimmed = configured.trim();
             if (isSafeShellPath(trimmed)) {
@@ -295,7 +314,7 @@ public final class TerminalPolicy {
     }
 
     private static boolean boolProperty(String key, boolean fallback) {
-        String raw = System.getProperty(key);
+        String raw = raw(key);
         if (raw == null || raw.isBlank()) {
             return fallback;
         }
@@ -310,7 +329,7 @@ public final class TerminalPolicy {
     }
 
     private static long longProperty(String key, long fallback) {
-        String raw = System.getProperty(key);
+        String raw = raw(key);
         if (raw == null || raw.isBlank()) {
             return fallback;
         }

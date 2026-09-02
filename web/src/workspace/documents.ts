@@ -8,6 +8,18 @@
  */
 import type { ScriptEntry, ScriptOrigin } from '../api/scripts';
 
+/**
+ * Where a DOCUMENT comes from — a superset of {@link ScriptOrigin}.
+ *
+ * `'new'` has no equivalent on the server: it means this buffer was opened
+ * without ever reading a resource, because none exists yet. Clicking an absent
+ * Startup/Shutdown/Update row is the only way to reach it — see {@link
+ * newUnsavedDoc}. The resource is created on the FIRST save, exactly like the
+ * "New script…" dialog's own create, and {@link OpenDoc.origin} moves to
+ * `'local'` the moment that succeeds (see `commitSaved` in Workspace.tsx).
+ */
+export type DocOrigin = ScriptOrigin | 'new';
+
 export interface OpenDoc {
   /** Stable key: project + resource path. A script is per-project, not global. */
   uri: string;
@@ -21,7 +33,7 @@ export interface OpenDoc {
   typeLabel: string;
   /** Short name for the tab strip. */
   label: string;
-  origin: ScriptOrigin;
+  origin: DocOrigin;
   /** Resource signature this edit is based on; the If-Match for the next save. */
   etag: string;
   /** The text as last agreed with the gateway. */
@@ -75,9 +87,16 @@ export function docUri(project: string, path: string, scriptKey?: string): strin
   return scriptKey ? `${project}::${path}::${scriptKey}` : `${project}::${path}`;
 }
 
-/** True when the buffer differs from what the gateway last agreed to. */
+/**
+ * True when the buffer differs from what the gateway last agreed to.
+ *
+ * A `'new'` document is ALWAYS dirty, even with an empty buffer: nothing has
+ * been agreed with the gateway at all — there is no resource yet for
+ * `baseText` to be "the last read of" — so text-equality would say "clean" for
+ * a document that, if closed right now, discards a script nobody has created.
+ */
 export function isDirty(doc: OpenDoc): boolean {
-  return doc.text !== doc.baseText;
+  return doc.origin === 'new' || doc.text !== doc.baseText;
 }
 
 /**
@@ -111,6 +130,44 @@ export function newDoc(entry: ScriptEntry, project: string, text: string, etag: 
     text,
     // Always false on open, whatever the origin. An override is a gesture, and
     // a document that starts overridden is a document nobody chose to fork.
+    overridden: false,
+  };
+}
+
+/**
+ * Open a DRAFT for a singleton that does not exist on the gateway yet.
+ *
+ * The real Designer creates nothing until the user saves — clicking an absent
+ * Startup/Shutdown/Update row there just opens an empty editor. Before 1.5.0
+ * this module called `createScript` on the click itself, which meant browsing
+ * the tree could add resources (and git diffs) to a live project with no
+ * confirmation and no save. This is the fix: an ordinary buffer with no
+ * gateway-agreed text and no ETag, `origin: 'new'`, that only becomes a real
+ * resource on the first save (through the ordinary create path — see
+ * ScriptResourceRouteHandler#write, which takes the create branch whenever the
+ * resource does not already exist, base signature or none). Closing the tab
+ * without saving discards it; nothing was ever written.
+ */
+export function newUnsavedDoc(params: {
+  project: string;
+  path: string;
+  scriptKey: string;
+  typeLabel: string;
+  label: string;
+}): OpenDoc {
+  return {
+    uri: docUri(params.project, params.path, params.scriptKey),
+    project: params.project,
+    path: params.path,
+    scriptKey: params.scriptKey,
+    typeLabel: params.typeLabel,
+    label: params.label,
+    origin: 'new',
+    // No ETag: there is nothing on the gateway yet to match against, and the
+    // write route does not ask for one on its create branch.
+    etag: '',
+    baseText: '',
+    text: '',
     overridden: false,
   };
 }

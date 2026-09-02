@@ -6,14 +6,25 @@ import org.python.core.CompilerFlags;
 import org.python.core.Py;
 import org.python.core.PyCode;
 import org.python.core.PyException;
+import org.python.core.PyFrame;
 import org.python.core.PyObject;
 import org.python.core.PyStringMap;
 import org.python.core.PySystemState;
+import org.python.core.ThreadState;
+import org.python.core.TraceFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -49,13 +60,33 @@ import java.util.function.Supplier;
  * <p>Both were found the hard way, one spike iteration each. Removing either
  * breaks isolation silently — and one of the two failure modes is cross-user data
  * leakage, not merely lost output.</p>
+ *
+ * <h2>Output is streamed, and the outcome then carries none of it</h2>
+ *
+ * <p>When a {@link ScriptRunner.OutputListener} is supplied, captured bytes are
+ * pushed to it in chunks and are <b>not</b> retained: {@code Outcome.stdout()} and
+ * {@code Outcome.stderr()} come back EMPTY. That split is deliberate and is the
+ * whole reason the client can render output as it arrives without double-printing
+ * — see the {@code finished} frame's contract in {@code execClient.ts}. With no
+ * listener the old behaviour stands and the outcome carries everything, which is
+ * what the tests use.</p>
+ *
+ * <p>A chunk is flushed on a newline, at 4 KB, or every 100 ms, whichever comes
+ * first. The newline rule is what makes {@code print} in a loop feel live; the
+ * timer is what saves a script that writes a long line without ever ending it.</p>
  */
-public final class PrivateStateRunner {
+public final class PrivateStateRunner implements ScriptRunner {
 
     private static final Logger logger = LoggerFactory.getLogger(PrivateStateRunner.class);
 
     /** Per-execution output cap. Beyond this, output is dropped, not the script. */
     static final int MAX_CAPTURED_BYTES = 2 * 1024 * 1024;
+
+    /** Flush a partial chunk this often, so an unterminated line still appears. */
+    static final long FLUSH_INTERVAL_MS = 100;
+
+    /** Flush early once a chunk reaches this size, whatever it contains. */
+    static final int FLUSH_AT_BYTES = 4096;
 
     /**
      * Resolves the project's CURRENT ScriptManager.
@@ -88,8 +119,25 @@ public final class PrivateStateRunner {
     /** The manager {@link #managerState} was probed from; a new one invalidates it. */
     private volatile ScriptManager managerStateOwner;
 
+    /**
+     * Drives the 100 ms flush, or {@code null} for newline/size flushing only.
+     *
+     * <p>Borrowed rather than owned: {@link ExecutionService} already runs a
+     * single-threaded scheduler for the stop ladder, and one more periodic task
+     * per in-flight run costs nothing there. A thread of our own would have to be
+     * shut down by whoever constructed us, which is exactly the sort of lifecycle
+     * nobody remembers to wire up.</p>
+     */
+    private final ScheduledExecutorService flushScheduler;
+
     public PrivateStateRunner(Supplier<ScriptManager> scriptManagerSupplier) {
+        this(scriptManagerSupplier, null);
+    }
+
+    public PrivateStateRunner(Supplier<ScriptManager> scriptManagerSupplier,
+                              ScheduledExecutorService flushScheduler) {
         this.scriptManagerSupplier = scriptManagerSupplier;
+        this.flushScheduler = flushScheduler;
     }
 
     /** What one execution produced. */
@@ -101,6 +149,11 @@ public final class PrivateStateRunner {
         }
     }
 
+    /** Execute {@code source}, accumulating its output rather than streaming it. */
+    public Outcome run(String source, String fileName, PyObject locals) {
+        return run(source, fileName, locals, null);
+    }
+
     /**
      * Execute {@code source}, capturing its output privately.
      *
@@ -109,10 +162,19 @@ public final class PrivateStateRunner {
      *                 frames can be mapped back to an editor tab
      * @param locals   the locals map; pass the SAME one across calls for a console
      *                 session to behave like a REPL
+     * @param listener streams output as it is produced; when present the returned
+     *                 outcome carries NO stdout or stderr, because everything has
+     *                 already been sent (see the class Javadoc)
      */
-    public Outcome run(String source, String fileName, PyObject locals) {
-        BoundedOutputStream out = new BoundedOutputStream(MAX_CAPTURED_BYTES);
-        BoundedOutputStream err = new BoundedOutputStream(MAX_CAPTURED_BYTES);
+    @Override
+    public Outcome run(String source, String fileName, PyObject locals,
+                       OutputListener listener) {
+        Capture out = capture("stdout", listener);
+        Capture err = capture("stderr", listener);
+        // One task for both streams: two would double the scheduler load for no
+        // benefit, and the flush is a no-op when there is nothing pending.
+        ScheduledFuture<?> pump = (listener == null || flushScheduler == null) ? null
+            : schedulePump(out, err);
 
         ScriptManager scriptManager = scriptManagerSupplier.get();
         PySystemState mgr = managerState(scriptManager);
@@ -120,6 +182,8 @@ public final class PrivateStateRunner {
         applyModuleRegistry(state, mgr);
 
         PySystemState previous = Py.getSystemState();
+        ThreadState ts = Py.getThreadState();
+        FrameSnapshot before = FrameSnapshot.of(ts);
         Throwable failure = null;
         boolean cancelled = false;
         try {
@@ -139,19 +203,44 @@ public final class PrivateStateRunner {
             failure = t;
             cancelled = isCancellation(t);
         } finally {
+            before.restore(ts);
             flushQuietly(scriptManager, locals);
             try {
                 Py.setSystemState(previous);
             } catch (RuntimeException e) {
                 logger.debug("Could not restore the previous PySystemState: {}", e.getMessage());
             }
+            // Cancel BEFORE the final flush, or the pump can interleave with it and
+            // the last two chunks arrive out of order on the same stream.
+            if (pump != null) {
+                pump.cancel(false);
+            }
+            out.finish();
+            err.finish();
         }
 
         boolean truncated = out.truncated() || err.truncated();
-        return new Outcome(
-            out.toString(StandardCharsets.UTF_8),
-            err.toString(StandardCharsets.UTF_8),
-            truncated, failure, cancelled);
+        return new Outcome(out.captured(), err.captured(), truncated, failure, cancelled);
+    }
+
+    /** A stream that streams to {@code listener}, or one that accumulates. */
+    private static Capture capture(String name, OutputListener listener) {
+        return listener == null
+            ? new BoundedOutputStream(MAX_CAPTURED_BYTES)
+            : new StreamingOutputStream(MAX_CAPTURED_BYTES, name, listener);
+    }
+
+    private ScheduledFuture<?> schedulePump(Capture out, Capture err) {
+        return flushScheduler.scheduleWithFixedDelay(() -> {
+            // Never let a flush failure kill the periodic task — a cancelled
+            // ScheduledFuture is silent, and the run would simply stop streaming.
+            try {
+                out.flushPending();
+                err.flushPending();
+            } catch (RuntimeException e) {
+                logger.debug("Output flush failed: {}", e.toString());
+            }
+        }, FLUSH_INTERVAL_MS, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -252,6 +341,43 @@ public final class PrivateStateRunner {
     }
 
     /**
+     * The interpreter frame state a pool thread carried BEFORE a run, restored
+     * after it whether or not the run ended cleanly.
+     *
+     * <p>A Stop poisons the thread it lands on. {@code ScriptManager.interrupt}
+     * installs a {@code BreakTraceFunction} on the running frame, and when that
+     * function throws from inside {@code PyTableCode.call}'s exception handler
+     * the error escapes BEFORE the handler pops the frame, so
+     * {@code ThreadState.frame} stays pointed at the dead {@code <console>} frame
+     * with the trace function still attached. Measured on 1.5.0 (02/09/2026):
+     * every later run on that pool thread came back "cancelled" with no output
+     * and no error, two Stops took half the pool, and four would have taken the
+     * console until the gateway restarted. Restoring the thread's frame state
+     * after every run — measured the same way — is what fixed it.</p>
+     */
+    record FrameSnapshot(PyFrame frame, TraceFunction tracefunc, PyException exception) {
+
+        static FrameSnapshot of(ThreadState ts) {
+            return new FrameSnapshot(ts.frame, ts.tracefunc, ts.exception);
+        }
+
+        void restore(ThreadState ts) {
+            if (ts.frame != frame) {
+                // Strip the trace function from every frame the run left behind:
+                // interrupt() may have reached frames nothing points at any more,
+                // and a chain that still carries one is a trap for whatever
+                // borrows it next.
+                for (PyFrame f = ts.frame; f != null && f != frame; f = f.f_back) {
+                    f.tracefunc = null;
+                }
+                ts.frame = frame;
+            }
+            ts.tracefunc = tracefunc;
+            ts.exception = exception;
+        }
+    }
+
+    /**
      * Whether a Throwable is the platform cancelling a script rather than the
      * script failing.
      *
@@ -273,12 +399,38 @@ public final class PrivateStateRunner {
     }
 
     /**
+     * A capped output sink, whether it accumulates or streams.
+     *
+     * <p>An abstract class rather than an interface because Jython is handed a
+     * plain {@link OutputStream} and both variants have to BE one; the two are
+     * otherwise interchangeable, which is what lets the streaming decision be a
+     * single ternary in {@link #capture}.</p>
+     */
+    abstract static class Capture extends OutputStream {
+
+        /** Whether the cap was reached and output was dropped. */
+        abstract boolean truncated();
+
+        /** Everything retained — empty for a streaming capture, by design. */
+        abstract String captured();
+
+        /** Push whatever is buffered to the listener. A no-op when accumulating. */
+        void flushPending() {
+        }
+
+        /** Last flush of the run, after which nothing more will be written. */
+        void finish() {
+        }
+    }
+
+    /**
      * Captures output up to a cap, then silently drops the rest.
      *
      * <p>Deliberately does NOT stop the script: a chatty loop should lose its
      * output, not be killed halfway through whatever it was doing to the gateway.</p>
      */
-    static final class BoundedOutputStream extends ByteArrayOutputStream {
+    static final class BoundedOutputStream extends Capture {
+        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         private final int limit;
         private boolean truncated;
 
@@ -286,32 +438,176 @@ public final class PrivateStateRunner {
             this.limit = limit;
         }
 
+        @Override
         boolean truncated() {
             return truncated;
         }
 
         @Override
+        String captured() {
+            return buffer.toString(StandardCharsets.UTF_8);
+        }
+
+        @Override
         public synchronized void write(int b) {
-            if (size() >= limit) {
+            if (buffer.size() >= limit) {
                 truncated = true;
                 return;
             }
-            super.write(b);
+            buffer.write(b);
         }
 
         @Override
         public synchronized void write(byte[] b, int off, int len) {
-            int remaining = limit - size();
+            int remaining = limit - buffer.size();
             if (remaining <= 0) {
                 truncated = true;
                 return;
             }
             if (len > remaining) {
                 truncated = true;
-                super.write(b, off, remaining);
+                buffer.write(b, off, remaining);
                 return;
             }
-            super.write(b, off, len);
+            buffer.write(b, off, len);
+        }
+    }
+
+    /**
+     * Captures output up to the same cap, but hands it onward instead of keeping it.
+     *
+     * <h2>Why the decoder is stateful</h2>
+     *
+     * <p>A chunk boundary can fall in the middle of a multi-byte UTF-8 sequence —
+     * printing a non-ASCII character exactly on the 4 KB mark is enough. Decoding
+     * each chunk independently turns that character into two replacement glyphs,
+     * permanently, because the bytes have already been sent. So the decoder is kept
+     * across flushes and the trailing incomplete bytes are carried into the next
+     * one.</p>
+     *
+     * <h2>Ordering</h2>
+     *
+     * <p>Everything is guarded by this object's monitor, so the execution thread's
+     * writes and the scheduler's timed flushes cannot interleave within a stream.
+     * Across the two streams there is no ordering guarantee and there never was —
+     * Jython buffers them separately.</p>
+     */
+    static final class StreamingOutputStream extends Capture {
+        private final ByteArrayOutputStream pending = new ByteArrayOutputStream();
+        private final CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE);
+        private final int limit;
+        private final String streamName;
+        private final OutputListener listener;
+        private int written;
+        private boolean truncated;
+
+        StreamingOutputStream(int limit, String streamName, OutputListener listener) {
+            this.limit = limit;
+            this.streamName = streamName;
+            this.listener = listener;
+        }
+
+        @Override
+        boolean truncated() {
+            return truncated;
+        }
+
+        /** Always empty: everything has already gone to the listener. */
+        @Override
+        String captured() {
+            return "";
+        }
+
+        @Override
+        public synchronized void write(int b) {
+            if (written >= limit) {
+                truncated = true;
+                return;
+            }
+            written++;
+            pending.write(b);
+            if (b == '\n' || pending.size() >= FLUSH_AT_BYTES) {
+                flushPending();
+            }
+        }
+
+        @Override
+        public synchronized void write(byte[] b, int off, int len) {
+            int remaining = limit - written;
+            if (remaining <= 0) {
+                truncated = true;
+                return;
+            }
+            int take = len;
+            if (take > remaining) {
+                truncated = true;
+                take = remaining;
+            }
+            written += take;
+            pending.write(b, off, take);
+            // Scan for a newline rather than only checking the last byte: one
+            // write() can carry several lines, and a caller that writes a whole
+            // block at a time would otherwise wait for the timer every time.
+            boolean newline = false;
+            for (int i = off; i < off + take; i++) {
+                if (b[i] == '\n') {
+                    newline = true;
+                    break;
+                }
+            }
+            if (newline || pending.size() >= FLUSH_AT_BYTES) {
+                flushPending();
+            }
+        }
+
+        @Override
+        synchronized void flushPending() {
+            emit(false);
+        }
+
+        @Override
+        synchronized void finish() {
+            emit(true);
+        }
+
+        /**
+         * Decode and hand over whatever is buffered.
+         *
+         * @param end true on the final flush, when trailing incomplete bytes must
+         *            be turned into replacement characters rather than held back
+         *            for a continuation that will never arrive
+         */
+        private void emit(boolean end) {
+            if (pending.size() == 0 && !end) {
+                return;
+            }
+            byte[] bytes = pending.toByteArray();
+            pending.reset();
+            ByteBuffer in = ByteBuffer.wrap(bytes);
+            // Worst case one char per byte, plus room for the decoder's own flush.
+            CharBuffer out = CharBuffer.allocate(bytes.length + 2);
+            decoder.decode(in, out, end);
+            if (end) {
+                decoder.flush(out);
+            }
+            out.flip();
+            // Bytes the decoder could not finish belong to the NEXT chunk.
+            if (in.hasRemaining()) {
+                pending.write(bytes, in.position(), in.remaining());
+            }
+            if (out.length() == 0) {
+                return;
+            }
+            String text = out.toString();
+            try {
+                listener.onOutput(streamName, text);
+            } catch (RuntimeException e) {
+                // The listener is the transport. A dead socket must cost the user
+                // their output, never their script.
+                logger.debug("Output listener rejected a chunk: {}", e.toString());
+            }
         }
     }
 }

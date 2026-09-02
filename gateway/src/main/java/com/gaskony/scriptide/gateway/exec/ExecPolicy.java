@@ -1,14 +1,29 @@
 package com.gaskony.scriptide.gateway.exec;
 
+import com.gaskony.scriptide.gateway.term.PolicySource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.nio.file.Path;
 
 /**
  * The fleet-wide switches governing script execution.
  *
- * <p>Read from system properties on EVERY call, not cached at startup, so a
- * gateway operator can turn execution off without restarting anything. Set them
- * in {@code data/ignition.conf} as {@code wrapper.java.additional.N=-Dkey=value}.</p>
+ * <p>Read on EVERY call, never cached at startup, from two sources in this
+ * order:</p>
+ *
+ * <ol>
+ *   <li>the LIVE policy file — see {@link PolicySource} for its location and
+ *       format. Editing it turns execution off on a running gateway;</li>
+ *   <li>a JVM system property, set in {@code data/ignition.conf} as
+ *       {@code wrapper.java.additional.N=-Dkey=value}. Right for a fleet default,
+ *       but only readable at boot, so changing one needs a restart;</li>
+ *   <li>the built-in default below.</li>
+ * </ol>
+ *
+ * <p>The file wins because it is the more specific and more recent statement of
+ * intent. Until 1.5.0 only the system property existed, which made the "no
+ * restart needed" claim true of this class and false of the gateway.</p>
  */
 public final class ExecPolicy {
 
@@ -45,6 +60,22 @@ public final class ExecPolicy {
     public static final int MAX_MAX_CONCURRENT = 16;
 
     private ExecPolicy() { /* static config accessor */ }
+
+    /**
+     * Point the live overrides at a file.
+     *
+     * <p>Delegates: {@link PolicySource} is shared with {@code TerminalPolicy} so
+     * one file covers both, and the module hook only has to call this once.</p>
+     */
+    public static void setPropertiesFile(Path path) {
+        PolicySource.setPropertiesFile(path);
+    }
+
+    /** The live file first, then the system property. Null when neither sets it. */
+    private static String raw(String key) {
+        String live = PolicySource.value(key);
+        return live != null ? live : System.getProperty(key);
+    }
 
     /** Whether script execution is permitted at all on this gateway. */
     public static boolean executionEnabled() {
@@ -94,7 +125,7 @@ public final class ExecPolicy {
     }
 
     private static boolean boolProperty(String key, boolean fallback) {
-        String raw = System.getProperty(key);
+        String raw = raw(key);
         if (raw == null || raw.isBlank()) {
             return fallback;
         }
@@ -111,7 +142,7 @@ public final class ExecPolicy {
     }
 
     private static long longProperty(String key, long fallback) {
-        String raw = System.getProperty(key);
+        String raw = raw(key);
         if (raw == null || raw.isBlank()) {
             return fallback;
         }

@@ -43,9 +43,10 @@ import WebDevTree from '../components/WebDevTree';
 import NewScriptDialog from '../components/NewScriptDialog';
 import OutlinePanel from '../components/OutlinePanel';
 import ScriptConsole from '../components/ScriptConsole';
+import type { ActiveSource } from '../components/ScriptConsole';
 import StatusFooter from '../components/StatusFooter';
 import TabStrip from '../components/TabStrip';
-import { docUri, isDirty, isLockedByInheritance, newDoc, type OpenDoc } from './documents';
+import { docUri, isDirty, isLockedByInheritance, newDoc, newUnsavedDoc, type OpenDoc } from './documents';
 import './Workspace.css';
 
 export interface WorkspaceProps {
@@ -214,6 +215,24 @@ export default function Workspace({ session }: WorkspaceProps) {
    * "read-only" message would send people to the wrong one.
    */
   const activeLocked = activeDoc ? isLockedByInheritance(activeDoc) : false;
+
+  /**
+   * What "Run file" runs: the ACTIVE tab, read at click time through docsRef
+   * so an unsaved edit runs as typed. Only documents in the console's own
+   * project qualify — a script from another project would execute against the
+   * wrong library.
+   */
+  const activeSource = useMemo<ActiveSource | undefined>(() => {
+    if (!activeDoc || activeDoc.project !== project) {
+      return undefined;
+    }
+    const uri = activeDoc.uri;
+    return {
+      path: activeDoc.path,
+      label: activeDoc.label,
+      getSource: () => docsRef.current.find((d) => d.uri === uri)?.text ?? '',
+    };
+  }, [activeDoc, project]);
   /** Writes are refused for either reason. */
   const activeWritable = !readOnly && !activeLocked;
 
@@ -325,8 +344,9 @@ export default function Workspace({ session }: WorkspaceProps) {
               // the next write then 409s rather than overwriting blindly.
               etag: signature ?? d.etag,
               // A first save against an inherited script created a local
-              // override, so the tree badge is now stale for this entry.
-              origin: d.origin === 'inherited' ? 'override' : d.origin,
+              // override, and a first save of a 'new' draft created the
+              // resource itself — the tree is stale for this entry either way.
+              origin: d.origin === 'inherited' ? 'override' : d.origin === 'new' ? 'local' : d.origin,
             }
           : d
       )
@@ -364,6 +384,10 @@ export default function Workspace({ session }: WorkspaceProps) {
       // Capture the text being written: the user can keep typing during the
       // round trip, and baseText must become what the gateway actually stored.
       const source = doc.text;
+      // The resource does not exist on the gateway yet — this save IS the
+      // create. Remembered up front because commitSaved below already moves
+      // doc.origin off 'new'.
+      const wasNew = doc.origin === 'new';
       try {
         const result = await saveScriptContent({
           project: doc.project,
@@ -381,8 +405,24 @@ export default function Workspace({ session }: WorkspaceProps) {
         lsp.didSave(lspUri(doc.project, doc.path, doc.scriptKey));
         setConflict(null);
         setNotice({ kind: 'info', text: `Saved ${doc.label}.` });
+        if (wasNew) {
+          // Nothing in `tree` knows this resource exists until now — the row
+          // was a click-to-create placeholder, not a real entry. Re-reading is
+          // what turns the singleton row bold/openable and gives the entry a
+          // real signature for the settings strip and future deletes.
+          try {
+            setTree(await fetchScriptTree(project));
+          } catch {
+            /* the save itself succeeded; a stale tree is cosmetic, not lost work */
+          }
+        }
       } catch (e: unknown) {
-        if (e instanceof ApiError && e.isConflict) {
+        // A 'new' draft has no base signature to send, so a create raced by
+        // someone else does not come back as this route's usual 409 — the
+        // write route reads it as a MODIFY with no If-Match, which is 428. It
+        // means the same thing here: read the gateway's copy and let the user
+        // choose, exactly like an ordinary conflict.
+        if (e instanceof ApiError && (e.isConflict || (wasNew && e.isMissingBaseSignature))) {
           await raiseConflict(doc);
         } else {
           setNotice({ kind: 'error', text: `Could not save ${doc.label}: ${describe(e)}` });
@@ -391,18 +431,33 @@ export default function Workspace({ session }: WorkspaceProps) {
         setSaving(false);
       }
     },
-    [commitSaved, lsp, raiseConflict, readOnly, session.csrfToken]
+    [commitSaved, lsp, project, raiseConflict, readOnly, session.csrfToken]
   );
 
   const resolveReloadTheirs = useCallback(() => {
     if (!conflict) return;
     const { uri, theirs, theirsEtag } = conflict;
     setDocs((current) =>
-      current.map((d) => (d.uri === uri ? { ...d, text: theirs, baseText: theirs, etag: theirsEtag } : d))
+      current.map((d) =>
+        d.uri === uri
+          ? {
+              ...d,
+              text: theirs,
+              baseText: theirs,
+              etag: theirsEtag,
+              // A 'new' draft that raised this dialog lost the race to create
+              // the resource — someone else's copy is what is on the gateway
+              // now, so this document is exactly as 'local' as any other
+              // script this project owns, not still a draft of nothing.
+              origin: d.origin === 'new' ? 'local' : d.origin,
+            }
+          : d
+      )
     );
     setConflict(null);
     setNotice({ kind: 'info', text: 'Reloaded the gateway copy. Your edits were discarded.' });
-  }, [conflict]);
+    void fetchScriptTree(project).then(setTree).catch(() => {});
+  }, [conflict, project]);
 
   const resolveKeepMine = useCallback(async () => {
     if (!conflict) return;
@@ -758,34 +813,35 @@ export default function Workspace({ session }: WorkspaceProps) {
   }, [project]);
 
   /**
-   * Create a gateway-event singleton that does not exist yet.
+   * Open a DRAFT for a gateway-event singleton that does not exist yet.
    *
-   * Separate from `doCreate` because a singleton has no name to ask for: its
-   * resource path is `<module>/<type>` with no third segment, which is exactly
-   * how the platform stores it.
+   * Until 1.5.0 this called `createScript` on the click itself — the real
+   * Designer creates nothing until you save, and a click here was writing to
+   * the live project with no confirmation (Nigel, 02/09/2026: browsing the
+   * tree should not add resources, or git diffs, to a project). Separate from
+   * `doCreate` because a singleton has no name to ask for — its resource path
+   * is `<module>/<type>` with no third segment — and unlike a NAMED create
+   * from the "New script…" dialog, a bare click on a tree row is not an
+   * explicit "make this now".
    */
-  const createSingleton = useCallback(
-    async (typeId: ScriptTypeId) => {
+  const openSingletonDraft = useCallback(
+    (typeId: ScriptTypeId) => {
       const path = `ignition/${typeId}`;
-      try {
-        await createScript({
-          project,
-          path,
-          source: handlerStub(typeId),
-          csrfToken: session.csrfToken,
-        });
-        const refreshed = await fetchScriptTree(project);
-        setTree(refreshed);
-        const entry = refreshed.scripts.find((candidate) => candidate.path === path);
-        if (entry) {
-          await openScript(entry);
-        }
-        setNotice({ kind: 'info', text: `Created the ${TYPE_LABELS[typeId] ?? typeId} script.` });
-      } catch (e) {
-        setNotice({ kind: 'error', text: describe(e) });
+      const scriptKey = SINGLETON_KEYS[typeId] ?? 'code.py';
+      const uri = docUri(project, path, scriptKey);
+      if (docsRef.current.some((d) => d.uri === uri)) {
+        setActiveUri(uri);
+        return;
       }
+      const typeLabel = TYPE_LABELS[typeId] ?? typeId;
+      setDocs((current) => [
+        ...current,
+        newUnsavedDoc({ project, path, scriptKey, typeLabel, label: typeLabel }),
+      ]);
+      setActiveUri(uri);
+      setNotice(null);
     },
-    [openScript, project, session.csrfToken]
+    [project]
   );
 
   return (
@@ -888,7 +944,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                   }
                   onDelete={readOnly ? undefined : (entry) => setPendingDelete(entry)}
                   onCreateSingleton={
-                    readOnly ? undefined : (typeId) => void createSingleton(typeId)
+                    readOnly ? undefined : (typeId) => openSingletonDraft(typeId)
                   }
                 />
               ) : (
@@ -1017,6 +1073,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                         project={project}
                         csrfToken={session.csrfToken}
                         canExecute={session.canExecute !== false && !readOnly}
+                        activeSource={activeSource}
                         onOpenFrame={(path, line) => {
                           const entry = tree?.scripts.find((c) => c.path === path);
                           if (entry) {
@@ -1220,6 +1277,17 @@ const WEBDEV_STUBS: Record<string, string> = Object.fromEntries(
     (method) => [method, `def ${method}(request, session):\n\treturn {'json': {'ok': True}}`]
   )
 );
+
+/**
+ * The `.py` data key a fresh singleton is created with — the type's own
+ * `createKey`, mirrored from `ScriptResourceTypes` because the client has
+ * nothing to read one off until the resource exists.
+ */
+const SINGLETON_KEYS: Record<string, string> = {
+  startup: 'onStartup.py',
+  shutdown: 'onShutdown.py',
+  update: 'onUpdate.py',
+};
 
 /** Fallback labels, for a type the current tree happens to hold none of. */
 const TYPE_LABELS: Record<string, string> = {

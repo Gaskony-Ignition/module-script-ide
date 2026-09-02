@@ -31,7 +31,7 @@ export interface ConnectionSource {
 }
 
 /** What the user is told, as opposed to what the transport calls itself. */
-export type ConnectionState = 'connected' | 'reconnecting' | 'offline';
+export type ConnectionState = 'idle' | 'connected' | 'reconnecting' | 'offline';
 
 export interface StatusFooterProps {
   /** The loaded script list. Empty while the tree is still loading, or on error. */
@@ -40,6 +40,7 @@ export interface StatusFooterProps {
 }
 
 const STATE_LABELS: Record<ConnectionState, string> = {
+  idle: 'Language server idle',
   connected: 'Language server connected',
   reconnecting: 'Language server reconnecting…',
   offline: 'Language server offline',
@@ -50,9 +51,16 @@ const STATE_LABELS: Record<ConnectionState, string> = {
  *
  * `connecting` covers the first connect and every backoff retry alike, and
  * "reconnecting" is the honest word for both: either way there is no server yet
- * and answers are not coming. `idle` — nothing has ever opened the socket —
- * folds into `offline` for the same reason: the state of the language server
- * from the user's side is that it is not there.
+ * and answers are not coming.
+ *
+ * `idle` — nothing has ever opened the socket, because the LSP connects
+ * lazily on the first script opened — is its OWN state, not folded into
+ * `offline`. Before this fix it was: the footer showed "Language server
+ * offline" in red on the landing page before any document was opened, which
+ * reads as a fault when nothing has actually failed — a connection that was
+ * never attempted cannot have dropped. `offline` is reserved for `closed`,
+ * which the transport only reaches after `connecting` — i.e. after a real
+ * attempt failed or a live connection dropped.
  */
 export function connectionState(status: TransportStatus): ConnectionState {
   switch (status) {
@@ -60,6 +68,8 @@ export function connectionState(status: TransportStatus): ConnectionState {
       return 'connected';
     case 'connecting':
       return 'reconnecting';
+    case 'idle':
+      return 'idle';
     default:
       return 'offline';
   }
@@ -84,12 +94,16 @@ const SEGMENTS: ReadonlyArray<{ typeId: ScriptTypeId; one: string; many: string 
 
 /** `7 scripts · 2 timers`, from the tree the rail is already showing. */
 export function describeCounts(scripts: ScriptEntry[]): string {
-  if (scripts.length === 0) return 'No scripts';
+  // An empty Project Library package (`isFolder`) is a placeholder row so the
+  // tree can show it as a folder, not a script anyone wrote — counting it
+  // would claim a script that does not exist.
+  const real = scripts.filter((entry) => !entry.isFolder);
+  if (real.length === 0) return 'No scripts';
   const byType = new Map<string, number>();
-  for (const entry of scripts) {
+  for (const entry of real) {
     byType.set(entry.typeId, (byType.get(entry.typeId) ?? 0) + 1);
   }
-  const parts = [`${scripts.length} ${scripts.length === 1 ? 'script' : 'scripts'}`];
+  const parts = [`${real.length} ${real.length === 1 ? 'script' : 'scripts'}`];
   for (const segment of SEGMENTS) {
     const count = byType.get(segment.typeId) ?? 0;
     if (count > 0) parts.push(`${count} ${count === 1 ? segment.one : segment.many}`);

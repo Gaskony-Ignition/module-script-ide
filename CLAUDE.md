@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.4.3 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.5.4 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -10,8 +10,10 @@ This file covers only what is specific to this module.
 
 A browser-based Jython IDE for Ignition 8.3, served from the Gateway. Edit
 Project Library and Gateway event scripts with completions taken from the running
-gateway, live error checking, project-wide navigation, and a script console that
-executes on the Gateway.
+gateway, live error checking, an outline of the open script, and a script console
+that executes on the Gateway with its output streamed as it is produced. The
+LSP also answers definition, workspace-symbol and project-wide text search, but
+nothing in the UI calls them yet — `ActivityBar` has no Search view.
 
 **Internal/PoC status, like web-designer and playwright: NOT in `modules/release.sh`
 or `test-all.sh`, and never on the public portal.** Build with its own `./gradlew`.
@@ -92,8 +94,8 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   process for it. Two routes, both proved by DOING them, never by reading
   config, and both decided by the HOST:
   1. **The Docker daemon** (preferred, 02/09/2026) — `DockerExec` asks it for an
-     exec with `User:"0"`. Needs nothing in the image, gets a real pty, resizes
-     through the API, and closes cleanly because the shell is the daemon's child.
+     exec with `User:"0"`. Needs nothing in the image, gets a real pty and resizes
+     through the API. Ending one is not free — see the two rules below.
   2. **`sudo -n`** where the host grants it. `-n` is load-bearing: without it a
      prompting host hangs the shell.
 - **The two routes are NOT the same risk, and must keep separate switches.**
@@ -110,6 +112,41 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   AND makes the attached stream raw; with `Tty: false` the daemon multiplexes
   stdout and stderr behind an 8-byte frame header, which reaches xterm.js as
   garbage every few hundred bytes.
+- **Resize a Docker exec AFTER the attach, never before.** A
+  `POST /exec/{id}/resize` sent before `/exec/{id}/start` has no exec session to
+  size: the daemon blocks and then answers `500 timeout waiting for exec session
+  ready`, and our own five-second watchdog cut that short — which is why every
+  1.4.x terminal took exactly 5.00 s to open and the resize never applied. Attach
+  first and the same call returns 200 in about 90 ms. `DockerExec.start` retries
+  it three times at 100 ms, because the session becomes ready a moment after the
+  upgrade.
+- **Closing the hijacked attach does NOT kill the shell, so the sweep is
+  load-bearing.** The Engine API has no "kill this exec"; the daemon keeps the
+  process running, detached, and the exec's own `Pid` is a HOST pid this JVM
+  (uid 2003, container pid namespace) can neither see nor signal. So a close
+  sends ETX, EOT and `exit`, polls `Running:false` for up to 750 ms, and then
+  ALWAYS runs a root sweep exec that walks `/proc/*/environ` for
+  `SCRIPTIDE_TERM=<terminal id>` — `kill -HUP`, one second, `kill -KILL`. The tag
+  is inherited, so a background job goes with its parent. `TerminalService.shutdown`
+  waits on `DockerExec.awaitReapers` because the sweep runs on a daemon thread.
+  The `script(1)` route has its own ladder: descendants and `script` get
+  `destroy()`, then `destroyForcibly()` 300 ms later — `script` installs a SIGTERM
+  handler and an interactive bash ignores SIGTERM outright.
+- **Policy is read live, file first.** `PolicySource` resolves every `ExecPolicy`
+  and `TerminalPolicy` switch as **file > `-D` system property > built-in
+  default**. The file is `<gateway data dir>/modules/scriptide/policy.properties`
+  (`java.util.Properties`, the same fully-qualified keys as the `-D` names),
+  re-statted at most once every 2 s, and wired in `ScriptIdeModuleHook.startup()`.
+  **The module never creates it** — absent means "no overrides", which is where
+  every existing gateway already is. A system property is only readable at boot,
+  so without the file the "turn it off without a restart" claim was true of the
+  code and false of the gateway.
+- **The exec frame handler must never wait for a script.** `ScriptIdeSocket` is an
+  `AutoDemanding` listener — one frame at a time, on the socket thread — so a
+  blocking run made the whole connection deaf: a Stop sent into a running loop was
+  not read until the loop had ended, and the LSP and terminal froze with it.
+  `ExecutionService.submit` returns as soon as the work is accepted, and
+  `started`, `output` and `finished` are sent from its callbacks.
 
 ## Build, deploy, verify
 

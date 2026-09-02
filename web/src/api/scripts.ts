@@ -57,6 +57,15 @@ export interface ScriptEntry {
   /** Project that defines the resource — differs from the open one when inherited. */
   owner: string;
   /**
+   * True for a project-library PACKAGE with nothing in it — a directory the
+   * gateway reports as a resource in its own right (`dataKeys: []`) alongside
+   * the scripts nested inside it. It still needs a row so an empty package
+   * shows as an empty folder, but it carries no `scriptKey` and must never be
+   * opened: see ScriptResourceRouteHandler#isPackageContainer. Absent (falsy)
+   * on every ordinary script.
+   */
+  isFolder?: boolean;
+  /**
    * For a Web Dev endpoint: the HTTP methods it actually implements.
    *
    * Absent for every other type. Sent on the LISTING so the tree can show an

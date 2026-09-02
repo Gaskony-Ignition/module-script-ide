@@ -10,6 +10,7 @@ import com.inductiveautomation.ignition.common.resourcecollection.PushException;
 import com.inductiveautomation.ignition.common.resourcecollection.Resource;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourcePath;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceBuilder;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceCollectionManifest;
 import com.inductiveautomation.ignition.common.resourcecollection.RuntimeResourceCollection;
 import com.inductiveautomation.ignition.common.script.ModuleLibrary;
 import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
@@ -22,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -71,12 +73,34 @@ public final class ScriptResourceRouteHandler {
 
     // ==================== GET /api/projects ====================
 
-    /** Every project on this gateway, with whether it can be written to. */
+    /**
+     * Every project on this gateway, with whether it can be written to, and where
+     * its inherited resources come from.
+     *
+     * <p>{@code parent} and {@code inheritable} are what the tree needs to explain
+     * an inherited row, and what the live harness needs to tell "the fixture has no
+     * inheritable parent on this rig" from "inherited scripts are not listed" —
+     * the same empty tree, with opposite meanings. The Ignition web UI exposes
+     * neither over a GET.</p>
+     */
     public Object projects(RequestContext req, HttpServletResponse resp) {
         JsonArray out = new JsonArray();
+        Map<String, ResourceCollectionManifest> manifests;
+        try {
+            manifests = projectManager.getManifests();
+        } catch (Exception e) {
+            logger.debug("getManifests() failed, omitting parents: {}", e.getMessage());
+            manifests = Map.of();
+        }
         for (String name : projectManager.getNames()) {
             JsonObject p = new JsonObject();
             p.addProperty("name", name);
+            ResourceCollectionManifest manifest = manifests.get(name);
+            if (manifest != null) {
+                String parent = manifest.parent();
+                p.addProperty("parent", parent == null || parent.isEmpty() ? null : parent);
+                p.addProperty("inheritable", manifest.inheritable());
+            }
             // A project can exist and still refuse writes (inherited/immutable).
             // Surfacing it here lets the UI disable saving up front rather than
             // letting the user type for ten minutes and then fail the push.
@@ -129,7 +153,11 @@ public final class ScriptResourceRouteHandler {
             if (isNamelessNonSingleton(path)) {
                 continue;
             }
-            scripts.add(describe(resource, path, project));
+            // A package with nothing in it yet still needs a row — an empty
+            // package must show as an empty folder, not vanish — but it must
+            // never be openable. See isPackageContainer and describe()'s
+            // `isFolder`.
+            scripts.add(describe(resource, path, project, isPackageContainer(resource)));
         }
 
         JsonObject body = new JsonObject();
@@ -146,39 +174,48 @@ public final class ScriptResourceRouteHandler {
     }
 
     /**
-     * True for a CONTAINER the platform reports alongside real resources.
+     * True for a project-library PACKAGE resource — a directory the platform
+     * reports as a resource in its own right, but with no script of its own.
      *
-     * <p>Measured 01/09/2026: a project with {@code ignition/scheduled/Probe
-     * Scheduled} also reports a resource at bare {@code ignition/scheduled} —
-     * the folder — with a real signature, no data keys and an empty name. There
-     * is no {@code resource.json} for it on disk; it exists only in the runtime
-     * collection.</p>
+     * <p>Measured 02/09/2026: a project holding {@code
+     * ignition/script-python/MiningDemo/tags} also reports a resource at {@code
+     * ignition/script-python/MiningDemo} — the containing package — with a real
+     * signature, a real name and NO data keys ({@code dataKeys: []}). Unlike
+     * {@link #isNamelessNonSingleton}'s phantom type-folder, this one carries a
+     * name and passes every existing filter, so it was listed as an ordinary
+     * openable script; clicking it 404s with "No such data key 'code.py'"
+     * because there is nothing to read.</p>
      *
-     * <p>Left in, it appears in the rail as a row labelled with its type ("Scheduled"),
-     * indistinguishable from a singleton, and it is WRITABLE: a save against it
-     * returns 200 and hangs a {@code cronExpression} off a folder. That is this
-     * module writing junk onto a live gateway, which is the one thing it is not
-     * allowed to do.</p>
-     *
-     * <p>The discriminator is the type, not the shape. An empty name is exactly
-     * how startup/shutdown/update legitimately address their singleton, so
-     * "empty name" alone would hide three real scripts. A non-singleton type with
-     * an empty name has no other meaning.</p>
+     * <p>Scoped to {@code script-python} deliberately: it is the only type whose
+     * resources nest in slash-separated packages, so it is the only type where
+     * an intermediate directory can itself be a resource with nothing in it.</p>
      */
+    static boolean isPackageContainer(Resource resource) {
+        return ScriptResourceTypes.TYPE_SCRIPT_PYTHON.equals(
+            resource.getResourcePath().getResourceType().typeId())
+            && resource.getDataKeys().isEmpty();
+    }
+
     /**
      * One tree entry.
      *
      * <p>The {@code signature} is published on the LISTING as well as on a read.
      * That is not redundancy: a client needs it to delete or rename, and a
      * resource with no readable data key cannot supply one from a read at all.</p>
+     *
+     * @param isFolder true for an empty package directory — see {@link
+     *     #isPackageContainer}. Still contributes its path to the tree (an empty
+     *     package must render as an empty folder, not vanish), but carries no
+     *     {@code scriptKey}: the client must never treat it as an openable file.
      */
-    private JsonObject describe(Resource resource, ResourcePath path, String project) {
+    private JsonObject describe(Resource resource, ResourcePath path, String project, boolean isFolder) {
         JsonObject out = new JsonObject();
         var type = path.getResourceType();
         out.addProperty("path", HandlerSupport.encodePath(path));
         out.addProperty("typeId", type.typeId());
         out.addProperty("name", path.getPath().toString());
         out.addProperty("signature", resource.getResourceSignature().toString());
+        out.addProperty("isFolder", isFolder);
 
         JsonArray keys = new JsonArray();
         resource.getDataKeys().forEach(keys::add);
@@ -190,6 +227,14 @@ public final class ScriptResourceRouteHandler {
         // second key instead of updating the script.
         boolean webdev = ScriptResourceTypes.isWebDev(type.moduleId(), type.typeId());
         ScriptResourceTypes.byTypeId(type.typeId()).ifPresent(st -> {
+            out.addProperty("typeLabel", st.label());
+            out.addProperty("singleton", st.singleton());
+            if (isFolder) {
+                // No .py exists yet. Falling through to the createKey() default
+                // below would hand the client a `scriptKey` that reads back
+                // "No such data key" — the exact bug this guards against.
+                return;
+            }
             String actual;
             if (webdev) {
                 // A Web Dev endpoint has up to EIGHT .py files, so "the first
@@ -216,8 +261,6 @@ public final class ScriptResourceRouteHandler {
                     .orElse(st.createKey());
             }
             out.addProperty("scriptKey", actual);
-            out.addProperty("typeLabel", st.label());
-            out.addProperty("singleton", st.singleton());
         });
 
         // The Designer badges a disabled event script in its tree, so the flag

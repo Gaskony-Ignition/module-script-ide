@@ -1,11 +1,14 @@
 package com.gaskony.scriptide.gateway.routes;
 
 import com.gaskony.scriptide.common.ScriptResourceTypes;
+import com.google.common.collect.ImmutableSet;
+import com.inductiveautomation.ignition.common.resourcecollection.Resource;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourcePath;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -82,5 +85,49 @@ class ContainerPathTest {
         return ScriptResourceTypes.byTypeId(path.getResourceType().typeId())
             .map(ScriptResourceTypes.ScriptType::singleton)
             .orElse(false);
+    }
+
+    /**
+     * The OTHER folder case — a NAMED package, not the nameless type-folder
+     * above.
+     *
+     * <p>Measured 02/09/2026: {@code ignition/script-python/MiningDemo} with no
+     * scripts of its own still shows up as a resource — {@code dataKeys: []} —
+     * because a project holding {@code ignition/script-python/MiningDemo/tags}
+     * reports the containing package alongside it. {@link
+     * #namelessNonSingletonIsAFolder} does not catch this: the path HAS a name
+     * segment, so {@code isResourceTypeFolder()} is false and it sails through
+     * every filter above. {@code isPackageContainer} is the guard that catches
+     * it instead, by asking the RESOURCE (empty data), not the path.</p>
+     */
+    private static Resource mockResource(String encodedPath, String... dataKeys) {
+        Resource resource = Mockito.mock(Resource.class);
+        Mockito.when(resource.getResourcePath()).thenReturn(HandlerSupport.decodePath(encodedPath));
+        Mockito.when(resource.getDataKeys()).thenReturn(ImmutableSet.copyOf(dataKeys));
+        return resource;
+    }
+
+    @Test
+    @DisplayName("a named script-python package with no data keys is a container")
+    void emptyPackageIsAContainer() {
+        Resource pkg = mockResource("ignition/script-python/MiningDemo");
+        assertThat(ScriptResourceRouteHandler.isPackageContainer(pkg)).isTrue();
+    }
+
+    @Test
+    @DisplayName("a script-python resource that actually carries code.py is not a container")
+    void writtenScriptIsNotAContainer() {
+        Resource script = mockResource("ignition/script-python/MiningDemo/tags", "code.py");
+        assertThat(ScriptResourceRouteHandler.isPackageContainer(script)).isFalse();
+    }
+
+    @Test
+    @DisplayName("an empty-data resource of a DIFFERENT type is not a package container")
+    void emptyNonLibraryResourceIsNotAContainer() {
+        // The nested-package shape is peculiar to script-python; a timer or
+        // message handler with no data key is a different situation (an unsaved
+        // singleton, or the phantom type-folder above), not an empty package.
+        Resource notLibrary = mockResource("ignition/timer/Sweeper");
+        assertThat(ScriptResourceRouteHandler.isPackageContainer(notLibrary)).isFalse();
     }
 }

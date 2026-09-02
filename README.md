@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.4.3 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.5.4 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -46,18 +46,28 @@ actually has installed. No static stub file can know that.*
   startup, shutdown, scheduled, tag change), written through the platform's own
   resource API — so no file stamping and no project scan. Saved scripts are
   importable a couple of seconds later.
-- **Run** a buffer or a selection on the gateway, with output streamed back and a
-  clickable traceback. Concurrent users never see each other's output.
+- **Run** a buffer, a selection, or the file in the active tab on the gateway.
+  Output appears as it is produced — flushed on a newline, at 4 KB or every
+  100 ms — so a loop shows its first line before its last. A failure comes back
+  as a real traceback, `File "…", line N, in f`, and a frame inside a project
+  library script opens that script at the line. Stop is read while the script is
+  still running, and Reset drops the console's variables the way the Designer's
+  does. Concurrent users never see each other's output.
 - **Autocomplete and signature help** from the running gateway's script registry.
 - **Live error checking** against the real Jython 2.7 parser.
-- **Navigate** — go to definition, document outline, project-wide symbol search and
-  cross-file text search over your own scripts.
+- **Outline** the open script — every class and function, click to jump — parsed
+  by the gateway rather than by a client-side grammar, so Python 2 code outlines
+  correctly. Find and replace are in the editor on Ctrl+F.
 - **Web Dev** endpoints as a first-class view: all eight HTTP methods, per-method
   settings, create and delete.
 - **A terminal on the gateway** — a real shell on a real pseudo-terminal, with a
-  prompt, history, Ctrl-C and colour, running as the Gateway's own user. It is
-  what makes `git` usable against the projects directory. Same gate as execution,
-  with its own switch.
+  prompt, history, Ctrl-C and colour. It is what makes `git` usable against the
+  projects directory. Same gate as execution, with its own switch. What it runs
+  as is decided by the host, never by this module: a root shell through the
+  Docker daemon where the socket is mounted and writable, otherwise root through
+  `sudo -n` where the host already grants it, otherwise the Gateway's own
+  operating-system user. Closing the tab ends the shell and the jobs it
+  started.
 - **A VS Code-shaped shell**: activity bar, resizable side bar and outline, a
   bottom panel holding the console and the terminal, and the four layout glyphs
   in the title bar.
@@ -96,6 +106,15 @@ The terminal is gated the same way and has its **own** switch
 Console and refuse the shell. It grants no privilege that Jython's
 `Runtime.exec` did not already reach — see `SECURITY.md`, which says so plainly
 rather than resting on the equivalence.
+
+Both sets of switches are also read live from
+`<gateway data dir>/modules/scriptide/policy.properties` — same keys as the `-D`
+names, standard `java.util.Properties`, re-read within two seconds — so a site
+can turn execution or the terminal off on a **running** gateway. The module never
+creates that file; absent means no overrides. A system property still states the
+fleet default at boot, and the file wins over it. Because the file can also turn
+the Administrator requirement off, its permissions belong to the Gateway's own
+user and nobody else, exactly like `ignition.conf`.
 
 ## Build
 

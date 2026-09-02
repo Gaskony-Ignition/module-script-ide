@@ -126,6 +126,24 @@ export function buildPackageTree(entries: ScriptEntry[]): PackageNode {
   const root = emptyNode('', '');
   for (const entry of entries) {
     const segments = entry.name.split('/').filter((s) => s.length > 0);
+    if (entry.isFolder) {
+      // An empty package: the gateway reports it as a resource so it isn't
+      // dropped, but there is no script here to add — ensure the FOLDER node
+      // exists at its full path and stop. Falling through to the ordinary
+      // branch below would push it as a leaf `ScriptRow`, and clicking that
+      // 404s with "No such data key" — see ScriptResourceRouteHandler#write.
+      let node = root;
+      for (const segment of segments) {
+        const key = node.key ? `${node.key}/${segment}` : segment;
+        let child = node.children.find((c) => c.name === segment);
+        if (!child) {
+          child = emptyNode(segment, key);
+          node.children.push(child);
+        }
+        node = child;
+      }
+      continue;
+    }
     const leaf = segments.pop();
     let node = root;
     for (const segment of segments) {
@@ -144,9 +162,20 @@ export function buildPackageTree(entries: ScriptEntry[]): PackageNode {
   return root;
 }
 
+/** Case-insensitive name compare — "Zebra" and "apple" sort as `apple, Zebra`. */
+function byName(a: { name: string }, b: { name: string }): number {
+  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+}
+
+/**
+ * Folders (`children`) before files (`scripts`) at every level, each
+ * alphabetical — the Designer's own rule (see the file comment) — and
+ * case-insensitive throughout. PackageBranch already renders children ahead
+ * of scripts; this only has to sort within each group.
+ */
 function sortNode(node: PackageNode) {
-  node.children.sort((a, b) => a.name.localeCompare(b.name));
-  node.scripts.sort((a, b) => a.name.localeCompare(b.name));
+  node.children.sort(byName);
+  node.scripts.sort(byName);
   node.children.forEach(sortNode);
 }
 
@@ -265,7 +294,7 @@ export default function FileTree({
                   {!isCollapsed && (
                     <ul className="file-tree-list">
                       {[...group.entries]
-                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .sort(byName)
                         .map((entry) => (
                           <ScriptRow
                             key={entry.path}

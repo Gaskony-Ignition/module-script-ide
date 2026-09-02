@@ -2,14 +2,176 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.4.3 · all phases complete · deployed, gate-green and live-validated on
-`ignition-module-testing` (8.3.8) · 01/09/2026**
+**Version 1.5.4 · all phases complete · deployed on `ignition-module-testing`
+(8.3.8) 02/09/2026 — `deploy_gate.py` PASS, `validate_v15_term.py` 6/6,
+`validate_v15_exec.py` 19/19, `validate_v15_tree.py` 15/15 (one stated SKIP)**
 
-1.1.0–1.4.3 are post-1.0 feature work driven by Nigel's review, not new phases.
+**If this is a fresh chat: the work queue is in "What is next", below the
+status table.** Batches A–C (the 02/09 review fixes) are done; D and E are not
+started.
+
+1.1.0–1.5.0 are post-1.0 feature work driven by Nigel's review, not new phases.
 1.3.0 added a **Gateway terminal**, moved the console into a **bottom panel**, and
 brought **Gateway Events** into line with the real Designer. 1.4.0 makes
 **inherited scripts read-only until overridden**, names and explains **Script Hint
-Scope**, and makes the terminal a **root shell** where the host allows it.
+Scope**, and makes the terminal a **root shell** where the host allows it. 1.5.0
+makes the **exec channel non-blocking and streaming**, gives tracebacks
+**structure**, makes **closing a terminal actually close it**, and makes every
+policy switch **changeable on a running gateway**.
+
+### 1.5.1–1.5.4 — what the v15 suites found once they ran
+
+The three suites written for 1.5.0 were first run on 02/09/2026 and found three
+more defects in a row, each invisible from the page, each fixed in its own
+build. All three suites are green on 1.5.4.
+
+- **1.5.1 — Stop poisoned the thread.** `ScriptManager.interrupt` leaves
+  `ThreadState.frame`/`tracefunc`/`exception` pointing at the dead script, and
+  the pool thread's NEXT run inherited them. `PrivateStateRunner.FrameSnapshot`
+  restores all three in `finally`; `PrivateStateRunnerStopTest`.
+- **1.5.2 — the terminal opened before its socket did.** On a tab nothing else
+  had used, `TermClient.open()` sent its frame into a transport whose lazy
+  `connect()` had not completed; `send()` returns `false` and drops the frame,
+  so the xterm mounted and the prompt never came. `open()` now defers to the
+  transport's next `onOpen` and returns a disposer the view calls on unmount.
+- **1.5.3 — the JDK's channel adapters made the terminal half-duplex.**
+  `Channels.newInputStream` and `Channels.newOutputStream` both `synchronized`
+  on the channel's `blockingLock()`; with the pump parked in `read()`, every
+  `write()` waited for it. A prompt (the first read), then every keystroke
+  swallowed, and `close()` hung on its own ETX write so the sweep never ran —
+  3+ leaked root `bash -i` per session, measured. `DockerExec.ChannelInput` /
+  `ChannelOutput` use the `SocketChannel` directly (separate read/write locks);
+  `ChannelStreamsTest` proves the adapters block and the wrappers do not.
+- **1.5.4 — `/api/projects` carries `parent` and `inheritable`.** So the tree
+  suite can tell "no inherited scripts because the parent is not inheritable"
+  from "inherited scripts are not listed". Fixture `_si_child_` (parent
+  `_wd_scratch_`, title `Script IDE child fixture (dev)`) was created on the rig
+  for the suite; `_wd_scratch_` is NOT inheritable, so the read-only checks
+  SKIP with that reason — flipping the flag is a change to web-designer's
+  scratch project and is Nigel's call. Its child also logs `HintIndex: No
+  ScriptManager available` for `_si_child_` — a child of a non-inheritable
+  parent has no project ScriptManager, and the module tolerates it.
+
+### 1.5.0 — a socket that keeps listening, and a shell that actually dies
+
+Every item below was measured broken on 1.4.3, and most of them cannot be seen
+from the page at all, which is why
+`scripts/testing/validate_v15_{exec,term,tree}.py` exist. Run them as:
+
+```bash
+cd scripts/testing
+export SI_GATEWAY_CONFIG=$PWD/config.local.json PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright PYTHONPATH=$PWD
+PY=/home/nigel/Ignition-Work/ignition-toolbox/backend/.venv/bin/python
+$PY validate_v15_term.py
+SI_EXEC_PROJECT=_wd_scratch_ $PY validate_v15_exec.py
+SI_INHERIT_PROJECT=_si_child_ $PY validate_v15_tree.py
+```
+
+- **The exec frame handler no longer waits for the script.** `ScriptIdeSocket` is
+  an `AutoDemanding` listener — one frame at a time, on the socket thread — and
+  the run branch blocked there until the script finished. The connection was deaf
+  for the duration: a Stop was not READ until the loop it was meant to stop had
+  already ended, and pings, LSP requests and terminal keystrokes queued behind it.
+  The Stop button could not have worked. `ExecutionService.submit` now returns as
+  soon as the pool accepts the work; the timeout ladder moved from a
+  `future.get(deadline)` onto the watchdog; `started`, `output` and `finished` are
+  sent from its callbacks.
+- **The wire protocol.** Requests `run{project,source,csrfToken,target?,
+  lineOffset?}`, `stop{executionId}` and `reset{project}`; events `started`,
+  `output{stream,text}`, `stopping`, `finished{truncated,cancelled,ok,error?}` and
+  `reset{project}`. Omitting `target` is what marks a console run and keys its
+  REPL locals; `reset` drops them and is refused while that connection has a
+  script in flight. Closing the socket stops whatever it was running.
+- **`finished` carries EMPTY stdout and stderr, by contract.** Everything has
+  already gone out as `output` frames, so a client that rendered both would print
+  every line twice. Chunks are flushed on a newline, at 4 KB, or every 100 ms —
+  the newline rule is what makes `print` in a loop feel live, the timer saves a
+  long line that never ends. The UTF-8 decoder is kept across flushes, or a
+  multi-byte character landing on a chunk boundary becomes two replacement glyphs
+  permanently. `deploy_gate.py` gathers the stream rather than reading
+  `finished.stdout`.
+- **Tracebacks are structured, and our own token never reaches the screen.** The
+  error object is `{type, message, rendered, frames:[{file, function, line,
+  isSubmitted, libraryModule}]}`. The client had invented its own field names
+  (`path`, `module`, `functionName`, `isTarget`), so every frame on screen read
+  `<console>, line N` with no function and no exception type — nothing threw,
+  because TypeScript cannot check a wire. A frame with a `libraryModule` maps to
+  `ignition/script-python/<dotted/path>` and opens that script; a submitted-source
+  frame moves the console's own cursor. `<script-ide:project:target>` is replaced
+  with a display label wherever it appears in free text.
+- **A syntax error is not a traceback.** Its value is the tuple
+  `(msg, (file, line, offset, text))`, which 1.4.3 rendered with `toString()` —
+  a raw PyTuple, internal token and all. It is unpacked into `message` plus
+  top-level `line`/`offset`/`text`, the line is reported in the EDITOR's numbering
+  (the selection-run offset is subtracted), and the console draws a caret under
+  the column.
+- **The console shows where a run starts and ends.** A `▸ run N · HH:MM:SS`
+  divider, consecutive chunks of one stream merged into one block, and a closing
+  `— finished in N.N s —` / `— stopped —` / `— failed —`. **Run file** runs the
+  active tab as typed, with a `target`, so it gets fresh locals. **Reset** drops
+  the console's locals, where the Designer puts it.
+- **The terminal resize goes AFTER the attach.** A resize before
+  `/exec/{id}/start` has no exec session to size: the daemon blocks and then
+  answers `500 timeout waiting for exec session ready`, and our own five-second
+  watchdog cut it — which is why every 1.4.x terminal took exactly 5.00 s to open
+  and why the resize never applied (the client's own resize after `opened` was
+  doing all the sizing). Attach first and the same call answers 200 in about
+  90 ms, measured against the raw daemon. Three attempts at 100 ms, because the
+  session becomes ready a moment after the upgrade. `validate_v15_term.py` gates
+  the prompt at under 2 s.
+- **Closing the hijacked attach does not kill anything.** Measured 02/09/2026:
+  the daemon keeps the exec running, detached, for ever — **38 orphaned root
+  `bash -i`** in the test container, one per terminal ever opened, and the
+  120-minute idle reaper had been calling the same no-op. Close is now ETX, EOT,
+  `exit\n`, a ≤750 ms poll on `Running:false`, and then an unconditional root
+  sweep exec that walks `/proc/*/environ` for `SCRIPTIDE_TERM=<terminal id>` —
+  `kill -HUP`, one second, `kill -KILL`. The tag is inherited, so `sleep 300 &`
+  goes with its parent; the exec's own `Pid` is a HOST pid this JVM cannot see or
+  signal, which is why a tag beats pid bookkeeping. `TerminalService.shutdown`
+  waits up to 10 s on `DockerExec.awaitReapers`, because the sweep runs on a
+  daemon thread. The `script(1)` route got its own fix: `destroy()`, then
+  `destroyForcibly()` 300 ms later, because `script` installs a SIGTERM handler
+  and an interactive bash ignores SIGTERM outright.
+- **The audit line can no longer overstate privilege.** It is written before the
+  shell starts, so it records what was expected; `TerminalSession.elevation()`
+  reports what the shell actually got (`docker-exec` / `sudo` / `none`) and a
+  mismatch is a WARN naming both.
+- **Policy is live.** `PolicySource` resolves every `ExecPolicy` and
+  `TerminalPolicy` value as **file > `-D` system property > default**. The file is
+  `<data dir>/modules/scriptide/policy.properties` (`java.util.Properties`, the
+  same fully-qualified keys), re-statted at most once every 2 s on mtime AND size,
+  wired once in `ScriptIdeModuleHook.startup()`. The module never creates it.
+  Both classes were honest about re-reading on every call; every value came from a
+  property read once at JVM start, so "no restart needed" was true of the code and
+  false of the gateway.
+- **An empty Project Library package is a folder, not a script.** A package the
+  platform reports as a resource in its own right (`dataKeys: []`) passed every
+  filter and listed as openable; clicking it 404'd with "No such data key
+  'code.py'". `isPackageContainer` marks it `isFolder` in the tree JSON, it
+  carries no `scriptKey`, the rail renders it as a folder and the footer counts
+  exclude it. Scoped to `script-python`, the only type that nests.
+- **Clicking an absent Startup/Shutdown/Update row opens a DRAFT.** It used to
+  call `createScript` on the click — browsing the tree wrote resources, and git
+  diffs, into a live project with no confirmation. `DocOrigin 'new'` is a buffer
+  with no ETag that is always dirty; the first save creates the resource through
+  the ordinary create branch, and the tree is re-read afterwards. A create raced
+  by somebody else comes back as **428**, not 409 (there is no base signature to
+  send), and raises the same conflict dialog. The named "New script…" dialog is
+  unchanged: it still creates on OK.
+- **Two things the UI was not saying.** A tab holding an inherited,
+  not-yet-overridden script is labelled `(Read-Only)`, matching the Designer's own
+  buffer header — the editor already refused every keystroke, but with six tabs
+  open nothing said which one. And the footer has an `idle` state, "Language
+  server idle": the LSP connects lazily on the first document, so the landing page
+  showed "Language server offline" in red when nothing had failed. `offline` is
+  now reserved for a connection that was attempted and lost.
+- **Completion docs read like documentation again.** `HintIndex` rendered a return
+  type with `String.valueOf(rt)`, and `TypeDescriptor` is a Kotlin data class —
+  the doc panel showed `TypeDescriptor(name=None, description=null, …)` for every
+  return type. It uses `rt.getName()` now. The panel also printed the signature
+  twice, because the server's markdown already opens with `detail` in a fenced
+  block; `detail` is only rendered separately when the body does not start with
+  it.
 
 ### 1.4.0, and how the Designer was measured
 
@@ -112,15 +274,65 @@ much room it takes up, not only what it is called.
 | P1 — read/write script resources, byte-perfect | **Done.** Byte-identical on disk, verified with `cat -A` |
 | P2 — execution | **Done.** 0 cross-user output leakage under concurrency |
 | P3 — completions, signature help, hover | **Done.** Sourced from the running gateway |
-| P4 — project navigation | **Done.** Definition, outline, symbol search |
+| P4 — project navigation | **Done in the LSP; only the OUTLINE is wired into the UI.** `lspClient` has `definition`, `workspaceSymbols` and `scriptide/searchText`, and nothing calls them — `ActivityBar` has no Search view, by its own comment |
 | P5 — diagnostics | **Done.** Real Jython parser; valid Python 2 never flagged |
 | P6 — cross-file search, polish | **Done** |
 | P7 — hardening, docs, 1.0.0 | **Done.** Security review clean |
 
+## What is next
+
+Nigel's brief (02/09/2026): at least the Designer's capabilities, then more and
+better — "clean, easy to use, extremely functional and far superior to the
+Designer at the functions it is designed for". Read access may be BROADER than
+the Designer's. Named queries are in scope: the programming workflow builds
+named queries and Python together and needs them side by side.
+
+**Batch D — navigation (1.6.0).** The LSP already answers all of these; the UI
+calls none of them.
+- Go-to-definition (F12 / Ctrl-click) via `lspClient.definition`, across files.
+- Quick-open (Ctrl-P) over `workspace/symbol` + script paths.
+- Project text search panel over `scriptide/searchText`, with a Search view in
+  `ActivityBar` (its own comment says it is missing).
+- Problems panel listing every open document's diagnostics, click to jump.
+- Server-side references (name-based, scoped by the AST index; say it is
+  name-based in the UI).
+- Fold gutter; go-to-line (Ctrl-G).
+- Bottom panel height at a 1000 px viewport (measured cramped in the 02/09
+  review); the signature-twice check; ETag quoting (`"…"` per RFC 9110 — the
+  value is currently bare).
+
+**Batch E — Named Queries (1.7.0).** `ignition/named-query` resources.
+- Tree section under the project, folders, create/rename/delete.
+- SQL editor (CodeMirror `@codemirror/lang-sql`), byte-fidelity like scripts.
+- Settings / Authoring / Testing parity with the Designer workspace: type
+  (Query/Update/Scalar), database, caching, parameters with types, and a
+  test-run through `system.db.runNamedQuery` with a parameter form and a result
+  grid. Measure the resource shape on the rig FIRST (`query.sql` + `resource.json`
+  attributes) — do not guess attribute keys, per the Tag Change rule above.
+- Named-query name completion inside Python (`system.db.runNamedQuery("…")`).
+
+**Then — the review against purpose.** Once D and E are live-gated: review the
+module as a product against Nigel's brief and deliver recommendations for going
+beyond the Designer (offer the write-up as an artifact page).
+
+**Open decisions for Nigel**, parked, none blocking:
+- `terminal.docker` default (currently true — the larger grant, on by default).
+- The `groups: cannot find name for group ID` notice — leave, or suppress in
+  the shell's environment.
+- The Administrator role name is assumed (`Administrator`); make it policy?
+- ETag format (bare vs quoted).
+- The rig's API tokens are gone (noticed 02/09; nothing here uses them).
+- `_wd_scratch_` inheritable: flipping it lets the tree suite's read-only
+  checks run; it is web-designer's project.
+- `_si_child_` on the rig: keep as the fixture, or delete after the suites.
+- The rig admin password reached a scratchpad file and one agent transcript
+  line during the 02/09 fixture work (both scrubbed): rotate it.
+
 ## What is proved on a real gateway
 
-Six suites plus a per-theme contrast sweep, all green, all run against the
-live gateway rather than mocks.
+Six suites plus a per-theme contrast sweep, all green on 1.4.3, all run against
+the live gateway rather than mocks. The three 1.5.0 suites below them are written
+and not yet run green on 1.5.0.
 
 **`deploy_gate.py` — 6 checks.** Served bundle hash matches the build; Config ▸
 Modules shows the built version ACTIVE; a real cookie session gets `authenticated:true` with a
@@ -169,7 +381,20 @@ editor and restore bringing it back; the UI font not resolving to a serif and th
 editor font resolving to a monospace; ten themes with no two sharing a palette;
 and no failed request or console error attributable to this module.
 
-A sixth script, `theme_sweep_v13.py`, measures contrast on the **painted**
+**`validate_v15_exec.py`, `validate_v15_term.py`, `validate_v15_tree.py` — the
+1.5.0 suites, WRITTEN AND NOT YET RUN GREEN AGAINST 1.5.0 ON THE RIG.** exec
+covers Stop landing mid-run, the socket still answering terminal keystrokes while
+a script spins, the first printed line appearing before the last, a traceback that
+names its exception type and its functions, a syntax error carrying no internal
+token, and Reset. term times the open, proves the shell carries a
+`SCRIPTIDE_TERM` tag, and counts processes INSIDE the container after a close —
+the only place a leaked shell is visible. tree covers the click-to-draft negative
+(nothing is created by the click, or by closing the tab) as well as the positive,
+the empty-package folder, the idle footer and the `(Read-Only)` tab. term and tree
+need a container (`SI_TERM_CONTAINER`) and a project with a parent
+(`SI_INHERIT_PROJECT`) respectively, and skip rather than fail without them.
+
+A seventh script, `theme_sweep_v13.py`, measures contrast on the **painted**
 elements per theme — foreground against the background actually behind it, walked
 up the tree — because the 1.2.0 generator's own check measured the wrong pair and
 certified five illegible themes. Worst element across all ten: 5.08:1.
@@ -214,16 +439,27 @@ gutter marker.
    `stty`. The command passed to `-c` is not echoed, so setup can be smuggled in
    front of the shell; capture the slave path there and later resizes can be done
    from outside with `stty -F` instead of typing into the user's session.
-9. **git is not in the Ignition image and cannot be added from the terminal** — the
-   Gateway runs as uid 2003 with no sudo. It has to go in the image; see
-   `modules/dockers/ignition/Dockerfile.test`.
+9. **CLOSED.** "git is not in the Ignition image and cannot be added from the
+   terminal — the Gateway runs as uid 2003 with no sudo, so it has to go in the
+   image." Both halves are gone: the rig runs a STOCK image again (Nigel,
+   02/09/2026) and `Dockerfile.test` with it, and the terminal reaches root
+   through the Docker daemon rather than through anything in the image, so git is
+   `apt-get install -y git` from the root terminal. What survives is the reason
+   the module never tries to elevate itself: a process cannot raise its own
+   privilege.
 
 ## Known gaps and deliberate omissions
 
 - **No breakpoint debugging.** The only serious Ignition debugger needs a live
   Designer and blocks a gateway worker thread; neither fits a browser IDE.
-- **No find-references.** Definition, outline and symbol search are in; a correct
-  references implementation needs the type system the AST index does not build.
+- **No project-wide navigation in the UI.** The gateway answers
+  `textDocument/definition`, `workspace/symbol` and the module's own
+  `scriptide/searchText`, and `lspClient` wraps all three, but no component calls
+  them: the outline is the only navigation a user can reach, plus Ctrl+F in the
+  buffer. Anything claiming go-to-definition, quick-open or a search panel is
+  describing the server, not the product.
+- **No find-references.** A correct references implementation needs the type
+  system the AST index does not build.
 - **Diagnostics are syntax-only.** Undefined-name, unused-import and arity checks
   were designed but not shipped: the release bar was zero false positives, and one
   wrong squiggle on correct code costs more trust than ten missed problems.
@@ -237,9 +473,10 @@ gutter marker.
   workspace has never been measured. Its tag-path list is the missing piece, and
   guessing the key would write a value the Designer never reads.
 - **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`; `v1.0.0`
-  through `v1.4.3` tagged 01–02/09/2026. The folder is gitignored by the workspace repo,
-  like every sibling module. There is **no GitHub release artefact** — the signed
-  `.modl` is built locally and has not been attached to the tag.
+  through `v1.5.4` tagged 01–02/09/2026, `CHANGELOG.md` complete to 1.5.4. The
+  folder is gitignored by the workspace repo, like every sibling module. There
+  is **no GitHub release artefact** — the signed `.modl` is built locally and
+  has not been attached to any tag.
 
 ## Measured facts worth not rediscovering
 
@@ -258,11 +495,10 @@ gutter marker.
   meant to take its own row sat back on the control's row, wrapped into three
   short lines against the right edge. Every test passed; only the screenshot
   showed it. Put a measure limit on a child, never on the item doing the wrapping.
-- **The test rig's image is now built, not pulled** —
-  `modules/dockers/ignition/Dockerfile.test`, wired into `docker-compose.yml`
-  01/09/2026. It adds git 2.43.0, less, openssh-client and a **passwordless
-  sudoers rule for the `ignition` user**. That rule is what makes the browser
-  terminal a root shell, and no module property could have: an Ignition module is
-  Java in a JVM that is already uid 2003. The privilege is not confined to the
-  terminal — Jython from the Script Console gets it too — which is why it lives in
-  a file named `.test` and is written out at length there.
+- **The test rig runs a STOCK Ignition image** (Nigel, 02/09/2026). The custom
+  image built on 01/09 and its `Dockerfile.test` — git, less, openssh-client and a
+  passwordless sudoers rule for the `ignition` user — are gone. Root in the
+  browser terminal comes from the Docker daemon instead, which needs nothing in
+  the image, and git is installed from that root shell. The sudoers route is still
+  supported and still the LARGER-looking-but-smaller grant: it is bounded by the
+  container, where the socket is the daemon's full API as root on the host.

@@ -73,6 +73,13 @@ public class ScriptIdeModuleHook extends AbstractGatewayModuleHook {
     public void startup(LicenseState licenseState) {
         logger.info("Script IDE module starting...");
 
+        // Policy overrides come from a file under the data dir so an operator can
+        // turn execution or the terminal off WITHOUT a gateway restart. One call
+        // covers both policies; without it the source falls back to -Ddata.dir.
+        com.gaskony.scriptide.gateway.term.TerminalPolicy.setPropertiesFile(
+            context.getSystemManager().getDataDir().toPath()
+                .resolve("modules/scriptide/policy.properties"));
+
         // Publish the context BEFORE registering the servlet: the container
         // instantiates the servlet through its no-arg constructor and reads the
         // context back out of the registry.

@@ -178,7 +178,15 @@ public final class HintIndex {
         }
         String returnType = safe(() -> {
             var rt = method.getReturnType();
-            return rt == null ? null : String.valueOf(rt);
+            // getName(), never toString(): TypeDescriptor is a Kotlin data class
+            // and its toString() is the whole record —
+            // `TypeDescriptor(name=None, description=null, …)` — which was what
+            // the doc panel showed for every return type until 1.5.0.
+            if (rt == null) {
+                return null;
+            }
+            String typeName = rt.getName();
+            return (typeName == null || typeName.isBlank()) ? null : typeName;
         }, null);
         return new Entry(name, join(prefix, name), Kind.FUNCTION,
             signature(name, params), safe(method::getDescription, null),

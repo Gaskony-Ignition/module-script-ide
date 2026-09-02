@@ -2,18 +2,24 @@
  * The Script Console: a scratch buffer that runs on the Gateway.
  *
  * The Designer's console is a REPL against the gateway's script manager, and
- * this is the same thing with an actual editor above it. Three behaviours are
+ * this is the same thing with an actual editor above it. Four behaviours are
  * deliberate and are the ones worth knowing:
  *
  * **Locals persist between runs, exactly like the Designer's.** The server keys
  * console locals on the ABSENCE of a `target`, so a name bound in one run is
  * still bound in the next. That is what makes it a console rather than a
  * scratch file, and it is also why "Clear output" does not reset them — losing
- * your bindings because you tidied the output would be a nasty surprise.
+ * your bindings because you tidied the output would be a nasty surprise. Reset
+ * is the control that drops them, which is where the Designer puts it too.
  *
  * **Run selection runs only the selection**, with the preceding lines replaced
  * by blank ones so a traceback still points at the line you can see. The offset
  * is sent so the server can subtract it back off.
+ *
+ * **Output arrives as it is produced.** The server streams `output` frames and
+ * the `finished` frame then carries none of that text — see execClient.ts. So a
+ * chunk is APPENDED to the block it continues rather than starting a new one,
+ * or a loop printing a hundred lines would render as a hundred blocks.
  *
  * **Stop is best-effort and says so.** Jython's interrupt fires at the next
  * trace point: a busy loop stops in about three seconds, but a `time.sleep(10)`
@@ -24,8 +30,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { byteFidelity, editorTheme, findAndReplace, pythonKeymap, pythonSurface } from './editorCore';
-import { sharedExecClient, type ExecError, type ExecEvent, type ExecResult } from '../api/execClient';
+import {
+  sharedExecClient,
+  type ExecError,
+  type ExecErrorFrame,
+  type ExecEvent,
+  type ExecResult,
+} from '../api/execClient';
 import './ScriptConsole.css';
+
+/** A script file the console can run instead of its own buffer. */
+export interface ActiveSource {
+  /** Resource path, e.g. `ignition/script-python/util/helpers`. */
+  path: string;
+  /** What to call it on the button's tooltip and in a traceback frame. */
+  label: string;
+  /** Read the CURRENT editor text — never a snapshot taken at render time. */
+  getSource: () => string;
+}
 
 export interface ScriptConsoleProps {
   project: string;
@@ -34,6 +56,14 @@ export interface ScriptConsoleProps {
   canExecute: boolean;
   /** Jump to a traceback frame that resolved to a project script. */
   onOpenFrame?: (path: string, line: number) => void;
+  /**
+   * The file the workspace has open, so "Run file" can run it.
+   *
+   * Optional: the popped-out console has no editor behind it, and the button is
+   * disabled rather than hidden so its absence reads as "nothing open" instead
+   * of "this build cannot do that".
+   */
+  activeSource?: ActiveSource;
 }
 
 /** One entry in the output log. Kept as a list so runs stay visually separated. */
@@ -42,15 +72,59 @@ interface OutputEntry {
   kind: 'stdout' | 'stderr' | 'note' | 'error';
   text: string;
   error?: ExecError;
+  /**
+   * The resource a submitted-source frame belongs to, or undefined for a console
+   * run. Held per ENTRY, not per component: by the time someone clicks a frame
+   * the console may well be running something else.
+   */
+  sourcePath?: string;
+  /** Whether a further chunk of the same stream may be appended to this block. */
+  open?: boolean;
 }
 
 const STARTER = '# Runs on the Gateway. Ctrl+Enter to run, Ctrl+Shift+Enter for the selection.\n';
+
+/** Where the platform keeps project-library modules. */
+const LIBRARY_ROOT = 'ignition/script-python/';
+
+/** 24-hour local time, for the divider that separates one run from the next. */
+function clockTime(): string {
+  return new Date().toLocaleTimeString('en-AU', { hour12: false });
+}
+
+/** `util.helpers` → `ignition/script-python/util/helpers`. */
+export function libraryPathOf(module: string): string {
+  return LIBRARY_ROOT + module.replace(/\./g, '/');
+}
+
+/**
+ * What a frame should be CALLED, and what (if anything) it opens.
+ *
+ * The server has already decided which frames are which — `libraryModule` for a
+ * project-library frame, `isSubmitted` for the source that was just run — so
+ * this only spells the answer, it does not re-derive it from filenames.
+ */
+export function describeFrame(
+  frame: ExecErrorFrame,
+  sourcePath?: string
+): { label: string; path?: string } {
+  if (frame.libraryModule) {
+    return { label: libraryPathOf(frame.libraryModule), path: libraryPathOf(frame.libraryModule) };
+  }
+  if (frame.isSubmitted) {
+    // A file run knows its own path; a console run has none, and `<console>` is
+    // what the server calls it too.
+    return { label: sourcePath ?? '<console>', path: sourcePath };
+  }
+  return { label: frame.file ?? '<unknown>' };
+}
 
 export default function ScriptConsole({
   project,
   csrfToken,
   canExecute,
   onOpenFrame,
+  activeSource,
 }: ScriptConsoleProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -58,6 +132,14 @@ export default function ScriptConsole({
   const [running, setRunning] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const outputRef = useRef<HTMLDivElement | null>(null);
+
+  /** Monotonic, so two entries appended in the same millisecond differ. */
+  const nextId = useRef(0);
+  /** Which run this is, for the divider. Counts from 1 per mounted console. */
+  const runNumber = useRef(0);
+  const runStartedAt = useRef(0);
+  /** The resource the in-flight run submitted, or undefined for the console. */
+  const runSourcePath = useRef<string | undefined>(undefined);
 
   const exec = useMemo(() => sharedExecClient(), []);
 
@@ -67,8 +149,30 @@ export default function ScriptConsole({
     }
     setEntries((previous) => [
       ...previous,
-      { ...entry, id: `${Date.now()}-${previous.length}` },
+      { ...entry, id: `e${(nextId.current += 1)}` },
     ]);
+  }, []);
+
+  /**
+   * Append streamed output, continuing the previous block where it belongs.
+   *
+   * A chunk boundary is an artefact of flushing, not of the script — `print` in
+   * a loop must not turn into one bordered block per line. So consecutive chunks
+   * on the same stream are concatenated into one entry, and anything else (a
+   * note, the other stream, the next run's divider) closes it.
+   */
+  const appendChunk = useCallback((kind: 'stdout' | 'stderr', text: string) => {
+    if (!text) {
+      return;
+    }
+    setEntries((previous) => {
+      const last = previous[previous.length - 1];
+      if (last && last.open && last.kind === kind) {
+        const merged = { ...last, text: last.text + text };
+        return [...previous.slice(0, -1), merged];
+      }
+      return [...previous, { id: `e${(nextId.current += 1)}`, kind, text, open: true }];
+    });
   }, []);
 
   // ---- run / stop -------------------------------------------------------
@@ -77,6 +181,29 @@ export default function ScriptConsole({
   // closure over `running` would freeze at its first value and the Ctrl+Enter
   // binding would keep firing while a script was already running.
   const runRef = useRef<(selectionOnly: boolean) => void>(() => {});
+
+  /** Start a run: the divider, the clock, and the send. */
+  const beginRun = useCallback(
+    (sent: boolean, sourcePath?: string) => {
+      if (!sent) {
+        append({
+          kind: 'error',
+          text: 'Not connected to the gateway — the run was not sent. '
+            + 'The connection retries on its own; try again in a moment.',
+        });
+        return;
+      }
+      runNumber.current += 1;
+      runStartedAt.current = Date.now();
+      runSourcePath.current = sourcePath;
+      append({ kind: 'note', text: `▸ run ${runNumber.current} · ${clockTime()}` });
+      // Optimistic: the server answers `started` almost immediately, but the
+      // button must not stay clickable in the gap.
+      setRunning('pending');
+      setStopping(false);
+    },
+    [append]
+  );
 
   const doRun = useCallback(
     (selectionOnly: boolean) => {
@@ -105,24 +232,33 @@ export default function ScriptConsole({
         append({ kind: 'note', text: 'Nothing to run.' });
         return;
       }
-      const sent = exec.run({ project, source, csrfToken, lineOffset });
-      if (!sent) {
-        append({
-          kind: 'error',
-          text: 'Not connected to the gateway — the run was not sent. '
-            + 'The connection retries on its own; try again in a moment.',
-        });
-        return;
-      }
-      // Optimistic: the server answers `started` almost immediately, but the
-      // button must not stay clickable in the gap.
-      setRunning('pending');
-      setStopping(false);
+      beginRun(exec.run({ project, source, csrfToken, lineOffset }));
     },
-    [append, canExecute, csrfToken, exec, project, running]
+    [append, beginRun, canExecute, csrfToken, exec, project, running]
   );
 
   runRef.current = doRun;
+
+  /**
+   * Run the file the workspace has open, not this buffer.
+   *
+   * Sends a `target`, which is what tells the server this is a file: it then
+   * runs against FRESH locals, because a script file is not a REPL.
+   */
+  const doRunFile = useCallback(() => {
+    if (!activeSource || running || !canExecute) {
+      return;
+    }
+    const source = activeSource.getSource();
+    if (!source.trim()) {
+      append({ kind: 'note', text: `${activeSource.label} is empty.` });
+      return;
+    }
+    beginRun(
+      exec.run({ project, source, csrfToken, target: activeSource.path, lineOffset: 0 }),
+      activeSource.path
+    );
+  }, [activeSource, append, beginRun, canExecute, csrfToken, exec, project, running]);
 
   const doStop = useCallback(() => {
     if (!running || running === 'pending') {
@@ -132,6 +268,42 @@ export default function ScriptConsole({
     exec.stop(running, csrfToken);
   }, [csrfToken, exec, running]);
 
+  /** Drop the console's locals. Refused server-side while a script is running. */
+  const doReset = useCallback(() => {
+    if (running || !canExecute) {
+      return;
+    }
+    exec.reset(project, csrfToken);
+  }, [canExecute, csrfToken, exec, project, running]);
+
+  /** Put the console's own cursor on a line — for a frame in the buffer above. */
+  const goToConsoleLine = useCallback((line: number) => {
+    const view = viewRef.current;
+    if (!view) {
+      return;
+    }
+    const clamped = Math.min(Math.max(1, line), view.state.doc.lines);
+    const target = view.state.doc.line(clamped);
+    view.dispatch({
+      selection: { anchor: target.from },
+      scrollIntoView: true,
+    });
+    view.focus();
+  }, []);
+
+  const openFrame = useCallback(
+    (path: string | undefined, line: number) => {
+      // A frame in the submitted console source has no resource to open, so the
+      // console moves its own cursor instead — the same gesture, locally.
+      if (!path) {
+        goToConsoleLine(line);
+        return;
+      }
+      onOpenFrame?.(path, line);
+    },
+    [goToConsoleLine, onOpenFrame]
+  );
+
   // ---- socket subscription ---------------------------------------------
 
   useEffect(() => {
@@ -140,8 +312,16 @@ export default function ScriptConsole({
         setRunning(event.executionId);
         return;
       }
+      if (event.kind === 'output') {
+        appendChunk(event.stream, event.text);
+        return;
+      }
       if (event.kind === 'stopping') {
         append({ kind: 'note', text: event.detail || 'Stopping…' });
+        return;
+      }
+      if (event.kind === 'reset') {
+        append({ kind: 'note', text: '— reset —' });
         return;
       }
       if (event.kind === 'error') {
@@ -158,17 +338,22 @@ export default function ScriptConsole({
     });
 
     function appendResult(result: ExecResult) {
+      // stdout/stderr here are empty by contract — everything was streamed. They
+      // are still read, so a gateway that has not been upgraded yet still shows
+      // its output rather than nothing at all.
       if (result.stdout) {
-        append({ kind: 'stdout', text: result.stdout });
+        appendChunk('stdout', result.stdout);
       }
       if (result.stderr) {
-        append({ kind: 'stderr', text: result.stderr });
-      }
-      if (result.cancelled) {
-        append({ kind: 'note', text: 'Stopped.' });
+        appendChunk('stderr', result.stderr);
       }
       if (result.error) {
-        append({ kind: 'error', text: result.error.message, error: result.error });
+        append({
+          kind: 'error',
+          text: headlineOf(result.error),
+          error: result.error,
+          sourcePath: runSourcePath.current,
+        });
       }
       if (result.truncated) {
         append({
@@ -176,11 +361,32 @@ export default function ScriptConsole({
           text: 'Output was truncated — the rest was discarded, not withheld.',
         });
       }
-      if (!result.stdout && !result.stderr && !result.error && !result.cancelled) {
-        append({ kind: 'note', text: 'Done. No output.' });
-      }
+      append({ kind: 'note', text: closingNote(result) });
     }
-  }, [append, exec]);
+
+    /**
+     * `ZeroDivisionError: integer division or modulo by zero`.
+     *
+     * A syntax error has no frames to carry its position, so the line goes in
+     * the headline — it is the only thing the reader can act on.
+     */
+    function headlineOf(error: ExecError): string {
+      const where = error.line === undefined ? '' : ` (line ${error.line})`;
+      return `${error.type}: ${error.message}${where}`;
+    }
+
+    /** The quiet line that ends a run, so the next one starts somewhere new. */
+    function closingNote(result: ExecResult): string {
+      if (result.cancelled) {
+        return '— stopped —';
+      }
+      if (!result.ok || result.error) {
+        return '— failed —';
+      }
+      const seconds = Math.max(0, Date.now() - runStartedAt.current) / 1000;
+      return `— finished in ${seconds.toFixed(1)} s —`;
+    }
+  }, [append, appendChunk, exec]);
 
   // Keep the newest output visible without fighting a user who scrolled up.
   useEffect(() => {
@@ -259,12 +465,22 @@ export default function ScriptConsole({
         >
           Run selection
         </button>
+        <button
+          type="button"
+          onClick={doRunFile}
+          disabled={busy || !canExecute || !activeSource}
+          title={activeSource
+            ? `Run ${activeSource.label} on the Gateway, with fresh locals`
+            : 'Open a script to run it'}
+        >
+          Run file
+        </button>
         <button type="button" onClick={doStop} disabled={!busy || running === 'pending'}>
           {stopping ? 'Stopping…' : 'Stop'}
         </button>
         {stopping && (
           <span className="console-hint muted">
-            waiting for the script to reach a stopping point
+            (waiting for the script to reach a stopping point)
           </span>
         )}
         <span className="console-spacer" />
@@ -273,6 +489,14 @@ export default function ScriptConsole({
         </span>
         <button type="button" onClick={() => setEntries([])} disabled={entries.length === 0}>
           Clear output
+        </button>
+        <button
+          type="button"
+          onClick={doReset}
+          disabled={busy || !canExecute}
+          title="Forget every variable this console has bound, like the Designer's Reset"
+        >
+          Reset
         </button>
       </div>
 
@@ -304,7 +528,7 @@ export default function ScriptConsole({
             </p>
           ) : (
             entries.map((entry) => (
-              <OutputBlock key={entry.id} entry={entry} onOpenFrame={onOpenFrame} />
+              <OutputBlock key={entry.id} entry={entry} onOpenFrame={openFrame} />
             ))
           )}
         </div>
@@ -318,59 +542,85 @@ function OutputBlock({
   onOpenFrame,
 }: {
   entry: OutputEntry;
-  onOpenFrame?: (path: string, line: number) => void;
+  onOpenFrame: (path: string | undefined, line: number) => void;
 }) {
   return (
     <div className={`console-block console-${entry.kind}`}>
       <pre>{entry.text}</pre>
       {entry.error && (
-        <Traceback error={entry.error} onOpenFrame={onOpenFrame} />
+        <Traceback error={entry.error} sourcePath={entry.sourcePath} onOpenFrame={onOpenFrame} />
       )}
     </div>
   );
 }
 
 /**
- * The traceback, as clickable frames where the frame resolved to a resource.
+ * The traceback, in the shape Python itself prints it.
+ *
+ * `File "<console>", line 2, in f` is what the Designer shows and what anyone
+ * who has read a Python traceback expects — 1.4.3 rendered `<console>, line 2`
+ * for every frame with no function name and no exception type at all, because
+ * the client was reading field names the server does not send.
  *
  * Frames are extracted structurally by the server, never by regex over rendered
- * text — so a frame either carries a real resource path or it does not, and only
- * the ones that do become buttons. A frame with no path still shows, because a
- * traceback with holes in it is worse than one with some unclickable lines.
+ * text, so a frame either resolves to something openable or it does not. A frame
+ * that does not still shows: a traceback with holes in it is worse than one with
+ * some unclickable lines.
  */
 function Traceback({
   error,
+  sourcePath,
   onOpenFrame,
 }: {
   error: ExecError;
-  onOpenFrame?: (path: string, line: number) => void;
+  sourcePath?: string;
+  onOpenFrame: (path: string | undefined, line: number) => void;
 }) {
+  // A syntax error has no frames — it never ran — but it does know the line and
+  // the column, which is enough to point at.
+  const caret = error.text !== undefined && error.offset
+    ? `${error.text.replace(/\n$/, '')}\n${' '.repeat(Math.max(0, error.offset - 1))}^`
+    : null;
+
   if (!error.frames || error.frames.length === 0) {
-    return error.text ? <pre className="console-traceback">{error.text}</pre> : null;
+    return (
+      <>
+        {caret && <pre className="console-caret">{caret}</pre>}
+        {!caret && error.rendered && (
+          <pre className="console-traceback">{error.rendered}</pre>
+        )}
+      </>
+    );
   }
+
   return (
-    <ol className="console-frames">
-      {error.frames.map((frame, index) => {
-        const label = `${frame.module ?? frame.path ?? '<console>'}`
-          + `, line ${frame.line}`
-          + (frame.functionName ? `, in ${frame.functionName}` : '');
-        const clickable = Boolean(frame.path && onOpenFrame);
-        return (
-          <li key={`${frame.path ?? 'x'}-${frame.line}-${index}`}>
-            {clickable ? (
-              <button
-                type="button"
-                className="console-frame-link"
-                onClick={() => onOpenFrame?.(frame.path as string, frame.line)}
-              >
-                {label}
-              </button>
-            ) : (
-              <span className="console-frame">{label}</span>
-            )}
-          </li>
-        );
-      })}
-    </ol>
+    <>
+      <ol className="console-frames">
+        {error.frames.map((frame, index) => {
+          const { label, path } = describeFrame(frame, sourcePath);
+          const suffix = frame.function ? `, in ${frame.function}` : '';
+          const text = `File "${label}", line ${frame.line}${suffix}`;
+          // A submitted-source frame with no resource still navigates — the
+          // console moves its own cursor. So every frame we can place is a link.
+          const clickable = Boolean(path) || frame.isSubmitted === true;
+          return (
+            <li key={`${frame.file ?? 'x'}-${frame.line}-${index}`}>
+              {clickable ? (
+                <button
+                  type="button"
+                  className="console-frame-link"
+                  onClick={() => onOpenFrame(path, frame.line)}
+                >
+                  {text}
+                </button>
+              ) : (
+                <span className="console-frame">{text}</span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {caret && <pre className="console-caret">{caret}</pre>}
+    </>
   );
 }

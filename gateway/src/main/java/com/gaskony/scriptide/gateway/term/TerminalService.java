@@ -28,6 +28,9 @@ public class TerminalService {
 
     private static final Logger logger = LoggerFactory.getLogger(TerminalService.class);
 
+    /** How long shutdown waits for the Docker sweeps it just started. */
+    private static final long SHUTDOWN_REAP_BUDGET_MILLIS = 10_000;
+
     /** One entry per live shell. */
     private record Entry(TerminalSession session, String owner, String username) { }
 
@@ -110,6 +113,15 @@ public class TerminalService {
                     onExit.accept(terminalId, code);
                 });
             terminals.put(id, new Entry(session, owner, username));
+            // The line above records what was EXPECTED. If the Docker route then
+            // failed and TerminalSession fell back to a local shell, the audit
+            // would otherwise say root when the user got no such thing — a log
+            // that quietly overstates privilege is worse than no log.
+            if (!elevation.equals(session.elevation())) {
+                logger.warn("Gateway terminal {} did NOT elevate as expected: the audit line "
+                    + "above says elevation={}, the shell actually got elevation={}",
+                    id, elevation, session.elevation());
+            }
             return session;
         } catch (IOException e) {
             throw new RejectedException("Could not start a shell: " + e.getMessage());
@@ -177,6 +189,9 @@ public class TerminalService {
                 return false;
             }
             if (session.isAlive()) {
+                // This promise was empty until 1.5.0: close() on a Docker-backed
+                // terminal closed a stream and left the shell running, so the
+                // sweeper "closed" idle terminals that went on existing.
                 logger.info("Closing idle Gateway terminal {} for '{}'",
                     entry.getKey(), entry.getValue().username());
             }
@@ -185,7 +200,16 @@ public class TerminalService {
         });
     }
 
-    /** Close every terminal and stop the sweeper. */
+    /**
+     * Close every terminal and stop the sweeper.
+     *
+     * <p>The wait at the end is the point of this method rather than a nicety.
+     * A Docker-backed terminal is ended by a sweep that runs on a background
+     * DAEMON thread, and a daemon thread is simply dropped when the JVM goes —
+     * so without waiting, uninstalling the module would leave behind exactly the
+     * root shells it was closing. Bounded, because a shutdown that hangs on a
+     * wedged Docker daemon is its own incident.</p>
+     */
     public void shutdown() {
         sweeper.shutdownNow();
         int count = terminals.size();
@@ -193,6 +217,11 @@ public class TerminalService {
         terminals.clear();
         if (count > 0) {
             logger.info("Closed {} Gateway terminal(s) during shutdown", count);
+            if (!DockerExec.awaitReapers(SHUTDOWN_REAP_BUDGET_MILLIS)) {
+                logger.warn("Gave up waiting for the Docker terminal sweep after {} ms; a root "
+                    + "shell may still be running in the container",
+                    SHUTDOWN_REAP_BUDGET_MILLIS);
+            }
         }
     }
 

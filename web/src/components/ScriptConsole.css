@@ -196,3 +196,30 @@
   border-top: 1px dashed var(--border-light);
   padding-top: var(--space-2);
 }
+
+/* ---- run dividers and the syntax-error caret (v1.5.0) -------------------
+ *
+ * Output used to accumulate as one undifferentiated column: three runs in a row
+ * and you could not tell where the second one started. Each run now opens with
+ * a `▸ run 3 · 12:01:45` note and closes with a dim one-line verdict, both of
+ * them ordinary notes so they stay quiet — the loudest thing in the pane must
+ * still be the script's own output.
+ */
+
+/* `.console-block pre` is (0,1,1) and sets pre-wrap, so this has to name both
+   or the caret line wraps and stops pointing at anything. */
+.console-block pre.console-caret {
+  margin: var(--space-1) 0 0;
+  /* The caret line is positional: wrapping it would move the ^ away from the
+     character it points at, so this one pre does NOT wrap. */
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--text-secondary);
+  font: inherit;
+}
+
+/* A frame line reads as a traceback, so it is monospaced and quiet even as a
+   link — the same weight as the text around it, distinguished by colour. */
+.console-frames li {
+  font-family: var(--font-mono);
+}

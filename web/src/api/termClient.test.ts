@@ -80,6 +80,39 @@ describe('TermClient', () => {
     });
   });
 
+  it('sends the open frame on the next connect when the socket is not open yet', () => {
+    // The terminal mounts before the socket is open on a tab where nothing else
+    // has used it; the transport starts connecting and drops the frame. The
+    // request must survive that, and go out exactly once.
+    const { transport, sent } = fakeTransport();
+    const hook: { listener: (() => void) | null } = { listener: null };
+    (transport.send as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
+    (transport as unknown as { onOpen: unknown }).onOpen = vi.fn((fn: () => void) => {
+      hook.listener = fn;
+      return () => { hook.listener = null; };
+    });
+    new TermClient(transport).open(80, 24, 'tok');
+    expect(sent).toHaveLength(0); // the first attempt was dropped by the transport
+    hook.listener?.();
+    hook.listener?.();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].msg).toEqual({ action: 'open', cols: 80, rows: 24, csrfToken: 'tok' });
+  });
+
+  it('withdraws a deferred open when the view goes away first', () => {
+    const { transport, sent } = fakeTransport();
+    const hook: { listener: (() => void) | null } = { listener: null };
+    (transport.send as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
+    (transport as unknown as { onOpen: unknown }).onOpen = vi.fn((fn: () => void) => {
+      hook.listener = fn;
+      return () => { hook.listener = null; };
+    });
+    const cancel = new TermClient(transport).open(80, 24);
+    cancel();
+    expect(hook.listener).toBeNull();
+    expect(sent).toHaveLength(0);
+  });
+
   it('base64-encodes keystrokes', () => {
     const { transport, sent } = fakeTransport();
     new TermClient(transport).input('t1', 'git status\r');

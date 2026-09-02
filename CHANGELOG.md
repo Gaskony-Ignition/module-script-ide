@@ -2,6 +2,356 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.4] — 2026-09-02
+
+feat: the project listing says where inherited scripts come from.
+
+### Added
+- **`GET /api/projects` now carries `parent` and `inheritable`** for each
+  project. A child of a non-inheritable parent lists no inherited scripts, and
+  without these two fields that was indistinguishable from the listing being
+  broken — the Ignition web UI exposes neither over a GET. Unit-tested.
+
+### Changed
+- `validate_v15_tree.py` SKIPs the read-only checks, with the reason printed,
+  when the fixture's parent is not marked Inheritable on the target gateway,
+  instead of failing on a property of the rig.
+
+## [1.5.3] — 2026-09-02
+
+fix: typed input never reached the terminal's shell, and closing it leaked a root shell.
+
+### Fixed
+- **Keystrokes were swallowed by the Docker terminal until the shell produced
+  output, and closing it left the root shell running.** The hijacked
+  `/exec/{id}/start` socket was wrapped with `Channels.newInputStream` and
+  `Channels.newOutputStream`, and both of those `synchronized` on the channel's
+  `blockingLock()` around every call — so with the pump thread parked in
+  `read()` waiting for the shell, every `write()` from the socket thread waited
+  for it, and the shell was waiting for the write. A prompt appeared (the first
+  read returns), then nothing typed arrived, and `close()` hung on its own ETX
+  write so the sweep never ran: measured on the rig as 3+ leaked `bash -i` per
+  session. `DockerExec` now reads and writes the `SocketChannel` directly
+  through its own `ChannelInput`/`ChannelOutput`, which use the channel's
+  separate read and write locks. `ChannelStreamsTest` proves the JDK adapters
+  cannot write while a read is parked and that the wrappers can.
+
+### Measured on the rig (1.5.4)
+- `validate_v15_term.py` 6/6: prompt in 0.31 s; `SCRIPTIDE_TERM` tag present;
+  closing the browser ended the shell and its backgrounded `sleep 300` in
+  0.8 s; no `bash -i` left in the container.
+- `validate_v15_exec.py` 19/19: the terminal answers 3.0 s into a 20 s loop;
+  Stop lands in 0.2 s; streaming, tracebacks, REPL locals and reset all pass.
+- `validate_v15_tree.py` 15/15 with the read-only checks skipped as above.
+
+## [1.5.2] — 2026-09-02
+
+fix: a terminal opened before its socket did, on a tab nothing else had used.
+
+### Fixed
+- **A terminal could open a shell and never show a prompt.** On a tab where
+  nothing else had used the socket, mounting the terminal called `open()` before
+  the connection existed; `send()` starts the connection lazily but still
+  returns `false` for the frame that triggered it, so the open request was
+  dropped and never retried — the xterm mounted and the prompt never came.
+  `TermClient.open()` now defers the frame to the transport's next `onOpen` when
+  it cannot send immediately, and returns a disposer the view calls on unmount so
+  a tab closed in that window does not get a shell opened for it afterwards.
+  Unit-tested.
+
+## [1.5.1] — 2026-09-02
+
+fix: a stopped script poisoned its executor thread, and the next run on it was
+cancelled at once.
+
+### Fixed
+- **Stopping a script left the pool thread it ran on unusable.**
+  `ScriptManager.interrupt` installs a `BreakTraceFunction` on the running frame,
+  and its throw escapes before the handler pops the frame, so
+  `ThreadState.frame` is left pointing at the dead frame with the trace function
+  still attached — measured on 1.5.0: every later run on that thread came back
+  cancelled with no output and no error. `PrivateStateRunner` now snapshots
+  `ThreadState.frame`/`tracefunc`/`exception` before a run and restores them in
+  `finally` (`FrameSnapshot`). `PrivateStateRunnerStopTest` drives the real
+  `ScriptManager.interrupt` as its regression test. Verified live: a run stopped
+  mid-loop, two later runs on the same thread complete.
+
+## [1.5.0] — 2026-09-02
+
+A socket that keeps listening, and a shell that actually dies. Review fixes
+across the exec channel, the terminal and policy — most of them invisible from
+the page, which is why `scripts/testing/validate_v15_{exec,term,tree}.py` exist.
+
+### Fixed
+- **The exec frame handler no longer waits for the script.** `ScriptIdeSocket`
+  is an `AutoDemanding` listener — one frame at a time, on the socket thread —
+  and the run branch used to block there until the script finished: measured on
+  1.4.3, a Stop sent 1.5 s into a 20 s busy loop was not read until the loop had
+  run its full 20.0 s, and every ping, LSP request and terminal keystroke queued
+  behind it. `ExecutionService.submit` now returns the moment the pool accepts
+  the work; `started`, `output` and `finished` arrive through callbacks, and the
+  timeout ladder moved off a `future.get(deadline)` onto the watchdog. Closing
+  the socket now stops whatever that session was running (`stopAllFor`).
+- **Tracebacks are structured, and no internal token reaches the screen.** The
+  client had invented its own field names against a server payload of
+  `{type, message, rendered, frames}`, so nothing matched and every frame read
+  `<console>, line N` with no function and no exception type. A syntax error is
+  now unpacked from its raw `(msg, (file, line, offset, text))` tuple instead of
+  rendered with `toString()`, and the console draws a caret under the reported
+  column.
+- **A Docker exec's resize needs to happen after the attach, never before.** A
+  `POST /exec/{id}/resize` sent before `/exec/{id}/start` has no exec session to
+  size — the daemon blocks and answers `500 timeout waiting for exec session
+  ready`, and the five-second watchdog cut that short, which is why every 1.4.x
+  terminal took exactly 5.00 s to open and the resize never applied. Attach
+  first and the same call returns 200 in about 90 ms; `DockerExec.start` retries
+  it three times at 100 ms because the session becomes ready a moment after the
+  upgrade.
+- **Closing a terminal did not close it.** The Engine API has no "kill this
+  exec": the daemon keeps a closed session's shell running, detached, forever —
+  measured 02/09/2026 at 38 orphaned root `bash -i` in the test container, one
+  per terminal ever opened, with the 120-minute idle reaper calling the same
+  no-op every time. Close now sends ETX, EOT and `exit`, polls `Running:false`
+  for up to 750 ms, and always runs a root sweep exec that walks
+  `/proc/*/environ` for `SCRIPTIDE_TERM=<terminal id>` and kills what it finds,
+  so a backgrounded child goes with its parent. `TerminalService.shutdown` waits
+  on the sweep before returning, because it runs on a daemon thread. The
+  `script(1)` route got its own escalation: `destroy()`, then
+  `destroyForcibly()` 300 ms later, because an interactive bash ignores SIGTERM.
+- **Policy switches were read once, at JVM start.** `PolicySource` now resolves
+  every `ExecPolicy` and `TerminalPolicy` value live, as file > `-D` system
+  property > default, from `<data dir>/modules/scriptide/policy.properties`,
+  re-statted at most once every 2 s. The module never creates the file — absent
+  means no overrides, which is where every existing gateway already is. "Turn
+  it off without a restart" had been true of the code and false of the gateway.
+- **An empty Project Library package rendered as an openable script.** The
+  platform reports it as a resource with `dataKeys: []`; clicking it 404'd with
+  "No such data key `code.py`". It is marked `isFolder` in the tree JSON now,
+  scoped to `script-python`, the only resource type that nests.
+- **Clicking an absent Startup/Shutdown/Update row wrote a resource on the
+  click.** Browsing the tree wrote into a live project with no confirmation. It
+  now opens a draft with no ETag; the first save creates the resource through
+  the ordinary create path, and a create raced by somebody else comes back 428,
+  not 409 — there is no base signature to send.
+- **`HintIndex` printed a Kotlin data class instead of a type name.** The
+  completion doc panel showed `TypeDescriptor(name=None, description=null, …)`
+  for every return type; it calls `getName()` now. The panel also printed the
+  signature twice, because the server's markdown already opens with `detail` in
+  a fenced block.
+
+### Added
+- **The `finished` frame carries no stdout or stderr, by contract** — everything
+  has already gone out as `output` frames as it was produced. A chunk is
+  flushed on a newline, at 4 KB, or every 100 ms, with the UTF-8 decoder kept
+  across flushes so a multi-byte character landing on a chunk boundary does not
+  become two replacement glyphs. The console renders a `▸ run N · HH:MM:SS`
+  divider, merges consecutive chunks of one stream into a block, and closes
+  with `— finished in N.N s —` / `— stopped —` / `— failed —`.
+- Two states the UI was not saying: an inherited, not-yet-overridden tab is
+  labelled `(Read-Only)`, matching the Designer's own buffer header; the
+  footer has an `idle` state for the LSP's lazy connect, so the landing page no
+  longer shows "Language server offline" in red for a connection that was never
+  attempted.
+- The 1.5.0 validation harness — `scripts/testing/validate_v15_exec.py`,
+  `validate_v15_term.py`, `validate_v15_tree.py` — was written against this
+  release. Against 1.5.0–1.5.2 on the rig it found two more defects (the
+  terminal's deferred open, 1.5.2, and the channel-lock deadlock, 1.5.3); it
+  first ran fully green on 1.5.4.
+
+## [1.4.3] — 2026-09-02
+
+fix: the Docker route was never reachable, and the last terminal line was
+clipped.
+
+### Fixed
+- **The Docker route reported itself absent on a socket that worked fine.**
+  `SocketChannel.socket()` throws `UnsupportedOperationException` on a
+  Unix-domain channel — it is specified to for any non-IP-based channel — so
+  1.4.2's `connect()` call to set a read timeout threw on EVERY Docker API
+  request, `available()` caught it as "the socket is unusable", and the whole
+  route reported itself absent on a host where the socket was mounted,
+  readable, writable and working. The only symptom was an unprivileged shell
+  and one log line reading `elevation=none`. Timeouts now come from a watchdog
+  that closes the channel, raising `AsynchronousCloseException` on the blocked
+  read — the supported way to interrupt one — and a mounted-but-unusable
+  socket logs a WARN rather than a debug line, because somebody deliberately
+  mounted it. Verified on the live gateway: `elevation=docker-exec`, uid 0, on
+  a stock image with no sudo anywhere in it.
+- **A fitted terminal cut off its own last line** (Nigel: "The bottom of the
+  text seems to be getting cut off even though its a full screen?"). xterm's
+  `FitAddon` sizes from the computed height of the element the canvas sits in
+  and does not subtract that element's own padding, so 8px of `padding-top`
+  fitted 11 rows — 220px — into a 216px content area, and `overflow: hidden`
+  ate the bottom 4px of the last line. Measured on the live gateway: host
+  224px tall, rows 220px. The inset moved to the wrapper; the gate now asserts
+  both zero vertical padding on the fitted element and that the rows fit
+  inside it.
+
+### Changed
+- **The rig is back on a stock image** (Nigel: "We will not be using custom
+  ignition images."). The image built 01/09 is deleted, `Dockerfile.test` with
+  it, and the gateway runs `inductiveautomation/ignition:8.3.8` verbatim — the
+  socket mount is a compose change and never needed a build.
+
+### Added
+- `validate_v13`'s terminal INPUT checks are removed, with the reason written
+  into the file rather than glossed over: they stopped receiving any input in
+  that suite's page state, not even a bare Enter, while identical code in
+  `validate_v14` types and reads back fine on the same build and gateway. The
+  cause is NOT found; input coverage lives in `validate_v14`.
+
+### Verified
+Gate 6/6 · validate_v14 25/25 · v13 22/22 · v11 12/12 · lsp 10/10 · p1_p2 8/8 ·
+theme sweep clean. 192 frontend tests, Java green, SpotBugs clean.
+
+## [1.4.2] — 2026-09-02
+
+feat: chrome sizing, one chrome row, and a Docker route to root.
+
+Nigel, on the 1.4.1 screenshot: "The drop downs all seem to be squished like
+they are not the right size for the rest of the designed layout and the save
+script button is bleeding into the edges... can't you make the hint scope &
+Read only/override stuff all on 1 line so that it doesn't reduce the script
+window unecessarily?"
+
+### Fixed
+- **There was no height token for chrome controls.** Every control carried its
+  own `padding: 1px ...` and no height, so it was sized from its content, and a
+  `<select>` and a `<button>` with identical padding came out different
+  heights — in a 30px bar both looked squashed and the Save button ran into
+  the border. `--control-height: 24px` now applies to the project picker, the
+  theme picker, both save buttons and the hint scope; the toolbar is 34px.
+- **`.workspace-toolbar` was declared twice, forty lines apart.** The later
+  block won on gap and padding while the earlier one kept the height, which is
+  how a 30px bar ended up with 2px of vertical padding — the same trap
+  `FileTree.css` already carries a warning about. One rule now.
+- **The theme select was capped at 190px**, truncating the longest theme name
+  in the one control whose whole job is naming it.
+- **The inheritance notice cost two chrome rows.** It was its own bar below
+  the settings strip, so an inherited script paid ~105px above the code for
+  two short sentences that are never both true at once. It is the settings
+  strip's `leading` element now — measured 69px.
+
+### Added
+- **A Docker route to root.** A process cannot raise its own privilege; only
+  something already more privileged can create a privileged process for it.
+  The Docker daemon runs as root on the host, so `DockerExec` asks it for an
+  exec with `User:"0"` and it simply creates one — nothing in the image, no
+  sudo, no setuid binary, not even `script(1)`. The pty comes from the daemon
+  rather than being borrowed from a session recorder, resize is an API call
+  instead of a typed `stty`, and close reaches the shell as the daemon's own
+  child, where a sudo-elevated root shell is a process this JVM cannot signal
+  at all. ~380 lines of hand-rolled HTTP/1.1 over the Unix socket (Java 17
+  ships this in the JDK) rather than `docker-java` (a large
+  `modlImplementation` for four requests) or the `docker` CLI (a dependency
+  back in the image this route exists to remove).
+- **The two elevation routes get separate switches.** sudo grants root inside
+  this container; the Docker socket is the daemon's full API as root ON THE
+  HOST — the larger grant despite the tidier mechanism, and `SECURITY.md` says
+  so in those words. `terminal.docker=false` refuses it while keeping sudo.
+- Three traps that would have been silent bugs: `hostname` does NOT identify
+  the container under `network_mode: host` (it returns the workstation's
+  name) — `ContainerIdentity` reads `/proc/self/mountinfo` instead, verified
+  against `docker inspect`. `Tty: true` does two jobs, a real pty AND a raw
+  stream, so `Tty: false` reaches xterm.js as garbage behind an 8-byte frame
+  header. And the hijacked connection's headers must be read a byte at a
+  time, or a `BufferedReader` reads ahead into the terminal stream and the
+  first thing typed disappears.
+
+### Changed
+- The rig's `Dockerfile.test` drops sudo and its sudoers rule; keeping a
+  permanent container-wide root grant beside the socket route would have
+  doubled the exposure for no gain. git stays.
+
+### Verified
+On 8.3.8: gate 6/6 · validate_v14 23/23 (one-height controls, Save-button
+clearance, 69px of chrome above the code) · v13 25/25 · v11 12/12 · lsp 10/10
+· p1_p2 8/8 · theme sweep clean. 192 frontend tests, Java suite green,
+SpotBugs clean.
+
+## [1.4.1] — 2026-09-01
+
+fix: Script Hint Scope is small, last on the strip, and silent.
+
+Nigel, on the 1.4.0 strip: "I had never even noticed it was there and never
+needed to use it. So lets make it a bit the same. out of the way over on the
+right hand side if possible. Remove all the text explanation."
+
+### Fixed
+- **Script Hint Scope is a small, silent control at the top-right of the
+  editor header, matching the real Designer.** 1.4.0 correctly identified that
+  the control is obscure and then drew the wrong conclusion — it gave the
+  rarest setting in the module a paragraph of prose, which made it the
+  loudest thing on the row. Matching a Designer control means matching how
+  much room it takes up, not only what it is called. `FIELD_HELP` is gone
+  entirely, and `hintScope` is a `TRAILING_FIELD` — ordered after the save
+  button so it is the LAST thing on the strip and sits against its right
+  edge. The push comes from `.config-save`'s existing `margin-left: auto`;
+  giving the field its own auto margin instead left it stranded mid-strip
+  with the save button beyond it, which is the one place it must not be. The
+  live check now asserts "last on the strip", not "right of centre", because
+  the first version of that assertion passed on exactly that wrong layout.
+
+### Changed
+- What the removed paragraph said is kept in the `TRAILING_FIELDS` comment —
+  the measured filter behaviour and the caveat that "None" shows the widest
+  list rather than switching hints off. Worth knowing, not worth screen
+  space.
+
+### Verified
+On ignition-module-testing 8.3.8: gate 6/6 · validate_v14 19/19 · v13 25/25 ·
+v11 12/12 · lsp 10/10 · p1_p2 8/8. 192 frontend tests.
+
+## [1.4.0] — 2026-09-01
+
+feat: inherited scripts are read-only, and a root terminal.
+
+Three things Nigel asked for, one of which needed the real Designer driven
+rather than recalled.
+
+### Added
+- **Inherited Project Library scripts are read-only until overridden.**
+  Measured with `designer-drive` against `Site_Redgum_Sewer` ▸ `Template` on
+  the module-testing gateway, 01/09/2026, because parity cannot be built from
+  memory: double-clicking an inherited script does nothing; its context menu
+  is exactly `Override Resource` / `Copy Path` / `Open read-only`; `Open
+  read-only` heads the editor `(Read-Only)` and discards typing — four
+  characters typed, buffer byte-identical. `Override Resource` writes
+  nothing — the gateway's own filesystem still had no local copy afterwards —
+  and an overridden resource's menu has no `Delete`, only `Discard
+  Overrides`, whose dialog says "return to its inherited state? All local
+  changes will be lost." `isLockedByInheritance` is the single rule; both
+  save paths check it, because the keybinding does not go through the
+  disabled button. Read-only is reconfigured per view, keyed on the doc, so
+  overriding one tab does not unlock the strip. One deliberate deviation from
+  the Designer: an already-open read-only tab stays read-only after you
+  override.
+- **The terminal is root, where the host allows it.** `terminal.privileged`
+  defaults true and runs `sudo -n -H <shell> -i`. It cannot manufacture
+  privilege — elevation happens only where `sudo -n true` already succeeds
+  for the Gateway's OS user, proved by running it rather than parsing
+  `/etc/sudoers`, and on a stock Ignition image it does not. `-n` is
+  load-bearing; without it a prompting host hangs the shell. Elevation goes
+  INSIDE the pty so `script` stays a process this JVM can signal. The
+  sudoers rule lives in `modules/dockers/ignition/Dockerfile.test`, not in
+  this module.
+- **Script Hint Scope**, the Designer's own control, renamed and reordered
+  from a bitmask ordering to the Designer's measured one (None · Designer ·
+  Gateway · All) and explained on its own row, including the measured
+  caveat that "None" shows the WIDEST list rather than switching hints off.
+
+### Fixed
+- **A CSS `max-width` on a flex item defeats `flex-basis: 100%`**, because the
+  hypothetical main size is clamped before line-breaking. The Script Hint
+  Scope help line sat beside the control instead of below it and every test
+  passed — found only by looking at a screenshot.
+
+### Verified
+On ignition-module-testing 8.3.8: deploy gate 6/6 · validate_v14 17/17 ·
+validate_v13 25/25 · validate_v11 12/12 · validate_lsp 10/10 ·
+validate_p1_p2 8/8 · theme sweep 10/10 with no illegible text. 192 frontend
+tests, Java suite green.
+
 ## [1.3.1] — 2026-09-01
 
 Font rendering, measured side by side against VS Code (Nigel).

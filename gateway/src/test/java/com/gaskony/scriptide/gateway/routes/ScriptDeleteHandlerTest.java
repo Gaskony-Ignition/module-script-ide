@@ -5,7 +5,6 @@ import com.inductiveautomation.ignition.common.resourcecollection.Resource;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceId;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourcePath;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceSignature;
-import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
 import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
 import com.inductiveautomation.ignition.gateway.project.ProjectManager;
 import com.inductiveautomation.ignition.gateway.resourcecollection.PushOperation;
@@ -21,7 +20,6 @@ import com.inductiveautomation.ignition.common.resourcecollection.PushException;
 import java.io.IOException;
 import java.util.Optional;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;

@@ -200,9 +200,10 @@ export default function TerminalView({ csrfToken, canOpen, onExit }: TerminalVie
     } catch {
       /* hidden host; the resize after mount corrects it */
     }
-    client.open(term.cols || 80, term.rows || 24, csrfToken);
+    const cancelOpen = client.open(term.cols || 80, term.rows || 24, csrfToken);
 
     return () => {
+      cancelOpen();
       typing.dispose();
       unsubscribe();
       if (idRef.current) {

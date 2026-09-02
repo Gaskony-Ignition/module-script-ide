@@ -6,38 +6,65 @@
  * needed, and this file deliberately knows nothing about JSON-RPC: the exec
  * channel is a plain request/event protocol, not RPC.
  *
- * Two properties of the server protocol shape everything here:
+ * Three properties of the server protocol shape everything here:
  *
- * 1. **Output is not streamed.** ScriptIdeSocket sends `started` immediately and
- *    then a single `finished` carrying the whole stdout and stderr. A long run
- *    therefore shows nothing until it ends, which is why the UI has a running
- *    state at all rather than just appending text.
+ * 1. **Output IS streamed, and `finished` then carries none of it.** The server
+ *    sends `started`, then an `output` frame per chunk (flushed on a newline, at
+ *    4 KB, or every 100 ms), then exactly one `finished` whose `stdout` and
+ *    `stderr` are EMPTY. That split is the contract: everything has already been
+ *    delivered, so a client that renders both would print every line twice.
+ *    Ordering within a stream is guaranteed, and `finished` always comes last.
+ *    Until 1.5.0 it was the other way round — one `finished` carrying the lot,
+ *    and a twenty-second script showing nothing for twenty seconds.
  * 2. **The console keeps its locals; a file run does not.** Omitting `target`
  *    marks the run as a console run, and the server then reuses that project's
  *    locals so the console behaves like a REPL. Sending a `target` gets fresh
  *    locals every time, because a script file is not a REPL and carrying state
  *    between runs of one makes results depend on invisible history.
+ * 3. **`reset` drops those locals**, which is the Designer's Reset button. The
+ *    server refuses it while that connection has a script running.
  */
 import { sharedTransport } from './lspTransport';
 import type { LspTransport } from './lspTransport';
 
-/** The server's `error` describing a Python failure, from TracebackFormatter. */
+/**
+ * One traceback frame, EXACTLY as `TracebackFormatter.describe` emits it.
+ *
+ * The names are the server's and are pinned on both sides — see
+ * `TracebackFormatterTest#pinsTheFrameContract` and `__fixtures__/execError.json`.
+ * Until 1.5.0 this interface invented its own (`path`, `module`, `functionName`,
+ * `isTarget`); nothing threw, because TypeScript cannot check a wire, and every
+ * frame on screen read "<console>, line N" with no function name and no
+ * exception type. Rename nothing here without renaming it there.
+ */
 export interface ExecErrorFrame {
-  /** Resource path when the frame is in a project script, else absent. */
-  path?: string;
-  /** Dotted module name for a project-library frame, e.g. `util.helpers`. */
-  module?: string;
+  /** The frame's `co_filename`: our own submitted token, or `<module:dotted.name>`. */
+  file?: string;
+  /** The function the frame is in; `<module>` at the top level. */
+  function?: string;
   line: number;
-  functionName?: string;
   /** True when this frame is in the source the user just ran. */
-  isTarget?: boolean;
+  isSubmitted?: boolean;
+  /**
+   * Dotted module name for a project-library frame, e.g. `util.helpers`, which
+   * maps to `ignition/script-python/util/helpers`. Null for anything else — this
+   * is what makes a frame clickable.
+   */
+  libraryModule?: string | null;
 }
 
 export interface ExecError {
+  /** The exception class, e.g. `ZeroDivisionError`. Shown as the headline. */
   type: string;
   message: string;
   frames: ExecErrorFrame[];
-  /** The rendered traceback, for when a frame cannot be resolved to a file. */
+  /** The rendered traceback, shown when there are no frames to walk. */
+  rendered?: string;
+  /** Syntax errors only: the offending line, in the editor's numbering. */
+  line?: number;
+  /** Syntax errors only: 1-based column, for the caret. */
+  offset?: number;
+  /** Syntax errors only: the source line itself. NOT the rendered traceback. */
   text?: string;
 }
 
@@ -69,10 +96,14 @@ export interface RunRequest {
   lineOffset?: number;
 }
 
+export type OutputStream = 'stdout' | 'stderr';
+
 export type ExecEvent =
   | { kind: 'started'; executionId: string }
+  | { kind: 'output'; executionId: string; stream: OutputStream; text: string }
   | { kind: 'stopping'; executionId: string; detail?: string }
   | { kind: 'finished'; result: ExecResult }
+  | { kind: 'reset'; project?: string }
   | { kind: 'error'; message: string };
 
 /** Shape of anything arriving on the exec channel. Validated, never trusted. */
@@ -80,6 +111,9 @@ interface RawExecMessage {
   event?: string;
   executionId?: string;
   detail?: string;
+  stream?: string;
+  text?: string;
+  project?: string;
   error?: string | ExecError;
   stdout?: string;
   stderr?: string;
@@ -108,6 +142,20 @@ export function toExecEvent(raw: unknown): ExecEvent | null {
   }
   if (msg.event === 'started' && msg.executionId) {
     return { kind: 'started', executionId: msg.executionId };
+  }
+  if (msg.event === 'output' && msg.executionId && typeof msg.text === 'string') {
+    // Anything but an explicit 'stderr' is treated as stdout: a chunk with an
+    // unrecognised stream name is still the user's output and losing it would be
+    // worse than colouring it wrong.
+    return {
+      kind: 'output',
+      executionId: msg.executionId,
+      stream: msg.stream === 'stderr' ? 'stderr' : 'stdout',
+      text: msg.text,
+    };
+  }
+  if (msg.event === 'reset') {
+    return { kind: 'reset', project: msg.project };
   }
   if (msg.event === 'stopping' && msg.executionId) {
     return { kind: 'stopping', executionId: msg.executionId, detail: msg.detail };
@@ -179,9 +227,30 @@ export class ExecClient {
     return this.transport.send('exec', msg);
   }
 
-  /** Ask the gateway to stop a run. Best-effort — see the Stop UI copy. */
+  /**
+   * Ask the gateway to stop a run. Best-effort — see the Stop UI copy.
+   *
+   * Sendable DURING a run since 1.5.0. It always could be sent; the server was
+   * simply not reading, because the socket thread was parked inside the previous
+   * frame's execution.
+   */
   stop(executionId: string, csrfToken?: string): boolean {
     const msg: Record<string, unknown> = { action: 'stop', executionId };
+    if (csrfToken) {
+      msg.csrfToken = csrfToken;
+    }
+    return this.transport.send('exec', msg);
+  }
+
+  /**
+   * Drop the console's locals for a project — the Designer's Reset.
+   *
+   * Refused by the server while that connection has a script in flight, because
+   * swapping the locals map under a running script produces a NameError from a
+   * line that plainly assigns the name.
+   */
+  reset(project: string, csrfToken?: string): boolean {
+    const msg: Record<string, unknown> = { action: 'reset', project };
     if (csrfToken) {
       msg.csrfToken = csrfToken;
     }

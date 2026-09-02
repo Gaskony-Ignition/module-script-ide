@@ -4,7 +4,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.python.core.PyException;
 import org.python.core.PyFrame;
+import org.python.core.PyObject;
 import org.python.core.PyTraceback;
+import org.python.core.PyTuple;
 
 /**
  * Turns a failed execution into frames the editor can make clickable.
@@ -30,6 +32,20 @@ import org.python.core.PyTraceback;
  * reversible token maps a frame back to its editor tab. A frame inside a project
  * library module is spelled {@code <module:dotted.name>} — measured, and the
  * reason a library frame can be made clickable at all.</p>
+ *
+ * <p>That token is ours, not the user's, and it must never reach the screen. It
+ * is replaced with a display label wherever it appears in free text — see
+ * {@link #displayLabel}. On 1.4.3 a syntax error put
+ * {@code <script-ide:Mining_Demo:console>} in front of the user verbatim.</p>
+ *
+ * <h2>Syntax errors are not tracebacks</h2>
+ *
+ * <p>A compile failure has no frames at all, and its {@code value} is the tuple
+ * {@code (msg, (filename, lineno, offset, text))}. Rendering that with
+ * {@code toString()} — which is what 1.4.3 did — shows the user a raw PyTuple
+ * complete with the internal token and the escaped source line. So the tuple is
+ * unpacked here into {@code message} plus top-level {@code line}, {@code offset}
+ * and {@code text}, which is everything a caret needs.</p>
  */
 public final class TracebackFormatter {
 
@@ -67,9 +83,22 @@ public final class TracebackFormatter {
             return out;
         }
 
+        String label = displayLabel(fileName);
         out.addProperty("type", typeName(py));
-        out.addProperty("message", messageOf(py));
-        out.addProperty("rendered", safeToString(py));
+        out.addProperty("rendered", sanitise(safeToString(py), fileName, label));
+
+        SyntaxError syntax = syntaxErrorOf(py);
+        if (syntax == null) {
+            out.addProperty("message", sanitise(messageOf(py), fileName, label));
+        } else {
+            out.addProperty("message", sanitise(syntax.message(), fileName, label));
+            // The line the compiler objected to, in the EDITOR's numbering — a
+            // selection run prepends blank lines and the client must not have to
+            // know that.
+            out.addProperty("line", Math.max(1, syntax.line() - lineOffset));
+            out.addProperty("offset", syntax.offset());
+            out.addProperty("text", syntax.text());
+        }
 
         JsonArray frames = new JsonArray();
         PyTraceback tb = py.traceback;
@@ -124,6 +153,72 @@ public final class TracebackFormatter {
             }
         }
         return null;
+    }
+
+    /** The parts of a {@code SyntaxError} that a caret needs. */
+    record SyntaxError(String message, int line, int offset, String text) {
+    }
+
+    /**
+     * Unpack a {@code SyntaxError}'s value tuple, or null when it is not one.
+     *
+     * <p>Matched on SHAPE — {@code (msg, (file, line, offset, text))} — rather than
+     * on the exception's type name, because the same tuple is what any caller has
+     * to unpack and the shape is the thing that actually matters. Anything that
+     * does not fit falls through to the ordinary message path.</p>
+     */
+    static SyntaxError syntaxErrorOf(PyException py) {
+        try {
+            if (!(py.value instanceof PyTuple outer) || outer.size() != 2) {
+                return null;
+            }
+            if (!(outer.pyget(1) instanceof PyTuple detail) || detail.size() < 4) {
+                return null;
+            }
+            String message = String.valueOf(outer.pyget(0));
+            int line = intOf(detail.pyget(1), 1);
+            int offset = intOf(detail.pyget(2), 0);
+            PyObject text = detail.pyget(3);
+            return new SyntaxError(message, line, offset,
+                text == null ? "" : String.valueOf(text));
+        } catch (RuntimeException e) {
+            // A malformed value must cost the caret, never the error report.
+            return null;
+        }
+    }
+
+    private static int intOf(PyObject value, int fallback) {
+        try {
+            return value == null ? fallback : value.asInt();
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+    }
+
+    /**
+     * What a frame in the submitted source should be CALLED on screen.
+     *
+     * <p>{@code <script-ide:Proj:console>} → {@code <console>};
+     * {@code <script-ide:Proj:ignition/script-python/util/helpers>} → that path.
+     * The token is an implementation detail of this module and means nothing to
+     * the person reading the error.</p>
+     */
+    static String displayLabel(String fileName) {
+        if (fileName == null || !fileName.startsWith("<script-ide:") || !fileName.endsWith(">")) {
+            return "<console>";
+        }
+        String inner = fileName.substring("<script-ide:".length(), fileName.length() - 1);
+        int colon = inner.indexOf(':');
+        String target = colon < 0 ? inner : inner.substring(colon + 1);
+        return target.isBlank() || "console".equals(target) ? "<console>" : target;
+    }
+
+    /** Replace every occurrence of our own token with the display label. */
+    private static String sanitise(String text, String fileName, String label) {
+        if (text == null) {
+            return "";
+        }
+        return fileName == null ? text : text.replace(fileName, label);
     }
 
     private static String typeName(PyException py) {

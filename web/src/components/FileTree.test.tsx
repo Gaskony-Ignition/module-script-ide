@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import FileTree from './FileTree';
+import FileTree, { buildPackageTree } from './FileTree';
 import type { ScriptEntry } from '../api/scripts';
 
 function entry(overrides: Partial<ScriptEntry> & Pick<ScriptEntry, 'path' | 'typeId' | 'name' | 'typeLabel'>): ScriptEntry {
@@ -358,5 +358,79 @@ describe('FileTree: discarding an override is not deleting', () => {
     // either, because saving an inherited script is refused outright now.
     const badge = screen.getByTitle(/Inherited from ParentProject/);
     expect(badge.getAttribute('title')).toMatch(/read-only until you override it/i);
+  });
+});
+
+describe('FileTree: empty package folders', () => {
+  // Measured 02/09/2026: `ignition/script-python/MiningDemo` with no scripts
+  // of its own still comes back from the tree endpoint — `dataKeys: []`,
+  // `isFolder: true` — because a project holding a script inside it also
+  // reports the containing package. Before this fix it fell through every
+  // filter and rendered as an ordinary openable ScriptRow; clicking it 404'd
+  // with "No such data key 'code.py'".
+  const emptyPackage = entry({
+    path: 'ignition/script-python/MiningDemo',
+    typeId: 'script-python',
+    name: 'MiningDemo',
+    typeLabel: 'Project Library',
+    dataKeys: [],
+    isFolder: true,
+  });
+
+  it('builds a folder node for an empty package, with no script inside it', () => {
+    const tree = buildPackageTree([emptyPackage]);
+    expect(tree.children).toHaveLength(1);
+    expect(tree.children[0].name).toBe('MiningDemo');
+    expect(tree.children[0].scripts).toHaveLength(0);
+  });
+
+  it('renders an empty package as a folder, never as an openable script row', () => {
+    const onSelect = vi.fn();
+    render(
+      <FileTree scripts={[emptyPackage]} selectedPath={null} onSelect={onSelect} />
+    );
+    const row = screen.getByRole('button', { name: /MiningDemo/ });
+    // A folder toggles collapse and carries aria-expanded; a script row does
+    // neither — see the "renders a singleton as a row" test above for the
+    // same distinction the other way around.
+    expect(row.getAttribute('aria-expanded')).not.toBeNull();
+    fireEvent.click(row);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('still shows a package with scripts of its own as an ordinary folder', () => {
+    // isFolder must not swallow the case a package genuinely has content —
+    // only a resource the gateway reports as having NO data becomes one.
+    render(
+      <FileTree
+        scripts={[
+          entry({
+            path: 'ignition/script-python/MiningDemo/tags',
+            typeId: 'script-python',
+            name: 'MiningDemo/tags',
+            typeLabel: 'Project Library',
+          }),
+        ]}
+        selectedPath={null}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'tags' })).toBeInTheDocument();
+  });
+});
+
+describe('FileTree: sort order', () => {
+  it('sorts folders before files, and both case-insensitively', () => {
+    const tree = buildPackageTree([
+      entry({ path: 'ignition/script-python/apple', typeId: 'script-python', name: 'apple', typeLabel: 'Project Library' }),
+      entry({ path: 'ignition/script-python/Banana', typeId: 'script-python', name: 'Banana', typeLabel: 'Project Library' }),
+      entry({ path: 'ignition/script-python/Zebra/nested', typeId: 'script-python', name: 'Zebra/nested', typeLabel: 'Project Library' }),
+      entry({ path: 'ignition/script-python/aardvark/nested', typeId: 'script-python', name: 'aardvark/nested', typeLabel: 'Project Library' }),
+    ]);
+    // Folders (aardvark, Zebra) sort before files (apple, Banana) — the
+    // Designer's own rule, see the file comment — regardless of case, and
+    // each group is itself case-insensitively ordered.
+    expect(tree.children.map((c) => c.name)).toEqual(['aardvark', 'Zebra']);
+    expect(tree.scripts.map((s) => s.name)).toEqual(['apple', 'Banana']);
   });
 });

@@ -198,14 +198,21 @@ def main():
                     action:'run', project: target.name,
                     csrfToken: session.csrfToken,
                     source: 'print 1+1\\n'}}));
+                // Since 1.5.0 output is STREAMED as `output` frames and the
+                // `finished` frame's stdout is empty by contract, so the gate
+                // gathers the stream and asserts on the whole.
+                let streamed = '';
                 ws.onmessage = (ev) => {
                   const f = JSON.parse(ev.data);
                   if (f.ch !== 'exec') return;
                   if (f.msg && f.msg.error) { clearTimeout(t); ws.close();
                     return finish({ok:false, why:'server said: ' + f.msg.error}); }
+                  if (f.msg && f.msg.event === 'output' && f.msg.stream === 'stdout') {
+                    streamed += f.msg.text || '';
+                  }
                   if (f.msg && f.msg.event === 'finished') {
                     clearTimeout(t); ws.close();
-                    const out = (f.msg.stdout || '').trim();
+                    const out = (streamed + (f.msg.stdout || '')).trim();
                     return finish({ok: out === '2',
                       why: 'stdout=' + JSON.stringify(out) + ' ok=' + f.msg.ok
                            + ' project=' + target.name});

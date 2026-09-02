@@ -52,6 +52,14 @@
   line-height: 1;
 }
 
+/* Muted rather than a badge: this is the SAME information the editor itself
+   already enforces (a locked buffer discards every keystroke), not a warning
+   that needs its own colour channel. */
+.tab-readonly {
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
 .tab-close {
   padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
   font-size: 16px;

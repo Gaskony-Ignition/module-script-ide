@@ -58,6 +58,15 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
     private final java.util.Map<String, PyObject> consoleLocals =
         new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * The execution this connection started and has not yet been told about.
+     *
+     * <p>Only needed to answer two questions the socket has to answer for itself:
+     * whether a {@code reset} would pull the locals out from under a running
+     * script, and what to stop when the browser goes away.</p>
+     */
+    private volatile String currentExecutionId;
+
     /** Whether this connection has presented its CSRF token on the exec channel. */
     private volatile boolean execUnlocked;
 
@@ -234,6 +243,30 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
      * properties are read live so an operator can disable execution on a running
      * gateway, and a socket opened while execution was enabled must not keep the
      * privilege afterwards.</p>
+     *
+     * <h2>This method must never wait for a script</h2>
+     *
+     * <p>The socket is an {@code AutoDemanding} listener: one frame at a time, on
+     * the socket thread. Until 1.5.0 the run branch blocked here until the script
+     * finished, so the connection was DEAF for the duration — a Stop sent 1.5 s
+     * into a 20 s loop was not read until the loop had already ended, and the LSP
+     * and the terminal froze with it. So the work is handed to
+     * {@link ExecutionService#submit} and the three outbound frames —
+     * {@code started}, {@code output}, {@code finished} — are sent from its
+     * callbacks instead.</p>
+     *
+     * <h2>The frames this sends</h2>
+     * <ul>
+     *   <li>{@code {"event":"started","executionId":…}} — once, when the script
+     *       actually begins. AFTER the submit is accepted, so a refusal produces an
+     *       {@code error} frame and never a started run that no-one ever finishes.</li>
+     *   <li>{@code {"event":"output","executionId":…,"stream":"stdout"|"stderr",
+     *       "text":…}} — zero or more, in order within a stream.</li>
+     *   <li>{@code {"event":"finished",…}} — once, after the last {@code output}.
+     *       Its {@code stdout}/{@code stderr} are EMPTY: everything has already been
+     *       streamed, and repeating it here would double-print.</li>
+     *   <li>{@code {"event":"reset","project":…}} — the console's locals were dropped.</li>
+     * </ul>
      */
     private void handleExec(JsonObject msg) {
         if (msg == null) {
@@ -284,6 +317,11 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
             return;
         }
 
+        if ("reset".equals(action)) {
+            handleReset(service, msg);
+            return;
+        }
+
         if (!"run".equals(action)) {
             sendError("exec", "unknown exec action: " + action);
             return;
@@ -309,10 +347,6 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         }
 
         String fileName = "<script-ide:" + project + ":" + target + ">";
-        JsonObject started = new JsonObject();
-        started.addProperty("event", "started");
-        started.addProperty("executionId", executionId);
-        sendOn("exec", started);
 
         // A console keeps its locals so it behaves like a REPL; a file does not —
         // a file is not a REPL, and carrying state between runs of one would make
@@ -321,22 +355,77 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
             ? consoleLocals.computeIfAbsent(project, service::newLocals)
             : service.newLocals(project);
 
-        PrivateStateRunner.Outcome outcome;
+        // Claimed BEFORE the submit, not in the started callback: a run sitting in
+        // the pool queue has not begun, and a reset in that gap would still swap
+        // the locals out from under it.
+        currentExecutionId = executionId;
         try {
-            outcome = service.execute(executionId, project, source, fileName, locals,
-                username, sessionId);
+            service.submit(executionId, project, source, fileName, locals, username, sessionId,
+                () -> sendStarted(executionId),
+                (stream, text) -> sendOutput(executionId, stream, text),
+                outcome -> sendFinished(executionId, fileName, lineOffset, outcome));
         } catch (ExecutionService.RejectedException e) {
+            currentExecutionId = null;
             sendError("exec", e.getMessage());
-            return;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            sendError("exec", "Execution was interrupted.");
+        }
+    }
+
+    /**
+     * Drop a project's console locals, the way the Designer's Reset does.
+     *
+     * <p>Refused while that session has a script in flight: the locals map is the
+     * one the running script is executing against, and replacing it mid-run gives
+     * a NameError from a line that plainly assigns the name.</p>
+     */
+    private void handleReset(ExecutionService service, JsonObject msg) {
+        String project = msg.has("project") ? msg.get("project").getAsString() : null;
+        if (project == null || project.isBlank()) {
+            sendError("exec", "reset requires 'project'");
             return;
         }
+        String inFlight = currentExecutionId;
+        if (inFlight != null && service.isRunning(inFlight)) {
+            sendError("exec", "A script is still running. Stop it before resetting the console.");
+            return;
+        }
+        consoleLocals.remove(project);
+        JsonObject out = new JsonObject();
+        out.addProperty("event", "reset");
+        out.addProperty("project", project);
+        sendOn("exec", out);
+    }
 
+    private void sendStarted(String executionId) {
+        JsonObject started = new JsonObject();
+        started.addProperty("event", "started");
+        started.addProperty("executionId", executionId);
+        sendOn("exec", started);
+    }
+
+    /** One chunk of output, as it is produced. Ordered within a stream. */
+    private void sendOutput(String executionId, String stream, String text) {
+        JsonObject out = new JsonObject();
+        out.addProperty("event", "output");
+        out.addProperty("executionId", executionId);
+        out.addProperty("stream", stream);
+        out.addProperty("text", text);
+        sendOn("exec", out);
+    }
+
+    /**
+     * The single completion frame.
+     *
+     * <p>Sent even when the browser has gone — {@link #send} drops quietly on a
+     * closed session, and a completion callback that threw would be swallowed by
+     * the service and lose the accounting.</p>
+     */
+    private void sendFinished(String executionId, String fileName, int lineOffset,
+                              PrivateStateRunner.Outcome outcome) {
+        currentExecutionId = null;
         JsonObject result = new JsonObject();
         result.addProperty("event", "finished");
         result.addProperty("executionId", executionId);
+        // Empty by contract: everything went out as `output` frames already.
         result.addProperty("stdout", outcome.stdout());
         result.addProperty("stderr", outcome.stderr());
         result.addProperty("truncated", outcome.truncated());
@@ -471,6 +560,12 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         // Drop the REPL state with the connection — it is per-user and must not
         // outlive the socket that owns it.
         consoleLocals.clear();
+        // And stop whatever it was running. Nobody is left to read the result, and
+        // a busy loop nobody can see is exactly what the abandoned counter is for.
+        ExecutionService executions = ScriptIdeSocketRegistry.getExecutionService();
+        if (executions != null) {
+            executions.stopAllFor(sessionId);
+        }
         // A shell outliving the tab that opened it is a process nobody can see
         // and nobody will close.
         TerminalService terminals = ScriptIdeSocketRegistry.getTerminalService();
