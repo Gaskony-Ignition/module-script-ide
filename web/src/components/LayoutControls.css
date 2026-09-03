@@ -35,7 +35,12 @@
   z-index: 40;
   min-width: 210px;
   padding: var(--space-1) 0;
-  background: var(--surface);
+  background: var(--glass-panel);
+  /* Frosted, and only here: a layer that floats OVER code. Never behind
+     the editor — blurring the ground under syntax highlighting is how a
+     theme becomes unreadable. `none` on the seven non-glass packs. */
+  backdrop-filter: var(--blur-panel);
+  -webkit-backdrop-filter: var(--blur-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-popup);

@@ -385,7 +385,253 @@ def clamp_contrast(rgb, page, low: float, high: float, dark: bool):
 BORDER_SOURCES = ("border.card", "border.sidebar", "border.table-cell", "border.primary")
 
 
-def border_from_pack(tokens: dict, page, dark: bool):
+# ---- material -------------------------------------------------------------
+#
+# Geometry and colour were the whole of a theme here until 1.8.0, and it is why
+# `aurora-teal` came out "a plain teal" beside the Perspective session wearing
+# the same pack (Nigel, 03/09/2026). The glass in Glass Aurora is not a colour.
+# It is a MATERIAL: translucent white films stacked over a lit ground, with a
+# 22%-white hairline along each edge where the light catches it.
+#
+#     surface.sidebar  rgba(255,255,255,0.06)
+#     surface.card     rgba(255,255,255,0.10)
+#     surface.chip     rgba(255,255,255,0.16)
+#     border.card      rgba(255,255,255,0.22)
+#
+# Compositing those to opaque hex — which is what this file did — turns three
+# panes of glass over a lit ground into three flat greys. The alpha is the
+# whole effect, so it is carried through as alpha.
+#
+# The material is READ FROM THE PACK, never switched on the pack's name: a pack
+# that paints translucent films is glass, one that paints opaque surfaces is
+# not, and a new pack gets the right treatment without this file learning its
+# name.
+
+FILM_SOURCES = {
+    "--bg-secondary": ("surface.sidebar", "surface.card"),
+    "--bg-tertiary": ("surface.chip", "surface.readout", "surface.card"),
+    "--surface": ("surface.card", "surface.kpi-tile"),
+    "--bg-chrome": ("surface.topbar", "surface.sidebar"),
+}
+
+
+def _rgba(colour: str):
+    """(rgb, alpha) from a CSS colour, or None. `_parse` drops the alpha."""
+    rgb = _parse(colour)
+    if rgb is None:
+        return None
+    text = str(colour).strip().lower()
+    alpha = 1.0
+    if text.startswith("rgba("):
+        parts = [x.strip() for x in text[5:text.rindex(")")].replace("/", ",").split(",")]
+        if len(parts) >= 4:
+            try:
+                alpha = max(0.0, min(1.0, float(parts[3])))
+            except ValueError:
+                alpha = 1.0
+    return rgb, alpha
+
+
+def composite(rgb, alpha: float, base):
+    """`rgb` at `alpha` painted over `base` — what the eye actually receives."""
+    return tuple(rgb[i] * alpha + base[i] * (1 - alpha) for i in range(3))
+
+
+def film(tokens: dict, names) -> tuple | None:
+    """The pack's translucent film for one role, as (rgb, alpha), or None.
+
+    Opaque values return None: a pack that names a solid sidebar is not glass
+    and must not be given an alpha it never asked for.
+    """
+    for name in names:
+        raw = tokens.get(name)
+        if not raw:
+            continue
+        parsed = _rgba(raw)
+        if parsed is None:
+            continue
+        rgb, alpha = parsed
+        if alpha < 0.98:
+            return rgb, alpha
+    return None
+
+
+def is_glass(tokens: dict) -> bool:
+    """True where the pack builds its chrome from translucent films.
+
+    Two of the four roles, so one stray rgba in a pack that is otherwise solid
+    does not turn an industrial HMI into frosted glass.
+    """
+    return sum(film(tokens, names) is not None
+               for names in FILM_SOURCES.values()) >= 2
+
+
+def hairline(tokens: dict):
+    """The pack's luminous edge, as (rgb, alpha), or None where it draws lines.
+
+    `border_from_pack` REFUSES a translucent border and falls back to the ramp,
+    which was right while surfaces were opaque and is wrong now: a 22%-white
+    hairline on a translucent pane is most of what reads as glass.
+    """
+    for name in ("border.card", "border.sidebar", "border.topbar"):
+        parsed = _rgba(tokens.get(name) or "")
+        if parsed and parsed[1] < 0.98:
+            return parsed
+    return None
+
+
+def css_rgba(rgb, alpha: float) -> str:
+    """`rgba(r, g, b, a)` at 8-bit precision, for emission."""
+    r, g, b = (int(round(max(0.0, min(1.0, c)) * 255)) for c in rgb)
+    return f"rgba({r}, {g}, {b}, {alpha:g})"
+
+
+# How much of its own colour a floating panel keeps.
+#
+# 0.94 was too dense to be glass: `backdrop-filter` had nothing left to show and
+# the review came back "an opaque panel, not glass". At 0.78 the code moves
+# under the palette as a blurred wash, which is the whole effect.
+#
+# The bound is the app's OWN ground, not pure white and black. A palette here
+# can only float over the editor, and the editor IS the ground — page at its
+# darkest, page-plus-glow at its brightest. Bounding against white was both
+# wrong and unreachable: nothing is legible on a panel 22% white in a dark
+# theme, so the search silently failed and left the token unchanged.
+GLASS_PANEL_ALPHA = 0.78
+
+
+# The brightest a glow may add over the ground. Every text token is verified
+# against the ground WITH this much accent mixed in, because a gradient is
+# invisible to the browser sweep: `getComputedStyle` reports `background-color`
+# and a gradient is a background-IMAGE, so the live gate cannot see it. It has
+# to be bounded here or it is not bounded anywhere.
+# Pushed hard, deliberately. At 0.20 the ground read as "a flat violet with a
+# faint tint in one corner" (Nigel, 03/09/2026: "still quite a bit of the
+# styling feels a bit dull"). The glow is what carries a glass theme's identity:
+# the aurora pair share one authored ground by design, so if the ground is the
+# only colour on screen they are the same theme twice. At 0.42 the teal pack
+# reads GREEN-glass and the violet pack reads violet, over the same #1a1233.
+#
+# It cannot cost legibility however high it goes: the brightest point of the
+# glow is composited below and every text token is verified against it.
+GLOW_ALPHA = 0.42
+GLOW_SECOND_ALPHA = 0.34
+GLOW_THIRD_ALPHA = 0.22
+
+# The non-glass wash. Below this softness a pack is HARD — flat, square,
+# shadowless — and gets no ground light at all, because that is its identity.
+WASH_MIN_SOFTNESS = 0.25
+WASH_BASE = 0.16
+WASH_SCALE = 0.22
+# The centred stop, relative to the corner one. Lower, because it sits directly
+# under the code and its job is to lift the ground, not to colour the text.
+WASH_CENTRE_FACTOR = 0.62
+# A light theme takes less: the same alpha that reads as a soft glow on a dark
+# ground reads as a stain on a pale one.
+LIGHT_WASH_FACTOR = 0.55
+
+
+def page_glow(tokens: dict, page, glass: bool, dark: bool, accent: str) -> str:
+    """
+    The lit ground a glass pack's panes are there to reveal.
+
+    Films alone do not make glass. Measured on the rig at 1.8.0: with a FLAT
+    ground, `rgba(255,255,255,0.06)` over a dark violet is a shade of the same
+    violet, so the rail, the header and the canvas all read as one flat block
+    and the review came back "the panel IS the ground" — a recolour, not a
+    material. Perspective's Glass Aurora is not flat: an aurora is a gradient,
+    and the panes catch different parts of it. That is where the depth is.
+
+    Two wide radial glows, in the pack's own accent, painted UNDER everything.
+    They cannot make text illegible: the brightest point is bounded by
+    GLOW_ALPHA and that composite is one of the surfaces every text token is
+    checked against.
+    """
+    # Not glass, but not nothing.
+    #
+    # Nigel, 03/09/2026: this is about the whole suite, not the two glass packs.
+    # A wash scaled by how SOFT the pack is, because that is the axis the packs
+    # already differ on: `nord-*` and `leather-parchment` are rounded, shadowed
+    # and soft, and a gentle light in one corner is exactly their character.
+    #
+    # The hard packs get NONE, deliberately. `newsprint-night` is ink on paper
+    # and `industrial-*` is a control-room HMI; flatness is what they ARE, and
+    # lighting them would be the same mistake as flattening the aurora pair.
+    if not glass:
+        soft = softness(tokens)
+        if soft < WASH_MIN_SOFTNESS:
+            return "none"
+        alpha = (WASH_BASE + WASH_SCALE * soft) * (1.0 if dark else LIGHT_WASH_FACTOR)
+        tint = _parse(accent) or (1.0, 1.0, 1.0)
+        # TWO stops, and the second one INSIDE the window.
+        #
+        # A single stop centred off-canvas at 4%/-10% is already deep in its own
+        # falloff by mid-screen: measured on the rig, ~8% of the nominal alpha
+        # survived to the centre and the wash moved the ground by 2 of 255 — a
+        # gradient that is only in the file. The corner stop gives the direction
+        # and the centred one gives it something to actually light.
+        return (f"radial-gradient(1400px 1000px at 2% -12%, "
+                f"{css_rgba(tint, round(alpha, 3))}, transparent 70%), "
+                f"radial-gradient(1100px 820px at 72% 58%, "
+                f"{css_rgba(tint, round(alpha * WASH_CENTRE_FACTOR, 3))}, transparent 72%)")
+    second = None
+    for name in ("accent.info", "accent.secondary", "surface.nav-active", "accent.ok"):
+        parsed = _rgba(tokens.get(name) or "")
+        if parsed:
+            second = parsed[0]
+            break
+    first = _parse(accent) or (1.0, 1.0, 1.0)
+    if second is None:
+        second = first
+    # Three stops, sized past the window on purpose: a gradient that ends inside
+    # the viewport draws a visible edge, and an aurora has none. The middle one
+    # lights the centre, which is where the code is.
+    return (f"radial-gradient(1400px 980px at 6% -14%, "
+            f"{css_rgba(first, GLOW_ALPHA)}, transparent 64%), "
+            f"radial-gradient(1200px 900px at 98% 112%, "
+            f"{css_rgba(second, GLOW_SECOND_ALPHA)}, transparent 62%), "
+            f"radial-gradient(1100px 780px at 62% 42%, "
+            f"{css_rgba(first, GLOW_THIRD_ALPHA)}, transparent 70%)")
+
+
+def lit_edge(shadow: str, edge) -> str:
+    """
+    A drop shadow with the pane's lit top edge added, where the pack has one.
+
+    Folded into the shadow rather than emitted as its own token because
+    `box-shadow: none, inset ...` is not valid CSS, and four of the ten packs
+    cast no shadow — so a second token would have to be composed with `none` at
+    every call site. A pack with no luminous edge gets its shadow back
+    untouched, `none` included.
+    """
+    if not edge:
+        return shadow
+    highlight = f"inset 0 1px 0 {css_rgba(edge[0], min(1.0, edge[1] * 2.2))}"
+    return highlight if shadow == "none" else f"{shadow}, {highlight}"
+
+
+def glass_panel(surface, glass: bool) -> str:
+    """
+    The background for a layer that floats OVER CODE — the palette, the dialogs.
+
+    `--surface` cannot do this job on a glass pack. It is the pack's own film,
+    `rgba(255,255,255,0.10)`, which is right over a page and useless over an
+    editor: at 10% the code shows through and competes with the palette's own
+    rows. The floating layer instead gets that film ALREADY COMPOSITED over the
+    page, re-emitted at 94% — dense enough to hide what is behind it, sheer
+    enough that the ground still moves under it. With `--blur-panel` over the
+    top it reads as frosted glass rather than as a transparency bug.
+    """
+    return css_rgba(surface, GLASS_PANEL_ALPHA) if glass else _hex(surface)
+
+
+def _lerp(at_hard: float, at_soft: float, soft: float) -> float:
+    """Interpolate a value between its hard-pack and soft-pack ends."""
+    return at_hard + (at_soft - at_hard) * max(0.0, min(1.0, soft))
+
+
+def border_from_pack(tokens: dict, page, dark: bool, low: float = 1.5,
+                     high: float = 4.0):
     """
     The pack's own line colour, banded — or None to fall back to the ramp.
 
@@ -400,7 +646,7 @@ def border_from_pack(tokens: dict, page, dark: bool):
         rgb = _parse(raw)
         if rgb is None:
             continue
-        return clamp_contrast(rgb, page, 1.5, 4.0, dark)
+        return clamp_contrast(rgb, page, low, high, dark)
     return None
 
 
@@ -622,22 +868,17 @@ def block(pack: dict, report: list[str]) -> str:
     dark = pack["dark"]
     ramp = DARK_RAMP if dark else LIGHT_RAMP
 
-    raw_page = opaque_page(tokens, dark)
-
-    # The brand accent, hue intact, legible on the page it will sit on. Resolved
-    # BEFORE the ramp because the ramp is tinted with it.
-    brand_source = next(
-        (rgb for rgb in (_parse(tokens.get(name) or "") for name in ACCENT_SOURCES["--accent-primary"])
-         if rgb is not None),
-        None,
-    )
-    if brand_source is None:
-        page = raw_page
-    else:
-        brand_seed, _ = lift_to_contrast(brand_source, [raw_page], MIN_ACCENT_CONTRAST, dark)
-        mixed = _mix(raw_page, brand_seed, ACCENT_TINT)
-        hue, sat, _ = _to_hsl(mixed)
-        page = _from_hsl((hue, sat, _to_hsl(raw_page)[2]))
+    # The page the pack was AUTHORED with, un-rotated.
+    #
+    # This used to be mixed 30% toward the brand accent so siblings told apart.
+    # It cost the estate its two best-looking themes: `aurora-teal` and
+    # `aurora-violet` share one violet ground (#1a1233) and differ by which
+    # colour glows on it — that shared ground IS Glass Aurora. The tint swung
+    # aurora-teal's ground to hue 203, actual teal, and Nigel's word for the
+    # result was "plain" (03/09/2026). The pack already distinguishes siblings
+    # by accent; rotating the ground only destroys the family.
+    page = opaque_page(tokens, dark)
+    glass = is_glass(tokens)
 
     # The ramp is SCALED by how soft the pack is. A flat, shadowless, square
     # theme has nothing but the step to separate its chrome from the code, so it
@@ -653,25 +894,109 @@ def block(pack: dict, report: list[str]) -> str:
     # well off the rail, the way a control-room HMI separates its furniture; on
     # a soft one it is flush with the rail and the border does the work.
     chrome = step(page, ramp["secondary"] * ramp_scale * (1 + 1.2 * (1 - soft)), dark)
-    surfaces = [page, secondary, tertiary, chrome]
+
+    # A glass pack's chrome is emitted as the pack's own films, and composited
+    # here only to know what the text will land on. The films are stacked in the
+    # order the app stacks them — the hover sits on the rail, not on the page —
+    # so the contrast guarantee is made against the colour the eye receives, not
+    # against an idealised one-layer version of it.
+    paint = {"--bg-secondary": _hex(secondary), "--bg-tertiary": _hex(tertiary),
+             "--surface": _hex(surface), "--bg-chrome": _hex(chrome)}
+    if glass:
+        over_page = {"--bg-secondary", "--bg-chrome"}
+        films = {role: film(tokens, names) for role, names in FILM_SOURCES.items()}
+        if films["--bg-secondary"]:
+            rgb, alpha = films["--bg-secondary"]
+            secondary = composite(rgb, alpha, page)
+            paint["--bg-secondary"] = css_rgba(rgb, alpha)
+        for role in ("--bg-tertiary", "--surface", "--bg-chrome"):
+            if not films[role]:
+                continue
+            rgb, alpha = films[role]
+            base = page if role in over_page else secondary
+            value = composite(rgb, alpha, base)
+            paint[role] = css_rgba(rgb, alpha)
+            if role == "--bg-tertiary":
+                tertiary = value
+            elif role == "--surface":
+                surface = value
+            else:
+                chrome = value
+
+    surfaces = [page, secondary, tertiary, chrome, surface]
+
+    # The lit ground, at its brightest point, for every pack that has one — the
+    # aurora glow and the softer wash alike. A gradient is a background IMAGE,
+    # and `getComputedStyle` reports background-COLOR, so the live browser sweep
+    # is blind to it. Bounding it here is the only place it gets bounded, and
+    # every text token below is then pushed until it clears on this.
+    ground_alpha = (GLOW_ALPHA if glass
+                    else (WASH_BASE + WASH_SCALE * soft) * (1.0 if dark else LIGHT_WASH_FACTOR)
+                    if soft >= WASH_MIN_SOFTNESS else 0.0)
+    glow_seed = next(
+        (rgb for rgb in (_parse(tokens.get(name) or "")
+                         for name in ACCENT_SOURCES["--accent-primary"])
+         if rgb is not None), None)
+    if glow_seed is not None and ground_alpha > 0:
+        surfaces.append(composite(glow_seed, ground_alpha, page))
+
+    if glass:
+        # The palette floats over the editor, and the editor is the ground. Both
+        # ends of that ground go in — the bare page, and the page under the
+        # brightest part of the glow — so the text loop below guarantees 4.5:1
+        # on a palette wherever it is opened.
+        surfaces += [composite(surface, GLASS_PANEL_ALPHA, ground)
+                     for ground in {page, surfaces[-1]}]
 
     # The pack's own line colour, held inside a contrast band. Unlike a surface,
     # a border has nothing painted on it, so this cannot cost legibility — and
     # it is most of what makes `industrial-*` read as hard-edged next to the
     # aurora pair, whose translucent borders are refused and fall back here.
-    pack_border = border_from_pack(tokens, page, dark)
+    # A rule drawn at ONE contrast band for all ten packs is most of why the
+    # chrome read alike. An HMI's furniture is hard-edged and a soft theme's is
+    # barely there, so the band is interpolated on the pack's own softness:
+    # `industrial-day-cyan` (0.06) gets a crisp line, `nord-*` (1.00) a whisper.
+    lo_light, hi_light = _lerp(2.2, 1.3, soft), _lerp(4.6, 2.6, soft)
+    lo_strong, hi_strong = _lerp(3.4, 1.9, soft), _lerp(7.0, 3.6, soft)
+    pack_border = border_from_pack(tokens, page, dark, lo_light, hi_light)
     if pack_border is not None:
         border = pack_border
-    strong = clamp_contrast(border, page, 2.2, 5.5, dark)
+    else:
+        border = clamp_contrast(border, page, lo_light, hi_light, dark)
+    strong = clamp_contrast(border, page, lo_strong, hi_strong, dark)
+    border_css, strong_css = _hex(border), _hex(strong)
 
+    # A luminous edge, where the pack draws one. `border_from_pack` refuses a
+    # translucent border and falls back to the ramp — right while the surfaces
+    # were opaque, wrong now: on a translucent pane the 22%-white hairline is
+    # where the light catches the edge, and it is most of what reads as glass.
+    # The strong variant is the same light, turned up, not a different colour.
+    edge = hairline(tokens) if glass else None
+    if edge:
+        rgb, alpha = edge
+        border_css = css_rgba(rgb, alpha)
+        strong_css = css_rgba(rgb, min(1.0, alpha * 1.9))
+
+    # Frosted glass, and ONLY on the layers that float over content: the palette
+    # and the dialogs. Never behind the editor — blurring the ground under
+    # syntax highlighting is how a theme becomes unreadable, and the code
+    # surface stays opaque in every one of the ten.
     out = {
         "--bg-primary": _hex(page),
-        "--bg-secondary": _hex(secondary),
-        "--bg-tertiary": _hex(tertiary),
-        "--bg-chrome": _hex(chrome),
-        "--surface": _hex(surface),
-        "--border-light": _hex(border),
-        "--border-strong": _hex(strong),
+        "--bg-secondary": paint["--bg-secondary"],
+        "--bg-tertiary": paint["--bg-tertiary"],
+        "--bg-chrome": paint["--bg-chrome"],
+        "--surface": paint["--surface"],
+        "--blur-panel": "blur(22px) saturate(1.4)" if glass else "none",
+        "--glass-panel": glass_panel(surface, glass),
+
+        # The rail colour as an OPAQUE value. Anything that has to occlude what
+        # scrolls under it — a sticky group heading — cannot use the film: at 6%
+        # the rows travel visibly behind the heading that is meant to cover
+        # them. Identical to --bg-secondary on the seven non-glass packs.
+        "--bg-solid": _hex(secondary),
+        "--border-light": border_css,
+        "--border-strong": strong_css,
         "--text-primary": text_at(page, TEXT_TARGETS["primary"], dark),
         "--text-secondary": text_at(page, TEXT_TARGETS["secondary"], dark),
         "--text-muted": text_at(page, TEXT_TARGETS["muted"], dark),
@@ -710,6 +1035,10 @@ def block(pack: dict, report: list[str]) -> str:
 
     differentiate_syntax(out, surfaces, dark, pack["id"], report)
 
+    # Emitted after the accents, because the glow is painted in the theme's own
+    # brand colour and that colour is not final until it has been made legible.
+    out["--page-glow"] = page_glow(tokens, page, glass, dark, out["--accent-primary"])
+
     accent = out["--accent-primary"]
     out["--accent-primary-bg"] = accent_bg(accent, dark)
 
@@ -744,11 +1073,12 @@ def block(pack: dict, report: list[str]) -> str:
         "--marker-width": _px(tokens.get("border.alarm-bar-width"), 2, 4, "2px"),
         # Elevation, in the pack's own shadow language. `none` where the pack
         # names no shadow, which is four of the ten and is deliberate.
-        "--shadow-card": elevate(tokens.get("shadow.card"), 1.0, 1.0, 0.0, 0.5),
+        "--shadow-card": lit_edge(elevate(tokens.get("shadow.card"), 1.0, 1.0, 0.0, 0.5), edge),
         # Tripled and floored: a floating layer that casts the same 0.06 alpha
         # a flat card does is a token nobody can see.
-        "--shadow-popup": elevate(tokens.get("shadow.card"), 3.0, 2.6, 0.22, 0.5,
-                                  floors=SHADOW_FLOORS),
+        "--shadow-popup": lit_edge(
+            elevate(tokens.get("shadow.card"), 3.0, 2.6, 0.22, 0.5,
+                    floors=SHADOW_FLOORS), edge),
         "--shadow-control": brand_glow(tokens.get("shadow.button"), accent),
         "--row-height": row_height,
         "--control-height": control_height,

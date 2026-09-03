@@ -5,10 +5,10 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-5);
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   /* Semi-opaque over the workspace rather than a flat panel, so the user keeps
      the context of which tab is in conflict. */
-  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
   z-index: 20;
 }
 
@@ -20,7 +20,12 @@
   max-height: 100%;
   min-height: 0;
   padding: var(--space-5);
-  background: var(--surface);
+  background: var(--glass-panel);
+  /* Frosted, and only here: a layer that floats OVER code. Never behind
+     the editor — blurring the ground under syntax highlighting is how a
+     theme becomes unreadable. `none` on the seven non-glass packs. */
+  backdrop-filter: var(--blur-panel);
+  -webkit-backdrop-filter: var(--blur-panel);
   border: 1px solid var(--warning);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-popup);
@@ -51,7 +56,8 @@
   position: sticky;
   top: 0;
   padding: var(--space-1) var(--space-2);
-  background: var(--bg-tertiary);
+  /* Opaque: a sticky heading must cover what scrolls under it. */
+  background: var(--bg-solid);
   color: var(--text-muted);
   font-size: 12px;
 }

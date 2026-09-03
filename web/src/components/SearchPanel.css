@@ -90,7 +90,8 @@
   top: 0;
   margin: 0;
   padding: var(--space-1) var(--space-2);
-  background: var(--bg-secondary);
+  /* Opaque: a sticky heading must cover what scrolls under it. */
+  background: var(--bg-solid);
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 600;

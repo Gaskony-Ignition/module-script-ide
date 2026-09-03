@@ -22,7 +22,12 @@
   flex-direction: column;
   width: min(620px, calc(100% - var(--space-5) * 2));
   max-height: 60vh;
-  background: var(--surface);
+  background: var(--glass-panel);
+  /* Frosted, and only here: a layer that floats OVER code. Never behind
+     the editor — blurring the ground under syntax highlighting is how a
+     theme becomes unreadable. `none` on the seven non-glass packs. */
+  backdrop-filter: var(--blur-panel);
+  -webkit-backdrop-filter: var(--blur-panel);
   /* The heavier line, not the hairline: four of the ten themes cast no shadow
      at all, and on those this border is the only thing that says the palette is
      OVER the code rather than in it. */

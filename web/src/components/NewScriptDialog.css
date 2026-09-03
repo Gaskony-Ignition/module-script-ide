@@ -7,7 +7,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-5);
-  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
   z-index: 20;
 }
 
@@ -17,7 +17,12 @@
   gap: var(--space-2);
   width: min(460px, 100%);
   padding: var(--space-5);
-  background: var(--surface);
+  background: var(--glass-panel);
+  /* Frosted, and only here: a layer that floats OVER code. Never behind
+     the editor — blurring the ground under syntax highlighting is how a
+     theme becomes unreadable. `none` on the seven non-glass packs. */
+  backdrop-filter: var(--blur-panel);
+  -webkit-backdrop-filter: var(--blur-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-popup);

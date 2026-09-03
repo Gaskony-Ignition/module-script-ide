@@ -99,7 +99,9 @@
      scrollbar, grows to fit its content, and pushes the footer off the bottom
      of the rail — which looks exactly like a footer that was never rendered. */
   min-height: 0;
-  background: var(--bg-secondary);
+  background-color: var(--bg-secondary);
+  background-image: var(--page-glow);
+  background-attachment: fixed;
   border-right: var(--rule-width) solid var(--border-light);
 }
 

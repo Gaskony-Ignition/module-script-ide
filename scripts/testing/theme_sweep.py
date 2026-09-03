@@ -14,15 +14,38 @@ MEASURE = """() => {
   };
   const parse = (s) => { const m = s.match(/rgba?\\(([^)]+)\\)/); if(!m) return null;
     const p = m[1].split(',').map(Number); return p.length>=3 ? p.slice(0,3) : null; };
+  // Composite the alpha, do not discard it.
+  //
+  // This walked up until backgroundColor was not fully transparent and then
+  // took its RGB. Correct while every surface was opaque hex, wrong from
+  // 1.8.0: the glass packs paint chrome as rgba(255,255,255,0.06), whose RGB
+  // is PURE WHITE. The sweep read a 6% film as a white background and called
+  // both aurora themes illegible at 1.69:1 when the composited surface is dark
+  // and the real ratio is fine. A gate that cannot see alpha cannot measure a
+  // translucent theme -- and would have had me revert a correct change.
+  const alphaOf = (c) => { const m = c.match(/rgba?\\(([^)]+)\\)/);
+    if (!m) return 1; const q = m[1].split(',').map(Number);
+    return q.length >= 4 ? q[3] : 1; };
   const bgOf = (el) => {
+    const layers = [];
     let n = el;
-    while (n && n !== document.documentElement) {
+    while (n) {
       const c = getComputedStyle(n).backgroundColor;
-      const p = parse(c);
-      if (p && !/rgba\\(.*,\\s*0\\)/.test(c)) return p;
+      const q = parse(c);
+      const a = q ? alphaOf(c) : 0;
+      if (q && a > 0) {
+        layers.push([q, a]);
+        if (a >= 0.999) break;      // opaque: nothing below can show through
+      }
       n = n.parentElement;
     }
-    return parse(getComputedStyle(document.body).backgroundColor) || [255,255,255];
+    if (!layers.length) return [255,255,255];
+    let out = layers[layers.length-1][0];
+    for (let i = layers.length-2; i >= 0; i--) {
+      const [rgb, a] = layers[i];
+      out = [0,1,2].map((k) => rgb[k]*a + out[k]*(1-a));
+    }
+    return out;
   };
   const ratio = (a,b) => { const la=lum(a), lb=lum(b);
     return (Math.max(la,lb)+0.05)/(Math.min(la,lb)+0.05); };

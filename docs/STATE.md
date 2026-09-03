@@ -2,11 +2,11 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.7.2 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
+**Version 1.8.4 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
 `deploy_gate.py` PASS (9 routes mounted) and every suite green: `p1_p2` 8/8,
 `lsp` 10/10, `v11` 12/12, `v13` 22/22, `v14` 18/18, `v15_term` 6/6,
 `v15_exec` 20/20, `v16_nav` 25/25, theme sweep no illegible themes (worst
-element 5.07). Java 338 tests, Vitest 447.**
+element 5.07). Java 338 tests, Vitest 450.**
 
 **Running the live suites needs a venv with playwright**, which is not on the
 system python and was absent on 03/09/2026:
@@ -661,6 +661,40 @@ gutter marker.
 
     Same shape as finding 10, one layer up: *the tokens are emitted* is not a
     theme, exactly as *the server does it* was not a feature.
+
+18. **A theme is a MATERIAL, not a palette — and a material needs something
+    behind it.** The glass in Glass Aurora is translucent films over a lit
+    ground; compositing them to opaque hex gives three flat greys. But shipping
+    the films over a FLAT ground achieved nothing either — a 6% white film on
+    dark violet is a shade of the same violet, and the review came back "the
+    panel IS the ground". An aurora is a gradient. The panes exist to reveal it.
+
+    Four things this cost, each worth not repeating:
+    - **The biggest surface is the one that matters.** The glow went on `.app`,
+      but `editorCore.ts` painted `.cm-editor` an opaque `--bg-primary` over it,
+      so the light survived only in the outline rail — the smallest region on
+      screen. `background-attachment: fixed` lets separate elements share one
+      continuous light; that is how it reaches the code.
+    - **A gradient centred off-canvas is mostly falloff.** One stop at 4%/−10%
+      moved the ground by 2 of 255 at the centre of the window. Always put a
+      stop INSIDE the viewport, and measure the delta rather than trusting the
+      emitted alpha.
+    - **A contrast gate that cannot see alpha is worse than none.**
+      `theme_sweep.py` took the RGB of the first non-transparent background:
+      `rgba(255,255,255,0.06)` is PURE WHITE by that rule, so it called both
+      aurora themes illegible at 1.69:1 when the real composited ratio was 7.49.
+      It would have had me revert a correct change.
+    - **A gradient is invisible to that gate regardless**, because
+      `getComputedStyle` reports `background-color` and this is a
+      background-IMAGE. Anything the live sweep cannot see has to be bounded in
+      the generator — the glow's brightest point is composited and added to the
+      surfaces every text token is checked against.
+
+    And the counterpart: **do not give every theme the same treatment.**
+    `newsprint-night` is ink on paper and `industrial-*` is a control-room HMI.
+    Flatness is what they ARE; lighting them would be the same mistake as
+    flattening the aurora pair. The material is read from the pack — translucent
+    surface tokens, shadow, radius — never switched on its name.
 
 ## Known gaps and deliberate omissions
 

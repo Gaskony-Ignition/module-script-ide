@@ -2,6 +2,14 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* The lit ground. `none` on the seven solid packs, two wide accent glows on
+     the glass ones — what the translucent chrome above is there to reveal.
+     Fixed, so it belongs to the window rather than scrolling with a panel.
+     The editor paints an opaque --bg-primary over it, so code is never read
+     against a gradient. */
+  background-color: var(--bg-primary);
+  background-image: var(--page-glow);
+  background-attachment: fixed;
   /* min-height:0 lets a flex child actually shrink; without it a long panel
      pushes the layout past the viewport instead of scrolling inside it. */
   min-height: 0;

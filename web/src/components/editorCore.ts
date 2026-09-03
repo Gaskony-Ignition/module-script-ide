@@ -58,7 +58,10 @@ export const editorTheme = EditorView.theme(
   {
     '&': {
       height: '100%',
-      backgroundColor: 'var(--bg-primary)',
+      // Transparent: the ground (colour AND --page-glow) belongs to
+      // `.code-editor` beneath. An opaque ground here covered the glow and
+      // left the biggest surface in the app flat — the 1.8.1 review.
+      backgroundColor: 'transparent',
       color: 'var(--text-primary)',
       fontSize: 'var(--font-size-code)',
     },

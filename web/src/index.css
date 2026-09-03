@@ -25,6 +25,17 @@
   --bg-chrome: #181818;
   --surface: #252526;         /* panels, dialogs */
 
+  /* Material, not colour. A glass pack paints its chrome as translucent films
+     over the ground and catches the light along each edge; the other seven
+     paint solid surfaces. These three carry that difference, and default to the
+     solid answer so a theme that says nothing looks exactly as it does today.
+     --glass-panel backs the layers that float OVER code (palette, dialogs) and
+     --bg-solid backs anything that must occlude what scrolls under it. */
+  --blur-panel: none;
+  --page-glow: none;
+  --glass-panel: #252526;
+  --bg-solid: #181818;
+
   --text-primary: #cccccc;
   --text-secondary: #9d9d9d;
   --text-muted: #8b8b8b;
@@ -283,6 +294,19 @@ button.primary:hover:not(:disabled) {
   /* Lighten the accent itself rather than switching to a second colour, so the
      hover works for all ten themes without a per-theme token. */
   filter: brightness(1.15);
+}
+
+/* Native controls take the theme's accent.
+   A checkbox and a radio are painted by the browser, not by this stylesheet, so
+   without this they render in Chrome's default BLUE in all ten themes — a
+   pastel blue box in the middle of leather-night-tan's amber panel. Found in a
+   pixel review of 1.8.2, present since 1.0.0. `accent-color` is the only hook
+   for it that does not mean rebuilding the control. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--accent-primary);
 }
 
 /* One visible focus ring everywhere. Keyboard users are the whole reason the

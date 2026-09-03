@@ -2,6 +2,82 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.4] — 2026-09-03
+
+feat: the themes carry a MATERIAL, not just a palette.
+
+Nigel, on 1.7.2: *"the glass themes in perspective really look beautiful but in
+this module they just look like a plain teal or violet"* — and then, once the
+glass pair improved, *"I wasn't just referring to the 2 glass themes… still
+quite a bit of the styling feels a bit dull."*
+
+Two causes, both measured.
+
+**The ground was being rotated away from the pack.** `aurora-teal` and
+`aurora-violet` share ONE authored ground (`#1a1233`, hue 255) and differ only in
+which colour glows on it — that shared violet ground is what Glass Aurora is.
+`ACCENT_TINT = 0.30` mixed the brand accent into the page and swung aurora-teal
+to hue 203, actual teal. The tint existed to make siblings tell apart; the pack
+already does that by accent.
+
+**The glass was being composited away.** The glass is not a colour, it is a
+material: `rgba(255,255,255,0.06 → 0.16)` films stacked over a lit ground with a
+22%-white hairline where the light catches each edge. Flattening those to opaque
+hex turns three panes into three flat greys.
+
+### Added
+- **Material read from the pack, never from its name.** `is_glass` counts
+  translucent surface tokens, so a new pack gets the right treatment without
+  this file learning about it. Three tiers fall out of the ten: **glass** (the
+  aurora pair), **soft** (nord ×2, leather ×2, finance), **hard** (industrial
+  ×2, newsprint).
+- **Translucent films, luminous hairlines and `backdrop-filter`** on the glass
+  packs. Blur only on layers that float OVER content — never behind the editor.
+- **A lit ground**, `--page-glow`: three strong accent stops for glass, two
+  gentle ones for soft, and **`none` for hard** — flatness is what newsprint and
+  an HMI *are*, and lighting them would be the same mistake in reverse.
+- **Edge character by material.** One contrast band for all ten was most of why
+  the chrome read alike; it now interpolates on the pack's own softness, so
+  `industrial-day-cyan` gets a crisp rule and `nord-*` a whisper.
+- `--glass-panel` (floating layers), `--bg-solid` (anything that must occlude
+  what scrolls under it), `--blur-panel`.
+
+### Fixed
+- **Native checkboxes and radios rendered in Chrome's default BLUE in all ten
+  themes** — a pastel blue box in the middle of leather-night-tan's amber panel.
+  Present since 1.0.0, found by a pixel review. `accent-color` on the four
+  native control types.
+- **`theme_sweep.py` could not see alpha.** It walked up for the first
+  non-transparent `backgroundColor` and took its RGB — correct while every
+  surface was opaque, and wrong the moment one was not: `rgba(255,255,255,0.06)`
+  has an RGB of PURE WHITE, so the gate read a 6% film as a white background and
+  called both aurora themes illegible at 1.69:1 when the composited surface is
+  dark. It now composites the layer stack. **A gate that cannot see alpha would
+  have had me revert a correct change.**
+
+### Two mistakes worth keeping
+- **Glass with nothing behind it is not glass.** The films shipped first over a
+  FLAT ground, where a 6% white film over dark violet is a shade of the same
+  violet: the rail, the header and the canvas all read as one block and the
+  review came back *"the panel IS the ground"*. An aurora is a gradient; the
+  panes exist to reveal it.
+- **A gradient centred off-canvas is mostly falloff.** The soft wash shipped as
+  one stop at 4%/−10% and moved the ground by **2 of 255** at the centre of the
+  window — ~8% of its nominal alpha survived that far. Measured, not eyeballed.
+  Both tiers now carry a stop INSIDE the window. Ground delta at 1.8.4: glass
+  29–31, soft 7–10, hard exactly 0.
+
+### Measured on the rig (8.3.8)
+`deploy_gate.py` PASS. Contrast, on the painted elements with alpha composited:
+no illegible theme, worst element 5.27, and the aurora pair are now the **best**
+in the set at 7.49 (they were 5.38 before — the authored ground is darker).
+Vitest 450.
+
+**The live sweep is blind to `--page-glow`**, because `getComputedStyle` reports
+`background-color` and a gradient is a background-IMAGE. The glow is therefore
+bounded in the generator instead: its brightest point is composited and added to
+the surfaces every text token is verified against.
+
 ## [1.7.2] — 2026-09-03
 
 fix: the themes pass shipped geometry nobody could see.

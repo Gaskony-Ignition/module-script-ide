@@ -192,8 +192,80 @@ describe('themes.generated.css', () => {
     // code with neither a shadow nor a line: --border-strong is what the
     // dialogs and the quick-open palette fall back to, so every theme has one
     // whatever its shadow says.
+    //
+    // A glass pack draws its edge as a luminous hairline — `rgba(255,255,255,
+    // 0.22)` is where the light catches a pane — so the value may be either a
+    // hex or an rgba. What is asserted is that it EXISTS and, when translucent,
+    // that it is meaningfully denser than the light one, which is what makes it
+    // the heavier line the palette falls back to.
     for (const [id, tokens] of blocks()) {
-      expect(`${id} ${tokens.get('--border-strong')}`).toMatch(/#[0-9a-f]{6}$/);
+      const strong = tokens.get('--border-strong') ?? '';
+      expect(`${id} ${strong}`).toMatch(/(#[0-9a-f]{6}|rgba\([^)]+\))$/);
+      const alpha = (value: string) =>
+        Number(value.match(/rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/)?.[1] ?? '1');
+      if (strong.startsWith('rgba')) {
+        expect(`${id} strong=${alpha(strong)} light=${alpha(tokens.get('--border-light') ?? '')}`)
+          .toSatisfy(() => alpha(strong) > alpha(tokens.get('--border-light') ?? '') * 1.5);
+      }
+    }
+  });
+
+  it('keeps each pack on the ground it was authored with', () => {
+    // Nigel, 03/09/2026: the aurora pair "just look like a plain teal or
+    // violet". They should not look like either — in Perspective both wear the
+    // SAME violet ground (#1a1233) and differ only in which colour glows on it,
+    // and that shared ground is what Glass Aurora is. This file used to mix the
+    // page 30% toward the brand accent, which swung aurora-teal to hue 203 and
+    // destroyed the family. The pack already tells siblings apart by accent.
+    const teal = blocks().get('aurora-teal')?.get('--bg-primary');
+    const violet = blocks().get('aurora-violet')?.get('--bg-primary');
+    expect(`teal ${teal} / violet ${violet}`).toBe(`teal ${teal} / violet ${teal}`);
+    expect(teal).toBe('#1a1233');
+  });
+
+  it('carries the glass packs as a MATERIAL, and leaves the others solid', () => {
+    // The glass in Glass Aurora is not a colour, it is translucent white films
+    // over a lit ground with a luminous hairline along each edge. Compositing
+    // those to opaque hex — what this file did until 1.8.0 — turns three panes
+    // of glass into three flat greys.
+    //
+    // Read from the pack, never switched on its name: `is_glass` counts
+    // translucent surface tokens, so a new pack gets the right material without
+    // the generator learning about it.
+    const translucent = (value: string | undefined) => !!value?.startsWith('rgba');
+    const glass = ['aurora-teal', 'aurora-violet'];
+    for (const [id, tokens] of blocks()) {
+      const isGlass = glass.includes(id);
+      expect(`${id} films=${translucent(tokens.get('--bg-secondary'))}`)
+        .toBe(`${id} films=${isGlass}`);
+      expect(`${id} hairline=${translucent(tokens.get('--border-light'))}`)
+        .toBe(`${id} hairline=${isGlass}`);
+      expect(`${id} blur=${tokens.get('--blur-panel') !== 'none'}`)
+        .toBe(`${id} blur=${isGlass}`);
+      // The ground is opaque in EVERY theme. The editor is painted on it, and
+      // a translucent editor ground is a legibility defect, not a material.
+      expect(`${id} ${tokens.get('--bg-primary')}`).toMatch(/#[0-9a-f]{6}$/);
+      // So is anything that has to occlude what scrolls under it.
+      expect(`${id} ${tokens.get('--bg-solid')}`).toMatch(/#[0-9a-f]{6}$/);
+    }
+  });
+
+  it('keeps a floating panel inside the band where it is actually glass', () => {
+    // --surface on a glass pack is the pack's own 10% film: right over a page,
+    // useless over an editor, where the code shows through and competes with
+    // the palette's own rows. --glass-panel is that film composited and
+    // re-emitted at a density that occludes without going solid.
+    //
+    // A BAND, not a floor. Too sheer and the code competes with the palette's
+    // rows; too dense and `backdrop-filter` has nothing left to show — 0.94
+    // was reviewed as "an opaque panel, not glass", which is the failure this
+    // now catches from the other side.
+    for (const [id, tokens] of blocks()) {
+      const panel = tokens.get('--glass-panel') ?? '';
+      const alpha = Number(panel.match(/rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)/)?.[1] ?? '1');
+      const glass = panel.startsWith('rgba');
+      expect(`${id} panel alpha ${alpha} glass=${glass}`)
+        .toSatisfy(() => (glass ? alpha >= 0.7 && alpha <= 0.9 : alpha === 1));
     }
   });
 
