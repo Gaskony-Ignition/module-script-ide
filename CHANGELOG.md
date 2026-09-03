@@ -2,6 +2,69 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.5] — 2026-09-03
+
+feat: a favicon, sidebar state that survives a view switch, and pull-from-gateway.
+
+Four of Nigel's 03/09/2026 items. The remaining three — the Designer's error
+ruler, WebDev static resources and a split view — are queued in `docs/STATE.md`.
+
+### Added
+- **A favicon.** There was none at all; the tab showed Chrome's default document
+  glyph. Inlined as a data URI rather than a file in `public/`, because the
+  module is served from inside a jar and must work air-gapped.
+- **Pull from the gateway**, per tab and for all at once. *"I made an edit on the
+  designer to one of the scripts. I had the script open in my ide module. The
+  change did not show up."*
+  - A **stale marker** on the tab, and a counted `Pull N changes` in the toolbar
+    that only exists while there is something to pull — a permanently visible
+    Pull button trains people to press it on a schedule; a button that appears
+    with a count IS the notification.
+  - Detection runs on window **focus** and visibility as well as a 20 s timer,
+    because the realistic sequence is edit in the Designer, alt-tab back. It
+    refetches the LISTING, not each open document: one request whatever is open,
+    and the listing already carries the signature that answers the question.
+  - **The buffer is never replaced behind you.** Detection is not a silent
+    reload; that is asserted in the suite.
+  - Dirty **and** stale routes to the existing conflict dialog rather than
+    reinventing it — the only difference from the save-time path is that the
+    user asked for it. A pull-all leaves every dirty document alone and names
+    them; quietly resolving several on someone's behalf is the one thing it must
+    not do.
+- **`validate_v18_pull.py`** — 15 checks, driving a real browser against a real
+  gateway: open a script, change the resource underneath it, prove the marker
+  appears on focus, prove the buffer is untouched until pulled, prove the pull
+  loads the gateway copy, then prove dirty+stale raises the conflict dialog
+  showing both copies.
+
+### Fixed
+- **Sidebar trees reset to default on every view switch.** *"its annoying how
+  everytime I shift between a section it resets to default."* The activity-bar
+  views are a `? :` chain, so switching from Scripting to Web Dev does not hide
+  the tree — it REMOVES it, and `useState` goes with the component. All three
+  trees now keep their open branches in `sessionStorage` behind `useStickySet`,
+  with an in-memory fallback for contexts where storage throws.
+
+### What the Problems panel actually does
+Reproduced on the rig: a broken line produces a squiggle, a gutter marker, and a
+row reading `no viable alternative at input '='  ·  CellSim 19:9`. The pipeline
+works. What is wrong is the FEATURE — it lists only documents open as tabs, it
+lives in a panel that starts collapsed, and a WebDev or named-query document is
+not registered with the language server at all. The Designer's overview ruler is
+the right answer and is next in the queue.
+
+### Two things worth keeping
+- **`npx tsc --noEmit` in `web/` checks NOTHING.** The root tsconfig is
+  solution-style (`"files": []` plus references), so that invocation type-checks
+  an empty program and exits 0. Verified by planting
+  `const x: number = "not a number"` and watching it pass. The real check is
+  `tsc -b`, which is what `npm run build` and therefore Gradle run — it caught a
+  genuine temporal-dead-zone bug in this very change, where a `useCallback`
+  dependency array referenced two `const`s declared 400 lines below it.
+- The v13 live suite asserted `aurora-teal`'s ground `!=` `aurora-violet`'s,
+  which **encoded the 1.7.x bug as a requirement**. Both packs are authored on
+  one violet ground and differ by the light on it; the check now asserts that.
+
 ## [1.8.4] — 2026-09-03
 
 feat: the themes carry a MATERIAL, not just a palette.

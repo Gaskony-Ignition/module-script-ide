@@ -18,7 +18,8 @@
  * itself. The create action sits on the group header so it is reachable while
  * the group is shut.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useStickySet } from '../workspace/viewState';
 import type { NamedQueryEntry } from '../api/namedQueries';
 import { QUERY_TYPE_LABELS } from '../api/namedQueries';
 import { IconDatabase, IconFolder, IconPlus, IconRevert, IconTrash } from './Icons';
@@ -151,7 +152,8 @@ export default function NamedQueryTree({
     }
     return out;
   }, [queries]);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // Sticky across an unmount — see useStickySet.
+  const [expanded, setExpanded] = useStickySet('queries.expanded');
 
   const tree = useMemo(() => buildQueryTree(queries), [queries]);
   const count = useMemo(() => queries.filter((entry) => !entry.isFolder).length, [queries]);

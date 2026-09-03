@@ -37,7 +37,8 @@
  * nested, collapsible tree; each gateway event type is a flat list, because each
  * is genuinely flat on the gateway.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useStickySet } from '../workspace/viewState';
 import type { ScriptEntry, ScriptTypeId } from '../api/scripts';
 import { IconFolder, IconPlus, IconRevert, IconTrash, iconForType } from './Icons';
 import { Chevron } from './Chevron';
@@ -216,7 +217,9 @@ export default function FileTree({
    * chosen. Quick open (Ctrl+P) is the fast path now, and the tree is for
    * browsing, which starts by choosing a branch.
    */
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // Sticky: switching activity-bar views unmounts this tree, and plain
+  // useState went with it — every folder collapsed again on the way back.
+  const [expanded, setExpanded] = useStickySet('scripts.expanded');
 
   const { library, eventGroups, singletons, unknownGroups } = useMemo(() => {
     const byType = new Map<string, ScriptEntry[]>();

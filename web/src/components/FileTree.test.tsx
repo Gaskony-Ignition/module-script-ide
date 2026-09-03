@@ -482,6 +482,28 @@ describe('FileTree defaults', () => {
     expect(screen.queryByRole('button', { name: /Poller/ })).toBeNull();
   });
 
+  it('remembers open branches across an UNMOUNT, which is what a view switch is', () => {
+    // Nigel, 03/09/2026: "everytime I shift between a section it resets to
+    // default". The activity-bar views are a `? :` chain, so switching to Web
+    // Dev does not hide this tree, it removes it — and plain useState went with
+    // it. Unmounting and remounting here is exactly what that switch does.
+    const view = renderRaw(
+      <FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Project Library/ }));
+    expect(screen.getByRole('button', { name: /Project Library/ }))
+      .toHaveAttribute('aria-expanded', 'true');
+
+    view.unmount();
+    renderRaw(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: /Project Library/ }))
+      .toHaveAttribute('aria-expanded', 'true');
+    // And only that one — coming back must not open everything either.
+    expect(screen.getByRole('button', { name: /Gateway Events/ }))
+      .toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('opens one branch at a time, leaving the rest shut', () => {
     renderRaw(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Project Library/ }));

@@ -12,7 +12,8 @@
  * create `doPost.py` on an endpoint that currently has only `doGet.py`, and
  * hiding them made it impossible.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useStickySet } from '../workspace/viewState';
 import type { ScriptEntry } from '../api/scripts';
 import { IconGlobe, IconPlus, IconTrash } from './Icons';
 import { Chevron } from './Chevron';
@@ -47,7 +48,10 @@ export default function WebDevTree({
   onAddMethod,
   onEditConfig,
 }: WebDevTreeProps) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  // Sticky across an unmount — see useStickySet. This tree in particular was
+  // called out for it: "everytime I go to that tab they return to being fully
+  // expanded regardless of what I set it to" (Nigel, 03/09/2026).
+  const [collapsed, setCollapsed] = useStickySet('webdev.collapsed');
 
   const sorted = useMemo(
     () => [...endpoints].sort((a, b) => a.name.localeCompare(b.name)),

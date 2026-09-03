@@ -119,3 +119,24 @@
   height: var(--tab-height);
   min-height: var(--tab-height);
 }
+
+/* The gateway has moved on. A BUTTON, not a dot: the marker is also the way to
+   act on it, so noticing and fixing are one gesture rather than two. Warning
+   coloured because it is not an error — nothing is lost and nothing is broken,
+   there is simply a newer copy. */
+.tab-stale {
+  flex: 0 0 auto;
+  margin-left: var(--space-1);
+  padding: 0 3px;
+  border: none;
+  border-radius: var(--radius-row);
+  background: none;
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tab-stale:hover {
+  background: var(--bg-tertiary);
+}

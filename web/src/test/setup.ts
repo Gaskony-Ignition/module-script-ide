@@ -1,5 +1,21 @@
 import '@testing-library/jest-dom/vitest';
+import { beforeEach } from 'vitest';
 import { configure } from '@testing-library/react';
+import { clearStickyState } from '../workspace/viewState';
+
+/**
+ * The sidebar trees remember which folders are open ACROSS an unmount, in
+ * sessionStorage with a module-level fallback — so by design that state
+ * outlives a component, and in a test file it would outlive the test. Two
+ * FileTree cases failed the moment stickiness landed, asserting a collapsed
+ * tree and getting one an earlier test had opened.
+ *
+ * Cleared here rather than in those two files: the leak is a property of the
+ * store, so the next test to use a sticky view should not have to rediscover it.
+ */
+beforeEach(() => {
+  clearStickyState();
+});
 
 // MUST stay strictly BELOW vite.config.ts's testTimeout (30 s). When the two are
 // equal, the query timeout and the vitest watchdog expire together and the

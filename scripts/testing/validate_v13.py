@@ -237,15 +237,39 @@ with sync_playwright() as p:
         seen[tokens] = tid
     rec("THEMES: no two themes share a palette", not dupes, "; ".join(dupes))
 
-    page.select_option('select[aria-label="Theme"]', "aurora-teal")
-    page.wait_for_timeout(400)
-    teal = page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg-primary').trim()")
-    page.screenshot(path=f"{OUT}/v13-aurora-teal.png")
-    page.select_option('select[aria-label="Theme"]', "aurora-violet")
-    page.wait_for_timeout(400)
-    violet = page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--bg-primary').trim()")
-    page.screenshot(path=f"{OUT}/v13-aurora-violet.png")
-    rec("THEMES: Glass Aurora Teal is not violet", teal != violet, f"teal={teal} violet={violet}")
+    # The aurora pair SHARE a ground, and that is the point.
+    #
+    # This asserted `teal != violet` on --bg-primary until 1.8.4, which encoded
+    # the bug rather than the requirement: build-themes.py used to mix 30% of
+    # the brand accent into the page to make siblings tell apart, which swung
+    # aurora-teal's ground to hue 203 — actual teal — and destroyed the family.
+    # In Perspective both packs are authored on ONE violet ground (#1a1233) and
+    # differ in which colour glows on it (Nigel, 03/09/2026: they "just look
+    # like a plain teal or violet").
+    #
+    # So the requirement is the opposite of what was written: the same ground,
+    # and a different LIGHT on it.
+    def theme_tokens(tid):
+        page.select_option('select[aria-label="Theme"]', tid)
+        page.wait_for_timeout(400)
+        page.screenshot(path=f"{OUT}/v13-{tid}.png")
+        return page.evaluate("""() => {
+          const s = getComputedStyle(document.documentElement);
+          return {ground: s.getPropertyValue('--bg-primary').trim(),
+                  accent: s.getPropertyValue('--accent-primary').trim(),
+                  glow: s.getPropertyValue('--page-glow').trim()};
+        }""")
+
+    teal = theme_tokens("aurora-teal")
+    violet = theme_tokens("aurora-violet")
+    rec("THEMES: the aurora pair share the ground they were authored on",
+        teal["ground"] == violet["ground"],
+        f"teal={teal['ground']} violet={violet['ground']}")
+    rec("THEMES: and are told apart by the light on it, not the ground",
+        teal["accent"] != violet["accent"] and teal["glow"] != violet["glow"]
+        and teal["glow"] != "none",
+        f"accent {teal['accent']} vs {violet['accent']}; glow differs="
+        f"{teal['glow'] != violet['glow']}")
 
     page.select_option('select[aria-label="Theme"]', "nord-dark-frost")
     page.wait_for_timeout(400)

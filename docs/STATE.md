@@ -2,7 +2,7 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.8.4 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
+**Version 1.8.5 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
 `deploy_gate.py` PASS (9 routes mounted) and every suite green: `p1_p2` 8/8,
 `lsp` 10/10, `v11` 12/12, `v13` 22/22, `v14` 18/18, `v15_term` 6/6,
 `v15_exec` 20/20, `v16_nav` 25/25, theme sweep no illegible themes (worst
@@ -381,6 +381,56 @@ much room it takes up, not only what it is called.
 | P7 — hardening, docs, 1.0.0 | **Done.** Security review clean |
 
 ## What is next
+
+### Nigel's 03/09/2026 list — three left
+
+Done in 1.8.5: favicon; sidebar trees keep their open branches across a view
+switch; pull-from-gateway with stale markers. Still open, in this order:
+
+1. **The Designer's error ruler.** A narrow strip right of the editor with a
+   mark per problem line, hover for the message, click to reveal it in the
+   Problems panel — and copyable, which the Designer does not offer. The
+   diagnostics themselves work (reproduced on the rig); what fails is
+   discoverability. Problems lists only OPEN tabs, sits in a collapsed panel,
+   and covers neither WebDev nor named-query documents, which are not registered
+   with the language server.
+2. **WebDev static resources.** Measured on `Machine_HMI_Demo`: `cell3D` is
+   `{"resource-type": "text-resource", "content-type": "text/html", "text": "…"}`
+   — the whole page lives in the `text` field of `config.json`. The module
+   assumes every WebDev resource is a Python endpoint, intersects the data keys
+   against `doGet.py…doPatch.py`, finds none, and renders eight empty verb
+   slots. **This is a bug, not only a gap: the one affordance offered is "add
+   doGet", which would inject a Python file into a static HTML resource.**
+   Needs `resource-type` modelled in `ScriptResourceTypes`, a branch in
+   `ScriptResourceRouteHandler.describe()`/`read()`, a second path in
+   `WebDevConfigRouteHandler`, and a distinct row in `WebDevTree.tsx`. Nigel
+   wants it to go beyond the Designer and edit HTML/JS/CSS properly.
+3. **Split view.** Two scripts side by side to compare and copy between.
+   `CodeEditor` already keeps one live `EditorView` per open document precisely
+   so scroll and undo survive a tab switch, so nothing needs tearing down — what
+   is hard-coded is "one `activeUri`, one `TabStrip`, one `CodeEditor`" in
+   `Workspace.tsx`, and `viewsRef` keyed by uri rather than by (pane, uri).
+
+### Parked — themes, for further review (Nigel, 03/09/2026)
+
+"Much improved on the themes. I do want to improve them further but right now I
+have some other items that need more urgent attention." **Do not pick this up
+ahead of the queue below.** Where it got to, and what is known to be left:
+
+- **The light packs are the weak ones.** `nord-light-frost`,
+  `leather-parchment-tan`, `finance-ledger` and `industrial-day-cyan` sit within
+  single-digit RGB of each other on the big surfaces — four shades of pale grey.
+  The wash helps and does not fix it: the neutral ramp derives near-colourless
+  surfaces from a near-white page. The fix is to let a light pack keep more of
+  its own hue through the ramp, which is a change to `step()`/`LIGHT_RAMP`, not
+  to the material pass.
+- **The accent barely appears in the chrome.** On a theme with nothing selected,
+  one highlighted row carries the entire identity. More accent in the active
+  tab, the focus ring, the gutter's active line and the icons would lift all ten.
+- `finance-ledger` renders square tab corners (`radius.control: 3px`). That is
+  the pack being honest, not a defect, but it makes a "soft" theme read hard.
+
+
 
 Nigel's brief (02/09/2026): at least the Designer's capabilities, then more and
 better — "clean, easy to use, extremely functional and far superior to the

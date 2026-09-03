@@ -259,3 +259,11 @@
   border-color: var(--accent-primary);
   color: var(--accent-primary);
 }
+
+/* The pull affordance. Warning-coloured, not error: nothing is broken and
+   nothing is lost — the gateway simply has a newer copy than this tab. It only
+   exists while there IS something to pull, so its presence is the notice. */
+.workspace-stale {
+  border-color: var(--warning);
+  color: var(--warning);
+}

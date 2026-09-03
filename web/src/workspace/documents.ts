@@ -130,6 +130,40 @@ export function docUri(project: string, path: string, scriptKey?: string): strin
 }
 
 /**
+ * Normalise a resource signature for comparison.
+ *
+ * The same signature reaches this app by two routes — the listing's
+ * `signature` field and a content read's `ETag` header — and a caching proxy is
+ * entitled to add quotes or a `W/` prefix to the header one. Comparing them raw
+ * makes every document look stale forever.
+ */
+export function sameSignature(a: string | undefined, b: string | undefined): boolean {
+  const bare = (value: string | undefined) =>
+    (value ?? '').trim().replace(/^W\//i, '').replace(/^"|"$/g, '');
+  return bare(a) === bare(b);
+}
+
+/**
+ * True when the gateway's copy has moved on from what this tab was opened at.
+ *
+ * The case this exists for: a script edited in the DESIGNER while it sits open
+ * here (Nigel, 03/09/2026 — "The change did not show up"). Nothing was ever at
+ * risk of being silently overwritten, because the save carries `If-Match` and
+ * the gateway answers 409 — but a conflict dialog at save time is a late and
+ * disruptive way to learn something you would have wanted to know before you
+ * started typing.
+ *
+ * `signature` is whatever the listing currently reports for this resource;
+ * `undefined` means the resource is not in the listing at all, which is a
+ * DELETION rather than a staleness and is not this function's business. A
+ * `'new'` document has no gateway copy to be stale against.
+ */
+export function isStale(doc: OpenDoc, signature: string | undefined): boolean {
+  if (doc.origin === 'new' || signature === undefined) return false;
+  return !sameSignature(doc.etag, signature);
+}
+
+/**
  * True when the buffer differs from what the gateway last agreed to.
  *
  * A `'new'` document is ALWAYS dirty, even with an empty buffer: nothing has

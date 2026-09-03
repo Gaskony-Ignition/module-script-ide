@@ -4,6 +4,8 @@ import {
   docUri,
   isDirty,
   isLockedByInheritance,
+  isStale,
+  sameSignature,
   newQueryDoc,
   settingsEqual,
   type OpenDoc,
@@ -221,5 +223,50 @@ describe('newQueryDoc', () => {
     });
     expect(isLockedByInheritance(inherited)).toBe(true);
     expect(isLockedByInheritance({ ...inherited, overridden: true })).toBe(false);
+  });
+});
+
+describe('isStale', () => {
+  it('is stale when the gateway signature has moved on', () => {
+    // The case it exists for: someone edited the script in the Designer while
+    // this tab sat open (Nigel, 03/09/2026).
+    expect(isStale(scriptDoc({ etag: 'sig-1' }), 'sig-2')).toBe(true);
+  });
+
+  it('is not stale when the signatures agree', () => {
+    expect(isStale(scriptDoc({ etag: 'sig-1' }), 'sig-1')).toBe(false);
+  });
+
+  it('ignores the quoting a caching proxy is entitled to add', () => {
+    // The listing reports a bare signature and a content read returns it in an
+    // ETag header, which a proxy may quote or mark weak. Comparing them raw
+    // makes every open document permanently stale — a "pull" badge that never
+    // clears is worse than no badge, because it stops being read.
+    expect(isStale(scriptDoc({ etag: '"sig-1"' }), 'sig-1')).toBe(false);
+    expect(isStale(scriptDoc({ etag: 'W/"sig-1"' }), 'sig-1')).toBe(false);
+    expect(sameSignature('W/"a"', 'a')).toBe(true);
+    expect(sameSignature('a', 'b')).toBe(false);
+  });
+
+  it('is not stale when the resource is absent from the listing', () => {
+    // Absent means DELETED, which is a different state with a different
+    // remedy — offering "pull" for a resource that is gone would re-read a 404
+    // and report it as though the user had done something wrong.
+    expect(isStale(scriptDoc(), undefined)).toBe(false);
+  });
+
+  it('is never stale for a draft that exists nowhere yet', () => {
+    // A 'new' document has no gateway copy to have moved on from, and its etag
+    // is not a signature of anything.
+    expect(isStale(scriptDoc({ origin: 'new', etag: '' }), 'sig-9')).toBe(false);
+  });
+
+  it('is orthogonal to dirty — both at once is the interesting case', () => {
+    // Dirty is "the gateway has not seen your edits", stale is "you have not
+    // seen the gateway's". Both together is a conflict waiting at the next
+    // save, and the point of showing it is to find that out before then.
+    const doc = scriptDoc({ text: 'x = 2', etag: 'sig-1' });
+    expect(isDirty(doc)).toBe(true);
+    expect(isStale(doc, 'sig-2')).toBe(true);
   });
 });

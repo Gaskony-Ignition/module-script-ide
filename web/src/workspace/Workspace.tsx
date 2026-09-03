@@ -78,6 +78,7 @@ import {
   docUri,
   isDirty,
   isLockedByInheritance,
+  isStale,
   newDoc,
   newQueryDoc,
   newUnsavedDoc,
@@ -86,6 +87,18 @@ import {
 } from './documents';
 import { entryForLocation, parseLocationUri } from './locations';
 import './Workspace.css';
+
+/**
+ * How often to ask the gateway whether anything an open tab is based on has
+ * changed underneath it.
+ *
+ * 20 s is chosen against the cost, not against a guess at how fast people work:
+ * it is ONE listing request per interval however many tabs are open, and the
+ * focus and visibility listeners beside it already cover the case that actually
+ * matters — coming back from the Designer. The timer is only there for a window
+ * left on screen beside one.
+ */
+const WATCH_INTERVAL_MS = 20_000;
 
 export interface WorkspaceProps {
   session: SessionInfo;
@@ -267,6 +280,31 @@ export default function Workspace({ session }: WorkspaceProps) {
   );
 
   /**
+   * Open documents whose gateway copy has moved on since they were opened.
+   *
+   * Derived from the listing rather than stored, for the reason `isDirty` is:
+   * a flag and the thing it describes drift apart, and the listing is already
+   * being refreshed in the background. A document missing from the listing is
+   * NOT stale — it has been deleted, which is a different state and not one
+   * this set claims to report.
+   */
+  const staleUris = useMemo(() => {
+    const signatures = new Map<string, string>();
+    for (const entry of tree?.scripts ?? []) {
+      signatures.set(docUri(project, entry.path, entry.scriptKey), entry.signature);
+    }
+    for (const entry of queries?.queries ?? []) {
+      signatures.set(docUri(project, entry.path, QUERY_DATA_KEY), entry.signature);
+    }
+    const out = new Set<string>();
+    for (const doc of docs) {
+      if (isStale(doc, signatures.get(doc.uri))) out.add(doc.uri);
+    }
+    return out;
+  }, [docs, project, queries, tree]);
+
+
+  /**
    * Mark this tab as overridden, so its buffer and its settings unlock.
    *
    * Nothing is written here. The Designer's `Override Resource` is a STAGED
@@ -346,6 +384,51 @@ export default function Workspace({ session }: WorkspaceProps) {
       cancelled = true;
     };
   }, []);
+
+  /**
+   * Notice that the gateway has moved on, without being asked.
+   *
+   * Until 1.8.5 nothing here ever re-read anything: the listing was refetched
+   * only after this app's OWN mutations, so a script edited in the Designer
+   * stayed invisible until a save 409'd (Nigel, 03/09/2026 — "The change did
+   * not show up"). Reopening the same script from the tree did not help either;
+   * `openScript` just refocuses the existing tab.
+   *
+   * Refetching the LISTING rather than each open document: one request whatever
+   * is open, and the listing already carries the signature that answers the
+   * question. The document bodies are only re-read when a pull actually happens.
+   *
+   * On focus as well as on a timer, because the realistic sequence is edit in
+   * the Designer, alt-tab back — and that should be immediate, not up to
+   * `WATCH_INTERVAL_MS` later.
+   */
+  useEffect(() => {
+    if (!project) return;
+    let cancelled = false;
+    const look = () => {
+      if (cancelled || document.hidden) return;
+      fetchScriptTree(project)
+        .then((next) => {
+          // Never clobber a load error or an in-flight first load with a
+          // background result; this is a refresh, not the source of truth for
+          // whether the listing works at all.
+          if (!cancelled) setTree((current) => (current ? next : current));
+        })
+        .catch(() => {
+          /* A background poll that fails is not worth a notice: the next one
+             may well succeed, and the save path still has If-Match behind it. */
+        });
+    };
+    const timer = window.setInterval(look, WATCH_INTERVAL_MS);
+    window.addEventListener('focus', look);
+    document.addEventListener('visibilitychange', look);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', look);
+      document.removeEventListener('visibilitychange', look);
+    };
+  }, [project]);
 
   useEffect(() => {
     if (!project) return;
@@ -578,6 +661,78 @@ export default function Workspace({ session }: WorkspaceProps) {
       });
     }
   }, [readCurrent]);
+
+  /**
+   * Re-read one document from the gateway.
+   *
+   * Clean buffer: replace it and say so. Dirty buffer: this is exactly the
+   * situation the conflict dialog exists for, so it is raised here rather than
+   * being reinvented — the difference is only that the user asked for it
+   * instead of discovering it at save time.
+   */
+  const pullDoc = useCallback(async (uri: string) => {
+    const doc = docsRef.current.find((d) => d.uri === uri);
+    if (!doc || doc.origin === 'new') return;
+    if (isDirty(doc)) {
+      await raiseConflict(doc);
+      return;
+    }
+    try {
+      const current = await readCurrent(doc);
+      setDocs((all) => all.map((d) => (
+        d.uri === uri
+          ? { ...d, text: current.text, baseText: current.text, etag: current.etag }
+          : d
+      )));
+      setNotice({ kind: 'info', text: `Pulled the gateway copy of ${doc.label}.` });
+    } catch (e: unknown) {
+      setNotice({ kind: 'error', text: `Could not pull ${doc.label}: ${describe(e)}` });
+    }
+  }, [raiseConflict, readCurrent]);
+
+  /**
+   * Pull every open document that has moved on.
+   *
+   * Clean ones are replaced silently — there is nothing to decide. Dirty ones
+   * are NOT touched and are named instead: the conflict dialog handles one
+   * document at a time, and quietly resolving several on the user's behalf is
+   * the one thing a pull-all must never do.
+   */
+  const pullAll = useCallback(async () => {
+    const candidates = docsRef.current.filter((d) => staleUris.has(d.uri));
+    if (candidates.length === 0) {
+      setNotice({ kind: 'info', text: 'Every open document is up to date.' });
+      return;
+    }
+    const clean = candidates.filter((d) => !isDirty(d));
+    const dirty = candidates.filter((d) => isDirty(d));
+    const failed: string[] = [];
+    for (const doc of clean) {
+      try {
+        const current = await readCurrent(doc);
+        setDocs((all) => all.map((d) => (
+          d.uri === doc.uri
+            ? { ...d, text: current.text, baseText: current.text, etag: current.etag }
+            : d
+        )));
+      } catch {
+        failed.push(doc.label);
+      }
+    }
+    const parts: string[] = [];
+    if (clean.length - failed.length > 0) {
+      parts.push(`Pulled ${clean.length - failed.length} document(s).`);
+    }
+    if (dirty.length > 0) {
+      parts.push(`Left ${dirty.map((d) => d.label).join(', ')} alone — `
+        + 'unsaved edits. Pull each from its tab to compare.');
+    }
+    if (failed.length > 0) parts.push(`Failed: ${failed.join(', ')}.`);
+    setNotice({
+      kind: dirty.length > 0 || failed.length > 0 ? 'error' : 'info',
+      text: parts.join(' '),
+    });
+  }, [readCurrent, staleUris]);
 
   /**
    * Write a named query: SQL first, then settings against the signature that
@@ -1465,6 +1620,20 @@ export default function Workspace({ session }: WorkspaceProps) {
           {saving ? 'Saving…' : activeQueryDoc ? 'Save query' : 'Save script'}
         </button>
 
+        {/* Pull is offered ONLY when there is something to pull. A permanently
+            visible "Pull" button trains people to press it on a schedule; a
+            button that appears with a count is the notification. */}
+        {staleUris.size > 0 && (
+          <button
+            type="button"
+            className="button workspace-stale"
+            onClick={() => void pullAll()}
+            title="These open documents changed on the gateway — most likely edited in the Designer."
+          >
+            {`Pull ${staleUris.size} change${staleUris.size === 1 ? '' : 's'}`}
+          </button>
+        )}
+
         {readOnly && (
           <span className="workspace-readonly" role="status">
             {readOnlyReason}
@@ -1611,8 +1780,10 @@ export default function Workspace({ session }: WorkspaceProps) {
             <TabStrip
               docs={docs}
               activeUri={activeUri}
+              staleUris={staleUris}
               onSelect={setActiveUri}
               onClose={closeDoc}
+              onPull={(uri) => void pullDoc(uri)}
             />
             {activeUri && activeQueryDoc && activeQueryDoc.settings && (
               /* Keyed on the document so each query opens its own editor state
