@@ -41,15 +41,15 @@
   --syntax-comment: #c7c2e0;
   --accent-primary-bg: color-mix(in srgb, #18baad 30%, transparent);
   --radius: 8px;
-  --radius-panel: 12px;
-  --radius-row: 6px;
+  --radius-panel: 18px;
+  --radius-row: 8px;
   --rule-width: 1px;
   --marker-width: 3px;
   --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.35);
   --shadow-popup: 0 12px 36px rgba(0, 0, 0, 0.5);
   --shadow-control: 0 4px 16px rgba(24, 186, 173, 0.45);
-  --row-height: 22px;
-  --control-height: 24px;
+  --row-height: 25px;
+  --control-height: 27px;
 }
 
 /* Glass Aurora — Violet — dark */
@@ -77,15 +77,15 @@
   --syntax-comment: #c7c2e0;
   --accent-primary-bg: color-mix(in srgb, #a888f1 30%, transparent);
   --radius: 8px;
-  --radius-panel: 12px;
-  --radius-row: 6px;
+  --radius-panel: 18px;
+  --radius-row: 8px;
   --rule-width: 1px;
   --marker-width: 3px;
   --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.35);
   --shadow-popup: 0 12px 36px rgba(0, 0, 0, 0.5);
   --shadow-control: 0 4px 16px rgba(168, 136, 241, 0.45);
-  --row-height: 22px;
-  --control-height: 24px;
+  --row-height: 25px;
+  --control-height: 27px;
 }
 
 /* Finance Ledger — light */
@@ -120,8 +120,8 @@
   --shadow-card: 0 1px 2px rgba(11, 23, 33, 0.08);
   --shadow-popup: 0 6px 16px rgba(11, 23, 33, 0.22);
   --shadow-control: none;
-  --row-height: 22px;
-  --control-height: 24px;
+  --row-height: 24px;
+  --control-height: 26px;
 }
 
 /* Industrial — Control Room Cyan — dark */
@@ -156,8 +156,8 @@
   --shadow-card: none;
   --shadow-popup: none;
   --shadow-control: 0 0 10px rgba(43, 179, 214, 0.3);
-  --row-height: 20px;
-  --control-height: 22px;
+  --row-height: 21px;
+  --control-height: 23px;
 }
 
 /* Industrial — Day Cyan — light */
@@ -228,8 +228,8 @@
   --shadow-card: none;
   --shadow-popup: none;
   --shadow-control: none;
-  --row-height: 22px;
-  --control-height: 24px;
+  --row-height: 25px;
+  --control-height: 27px;
 }
 
 /* Leather Journal — Parchment Tan — light */
@@ -257,15 +257,15 @@
   --syntax-comment: #5a4d3c;
   --accent-primary-bg: color-mix(in srgb, #88592a 20%, transparent);
   --radius: 8px;
-  --radius-panel: 12px;
-  --radius-row: 6px;
+  --radius-panel: 16px;
+  --radius-row: 8px;
   --rule-width: 1px;
   --marker-width: 3px;
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
   --shadow-popup: 0 6px 16px rgba(16, 24, 40, 0.22);
   --shadow-control: 0 1px 2px rgba(136, 89, 42, 0.06);
-  --row-height: 22px;
-  --control-height: 24px;
+  --row-height: 25px;
+  --control-height: 27px;
 }
 
 /* Newsprint — Night — dark */
@@ -300,8 +300,8 @@
   --shadow-card: none;
   --shadow-popup: none;
   --shadow-control: none;
-  --row-height: 24px;
-  --control-height: 26px;
+  --row-height: 26px;
+  --control-height: 28px;
 }
 
 /* Nord — Dark Frost — dark */
@@ -329,15 +329,15 @@
   --syntax-comment: #d8dee9;
   --accent-primary-bg: color-mix(in srgb, #a9bad0 30%, transparent);
   --radius: 8px;
-  --radius-panel: 12px;
-  --radius-row: 6px;
+  --radius-panel: 16px;
+  --radius-row: 8px;
   --rule-width: 1px;
   --marker-width: 3px;
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
   --shadow-popup: 0 6px 16px rgba(16, 24, 40, 0.22);
   --shadow-control: 0 1px 2px rgba(169, 186, 208, 0.06);
-  --row-height: 22px;
-  --control-height: 24px;
+  --row-height: 25px;
+  --control-height: 27px;
 }
 
 /* Nord — Light Frost — light */
@@ -365,13 +365,13 @@
   --syntax-comment: #4c566a;
   --accent-primary-bg: color-mix(in srgb, #466080 20%, transparent);
   --radius: 8px;
-  --radius-panel: 12px;
-  --radius-row: 6px;
+  --radius-panel: 16px;
+  --radius-row: 8px;
   --rule-width: 1px;
   --marker-width: 3px;
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
   --shadow-popup: 0 6px 16px rgba(16, 24, 40, 0.22);
   --shadow-control: 0 1px 2px rgba(70, 96, 128, 0.06);
-  --row-height: 22px;
-  --control-height: 24px;
+  --row-height: 25px;
+  --control-height: 27px;
 }

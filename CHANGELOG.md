@@ -2,6 +2,72 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.7.2] — 2026-09-03
+
+fix: the themes pass shipped geometry nobody could see.
+
+Nigel, on 1.7.0: *"I don't understand the theme changes still all look the same
+as before. Did you actually make any changes to them?"* He was right, and the
+answer is the interesting part: **every layer worked except the numbers.**
+
+The tokens were emitted per theme, the `:root[data-theme=…]` selectors were
+right, the CSS reached the browser, and the components consumed the variables.
+Measured in the browser, seven of the ten themes came out **byte-identical**:
+
+| | pack spread | emitted by 1.7.0 |
+| --- | --- | --- |
+| `radius.card` | 0, 2, 4, 6, 10, 16, 16, 16, 18, 18 | ceiling **12px** → five collapse to 12 |
+| `radius.nav` | 0, 2, 3, 6, 6, 8×5 | ceiling **6px** → seven collapse to 6 |
+| `space.content` | 12–26px | three bands → six collapse to 22px rows |
+
+`_px`'s clamps existed for a real reason — `radius.chip: 999px` on a tab makes a
+lozenge — but the ceilings were set below where the packs actually live, so the
+clamp that was meant to catch one outlier flattened the whole set.
+
+**Why no test caught it.** `theme_sweep.py` measures contrast, and contrast was
+never the thing that changed; it passed identically either way. The unit tests
+asserted each token was *present and in band*, never that the ten themes
+*differed from each other*. Both were green while the feature did nothing. This
+is finding 10 again — "the server does it is not a feature" — one layer up: the
+tokens are emitted is not a theme.
+
+### Fixed
+- **Clamp ceilings raised to where the packs are** — `--radius-panel` 12→18px,
+  `--radius-row` 6→8px. Panel radius now spans the pack's own 0→18px order.
+- **Density is a continuous map, not three bands.** `space.content` 12–26px maps
+  to 20–26px rows, so a pack that asked for tighter spacing gets it instead of
+  being rounded into the middle band with five others.
+- **The chrome bars derive from `--control-height`** instead of a hardcoded
+  34px in three files. A 28px control in a 34px bar had 3px of air and
+  reproduced the 1.4.2 "squished" complaint exactly; derived, it is 5px at
+  every density. Same rule as the controls, one level up.
+- **`--row-height` now binds on the palette, problems and outline rows.** They
+  set vertical padding, which outweighs `min-height`, so `industrial-day-cyan`
+  showed 20px tree rows and 25.5px palette rows — two densities in one theme.
+  Set the height, not the padding.
+
+### Added
+- **A test that fails on the defect**: the ten themes must yield at least seven
+  distinct geometry signatures, and no more than three may share one. Verified
+  against the shipped 1.7.0 stylesheet, which scores 6 with a group of 5.
+
+### Measured on the rig, not read off the packs
+Painted values across the ten themes, gateway 8.3.8:
+
+- palette radius **0 → 18px**, with four themes casting no shadow at all
+- tree and palette rows **20 → 26px**, both tracking the token exactly
+- control height **22 → 28px** (1.7.0 spanned 2px)
+- contrast unchanged: worst element 5.07, no illegible theme
+
+`validate_v15_tree` fails on this gateway at 1.7.0 and at 1.7.2 alike — it wants
+`Site_Redgum_Sewer`, a water-suite project not installed here. Pre-existing
+fixture gap, not a regression.
+
+## [1.7.1] — 2026-09-03
+
+Superseded within the hour by 1.7.2 — the clamp fix landed, then the row-padding
+half of the same defect was found by measuring it.
+
 ## [1.7.0] — 2026-09-03
 
 feat: named queries — the SQL and the Python that calls it, in one workspace.

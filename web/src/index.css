@@ -117,14 +117,18 @@
    * touched the border (Nigel, 02/09/2026: "squished... bleeding into the
    * edges"). Set the height, not the padding.
    *
-   * A theme moves it with --row-height, and the band is deliberately narrow
-   * (22-26px): the toolbar and the config strip are both 34px, so a control
-   * above 26px stops having air around it and the 1.4.2 complaint comes back.
+   * A theme moves it with --control-height, 22-28px across the ten packs.
+   *
+   * The BARS follow it rather than being fixed, which is the same rule one
+   * level up. They were all hardcoded 34px until 1.7.1, so a roomy theme's
+   * 28px control had 3px of air instead of 5 and reproduced the 1.4.2
+   * "squished" complaint exactly. Derived, the air is 5px at every density.
    */
   --control-height: 24px;
-  --header-height: 35px;
-  --tab-height: 35px;
-  --panel-tab-height: 35px;
+  --bar-height: calc(var(--control-height) + 10px);
+  --header-height: calc(var(--control-height) + 11px);
+  --tab-height: calc(var(--control-height) + 11px);
+  --panel-tab-height: calc(var(--control-height) + 11px);
   --status-height: 22px;
 
   --space-1: 4px;

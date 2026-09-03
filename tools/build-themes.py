@@ -326,7 +326,14 @@ def softness(tokens: dict) -> float:
 #
 # Heights, never padding: a <select> and a <button> with the same padding come
 # out different heights, which is what "squished" looked like in 1.4.2.
-DENSITY_BANDS = ((14.0, "20px", "22px"), (25.0, "22px", "24px"), (1e9, "24px", "26px"))
+# `space.content` runs 12px (industrial-day) to 26px (newsprint) across the ten
+# packs, and THREE bands collapsed six of them onto one row height. Mapped
+# continuously instead, so a pack that asked for tighter spacing gets it.
+#
+# The floor is 20px, not lower: 13px chrome text in a 18px row clips its
+# descenders, and a row nobody can read is not a denser row.
+DENSITY_MIN, DENSITY_MAX = 12.0, 26.0
+ROW_MIN, ROW_MAX = 20.0, 26.0
 
 
 def density(tokens: dict) -> tuple[str, str]:
@@ -336,10 +343,12 @@ def density(tokens: dict) -> tuple[str, str]:
         content = float(raw[:-2]) if raw.endswith("px") else 24.0
     except ValueError:
         content = 24.0
-    for limit, row, control in DENSITY_BANDS:
-        if content <= limit:
-            return row, control
-    return "22px", "24px"
+    content = max(DENSITY_MIN, min(DENSITY_MAX, content))
+    span = (content - DENSITY_MIN) / (DENSITY_MAX - DENSITY_MIN)
+    row = round(ROW_MIN + span * (ROW_MAX - ROW_MIN))
+    # The control is always two above the row: a button flush with a list row
+    # has nowhere to show a focus ring.
+    return f"{row:g}px", f"{row + 2:g}px"
 
 
 def clamp_contrast(rgb, page, low: float, high: float, dark: bool):
@@ -714,11 +723,19 @@ def block(pack: dict, report: list[str]) -> str:
         # Controls: buttons, inputs, selects, tabs.
         "--radius": _px(tokens.get("radius.control"), 0, 8, "3px"),
         # Framed and floating surfaces: dialogs, the palette, the layout menu.
-        "--radius-panel": _px(tokens.get("radius.card"), 0, 12, "3px"),
+        # Ceiling 18px — the roundest pack — not 12px, which flattened the five
+        # packs above it onto one value. This is the token the eye reads first,
+        # because the palette is the biggest floating surface in the app.
+        "--radius-panel": _px(tokens.get("radius.card"), 0, 18, "3px"),
         # List rows: the tree, the outline, palette and search results. Kept
-        # tighter than the panel radius — a 12px round on a 22px full-width row
-        # is a lozenge, and the rows are what the eye scans down.
-        "--radius-row": _px(tokens.get("radius.nav"), 0, 6, "0"),
+        # tighter than the panel radius — a full-width row takes the round at
+        # both ends, and the rows are what the eye scans down.
+        #
+        # The ceiling was 6px until 1.7.1 and SEVEN of the ten packs exceeded
+        # it, so seven themes came out with identical rows. Measured in the
+        # browser, not read off the packs: the tokens differed on paper and the
+        # painted values did not (Nigel: "they all look the same as before").
+        "--radius-row": _px(tokens.get("radius.nav"), 0, 8, "0"),
         # The rule under a strip or a head. Only `finance-ledger` doubles it,
         # and a ledger drawn with a heavier rule is exactly what it is for.
         "--rule-width": _px(tokens.get("border.table-header-width"), 1, 2, "1px"),

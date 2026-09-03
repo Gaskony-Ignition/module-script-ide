@@ -4,10 +4,11 @@
   flex: 0 0 auto;
   flex-wrap: wrap;
   gap: var(--space-3);
-  /* 34px, matching the toolbar, so a 24px control has air around it. The
+  /* Matches the toolbar via --bar-height, so a control has air around it at
+     every theme density. The
      min-height rather than a fixed one: the docs variant of this strip is a
      paragraph and has to be allowed to grow. */
-  min-height: 34px;
+  min-height: var(--bar-height);
   padding: var(--space-1) var(--space-3);
   background: var(--bg-secondary);
   border-bottom: var(--rule-width) solid var(--border-light);

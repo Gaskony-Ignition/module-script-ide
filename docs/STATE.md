@@ -2,15 +2,34 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.7.0 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
+**Version 1.7.2 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
 `deploy_gate.py` PASS (9 routes mounted) and every suite green: `p1_p2` 8/8,
 `lsp` 10/10, `v11` 12/12, `v13` 22/22, `v14` 18/18, `v15_term` 6/6,
-`v15_exec` 20/20, `v15_tree` 15/15, `v16_nav` 25/25, theme sweep no illegible
-themes (worst element 5.07). Java 338 tests, Vitest 446.**
+`v15_exec` 20/20, `v16_nav` 25/25, theme sweep no illegible themes (worst
+element 5.07). Java 338 tests, Vitest 447.**
+
+**Running the live suites needs a venv with playwright**, which is not on the
+system python and was absent on 03/09/2026:
+`python3 -m venv .venv-test && .venv-test/bin/pip install playwright &&
+.venv-test/bin/playwright install chromium` (1.62+; older cannot install a
+browser on Ubuntu 26.04). Then
+`WD_ALLOW_LOCAL_CONFIG=1 .venv-test/bin/python3 scripts/testing/<suite>.py` —
+`gateway_session` refuses to guess a gateway without either that flag or
+`SI_GATEWAY_CONFIG`.
+
+**`v15_tree` does not pass on this gateway and did not at 1.7.0 either** — it
+wants `Site_Redgum_Sewer`, a water-suite project not installed here. A fixture
+gap, not a regression; it needs the `skip()` treatment `validate_v14.py` got.
 
 **If this is a fresh chat: the work queue is in "What is next", below the
 status table.** Batches A–F are done and deployed. The one real gap is that
 **batch E has no live suite** — see the top of "What is next".
+
+**1.7.2 fixed the themes pass, which shipped in 1.7.0 doing nothing visible.**
+Every layer worked except the numbers: the clamps in `build-themes.py` were set
+below where the packs actually live, so seven of the ten themes came out
+byte-identical. See finding 17 — it is the sharpest example in this module of a
+green test suite measuring the wrong axis.
 
 1.1.0–1.5.0 are post-1.0 feature work driven by Nigel's review, not new phases.
 1.3.0 added a **Gateway terminal**, moved the console into a **bottom panel**, and
@@ -616,6 +635,32 @@ gutter marker.
     it from the attributes. So a description written by the platform does not come
     back through the platform. Round-trip anything you believe about a resource
     THROUGH BOTH HALVES before trusting it.
+
+17. **A generated design token is not a visible design.** The 1.7.0 themes pass
+    emitted per-theme geometry, mounted the right selectors, reached the browser
+    and was consumed by the components — and Nigel's first words on seeing it
+    were *"they all look the same as before."* He was right. `_px`'s clamps sat
+    below where the packs actually live (`--radius-panel` ceiling 12px against
+    packs asking 16–18; `--radius-row` 6px against seven asking 8), so **seven of
+    ten themes were byte-identical**.
+
+    Two green suites certified it. `theme_sweep.py` measures contrast, which was
+    never what changed — it passed identically before and after. The unit tests
+    asserted each token was present and in band, never that the ten themes
+    **differed from one another**. The axis nobody measured is the axis that
+    broke.
+
+    Three rules out of it, all cheap:
+    - When the deliverable is "these look different", the test asserts they
+      differ. Presence and range are not difference.
+    - Verify a clamp against the data it clamps. A ceiling chosen to catch one
+      outlier (`radius.chip: 999px`) flattened the whole distribution.
+    - Measure the painted value, not the emitted one. The tokens differed on
+      paper at 1.7.0; `getComputedStyle` on the running gateway is what showed
+      that five themes resolved to the same 12px.
+
+    Same shape as finding 10, one layer up: *the tokens are emitted* is not a
+    theme, exactly as *the server does it* was not a feature.
 
 ## Known gaps and deliberate omissions
 

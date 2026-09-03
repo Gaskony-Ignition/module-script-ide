@@ -13,6 +13,12 @@ build/
 out/
 bin/
 
+# Python venv for the live suites (playwright). Self-ignoring via the .gitignore
+# venv writes inside itself, but named here too — that is an implementation
+# detail of the venv module, not a guarantee.
+.venv-test/
+.venv/
+
 # Frontend
 node_modules/
 web/build/

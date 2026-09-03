@@ -142,15 +142,47 @@ describe('themes.generated.css', () => {
   });
 
   it('keeps --control-height a real height inside the band the chrome allows', () => {
-    // "Set the height, not the padding" (Nigel, 02/09/2026). The toolbar and
-    // the config strip are both 34px, so a control taller than 26px stops
-    // having air around it and the 1.4.2 "squished" complaint comes back; below
-    // 22px a <select> clips its own text.
+    // "Set the height, not the padding" (Nigel, 02/09/2026). Below 20px a
+    // <select> clips its own text and 13px row text loses its descenders.
+    //
+    // The ceiling was 26px while the toolbar and config strip were hardcoded
+    // 34px. They derive from --control-height as of 1.7.1, so the air around a
+    // control is 5px at every density and the band can be as wide as the packs
+    // actually are.
     for (const [id, tokens] of blocks()) {
       for (const name of ['--control-height', '--row-height']) {
         const value = tokens.get(name) ?? '';
-        expect(`${id} ${name} ${value}`).toMatch(/ (2[0-6])px$/);
+        expect(`${id} ${name} ${value}`).toMatch(/ (2[0-8])px$/);
       }
+    }
+  });
+
+  it('leaves the ten themes GEOMETRICALLY distinct, not just recoloured', () => {
+    // The defect this guards (Nigel, 03/09/2026: "still all look the same"):
+    // 1.7.0 shipped per-theme geometry that every unit test passed and nobody
+    // could see. The tokens were emitted, the selectors were right, the CSS
+    // reached the browser — and _px clamped --radius-panel at 12px when five
+    // packs ask for 16-18, and --radius-row at 6px when seven ask for 8. Seven
+    // of the ten themes came out with byte-identical geometry.
+    //
+    // Colour was measured (theme_sweep.py) and geometry never was, so the
+    // contrast sweep passed either way. This asserts the thing the eye reads.
+    const signatures = new Map<string, string[]>();
+    for (const [id, tokens] of blocks()) {
+      const key = ['--radius', '--radius-panel', '--radius-row', '--row-height']
+        .map((name) => tokens.get(name) ?? '?')
+        .join('/');
+      signatures.set(key, [...(signatures.get(key) ?? []), id]);
+    }
+    // Six or fewer means the clamps have flattened the packs again.
+    expect(signatures.size).toBeGreaterThanOrEqual(7);
+    // Three is the real ceiling: nord-dark, nord-light and leather-parchment
+    // genuinely share a pack geometry and differ by palette alone. Four means
+    // a band is squeezing packs together.
+    for (const [key, ids] of signatures) {
+      expect(`${ids.join(',')} share ${key}`).toMatch(
+        new RegExp(`^[^,]+(,[^,]+){0,2} share `)
+      );
     }
   });
 

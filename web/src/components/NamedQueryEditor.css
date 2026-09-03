@@ -2,7 +2,7 @@
  * The named-query editor: the tab row, and the panel under it.
  *
  * Every colour, font and space is a token from index.css. The tab row is built
- * to the same 34px rhythm as `.config-strip`, which is what it replaces for a
+ * to the same --bar-height rhythm as `.config-strip`, which it replaces for a
  * query document, so the code below it starts at the same place whichever kind
  * of document is open.
  */
@@ -21,7 +21,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-3);
-  min-height: 34px;
+  min-height: var(--bar-height);
   padding: var(--space-1) var(--space-3);
 }
 

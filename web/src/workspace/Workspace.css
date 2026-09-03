@@ -16,13 +16,14 @@
  * the border. Duplicated declarations in one stylesheet are not harmless: the
  * reader cannot tell which is in force without opening the browser.
  *
- * 34px, so a 24px control has 5px of air above and below it.
+ * --bar-height, which is --control-height + 10, so a control has 5px of air
+ * above and below it whatever density the theme asks for.
  */
 .workspace-toolbar {
   display: flex;
   align-items: center;
-  flex: 0 0 34px;
-  height: 34px;
+  flex: 0 0 var(--bar-height);
+  height: var(--bar-height);
   gap: var(--space-3);
   padding: 0 var(--space-3);
   background: var(--bg-secondary);
