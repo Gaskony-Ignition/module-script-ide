@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.5.4 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.7.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -58,6 +58,13 @@ actually has installed. No static stub file can know that.*
 - **Outline** the open script — every class and function, click to jump — parsed
   by the gateway rather than by a client-side grammar, so Python 2 code outlines
   correctly. Find and replace are in the editor on Ctrl+F.
+- **Navigate the project.** Go to definition on F12 or Ctrl-click, across files.
+  Quick open on Ctrl+P, with `#` to jump to a function or class anywhere in the
+  project. A Search view that reads every Project Library script on the gateway,
+  not just the open ones. Shift+F12 lists every place a name is written — matched
+  by name rather than by type, which the results say plainly. A Problems panel
+  collecting the errors in every open script, because a squiggle only helps in
+  the file you are looking at. Folding, and go-to-line on Ctrl+G.
 - **Web Dev** endpoints as a first-class view: all eight HTTP methods, per-method
   settings, create and delete.
 - **A terminal on the gateway** — a real shell on a real pseudo-terminal, with a
@@ -69,8 +76,8 @@ actually has installed. No static stub file can know that.*
   operating-system user. Closing the tab ends the shell and the jobs it
   started.
 - **A VS Code-shaped shell**: activity bar, resizable side bar and outline, a
-  bottom panel holding the console and the terminal, and the four layout glyphs
-  in the title bar.
+  bottom panel holding the console, the problems list and the terminal, and the
+  four layout glyphs in the title bar.
 
 Breakpoint debugging is deliberately **not** included: the only serious Ignition
 debugger requires a running Designer, which defeats the point of a browser IDE.

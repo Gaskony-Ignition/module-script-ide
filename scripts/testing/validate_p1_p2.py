@@ -134,9 +134,15 @@ def main():
             """async ([path, spa, project, csrf]) => {
                  const url = (location.protocol === 'https:' ? 'wss://' : 'ws://')
                              + location.host + path;
+                 // stdout is accumulated from the `output` frames, which since
+                 // 1.5.0 are the ONLY place it appears - `finished` carries empty
+                 // stdout by contract. Gathering the live stream also makes this a
+                 // stronger isolation test than reading a final buffer: a line
+                 // that leaked between the two runs leaks as it is produced.
                  function runOne(tag) {
                    return new Promise((resolve) => {
                      const ws = new WebSocket(url);
+                     let out = '';
                      const t = setTimeout(() => { try{ws.close();}catch(e){} 
                        resolve({tag, error:'timeout'}); }, 60000);
                      ws.onopen = () => ws.send(JSON.stringify({ch:'exec', msg:{
@@ -147,9 +153,13 @@ def main():
                        if (f.ch !== 'exec') return;
                        if (f.msg && f.msg.error) { clearTimeout(t); ws.close();
                          return resolve({tag, error: f.msg.error}); }
+                       if (f.msg && f.msg.event === 'output') {
+                         if (f.msg.stream === 'stdout') out += f.msg.text || '';
+                         return;
+                       }
                        if (f.msg && f.msg.event === 'finished') {
                          clearTimeout(t); ws.close();
-                         return resolve({tag, stdout: f.msg.stdout || ''});
+                         return resolve({tag, stdout: out});
                        }
                      };
                    });
@@ -208,21 +218,36 @@ def main():
 
 
 def run_script(page, project, session, source):
-    """Run one script over the exec socket and return the finished frame."""
+    """Run one script over the exec socket; return the finished frame plus stdout.
+
+    stdout is GATHERED FROM THE `output` FRAMES, never read off `finished`.
+    Since 1.5.0 `finished` carries empty stdout and stderr by contract - every
+    line has already gone out as an `output` frame, and a client that rendered
+    both would print the whole run twice. This suite was still reading
+    `finished.stdout` and so reported 0 lines for every run from 1.5.0 to 1.6.0:
+    the checks looked like an execution failure and were a stale reader.
+    `deploy_gate.py` was fixed at the time and this file was not.
+    """
     return page.evaluate(
         """async ([path, project, csrf, source]) => {
              const url = (location.protocol === 'https:' ? 'wss://' : 'ws://')
                          + location.host + path;
              return await new Promise((resolve) => {
                const ws = new WebSocket(url);
+               let out = '';
                const t = setTimeout(() => resolve({error:{type:'timeout'}}), 40000);
                ws.onopen = () => ws.send(JSON.stringify({ch:'exec', msg:{
                  action:'run', project: project, csrfToken: csrf, source: source}}));
                ws.onmessage = (ev) => {
                  const f = JSON.parse(ev.data);
                  if (f.ch !== 'exec') return;
+                 if (f.msg && f.msg.event === 'output') {
+                   if (f.msg.stream === 'stdout') out += f.msg.text || '';
+                   return;
+                 }
                  if (f.msg && f.msg.event === 'finished') {
-                   clearTimeout(t); ws.close(); resolve(f.msg);
+                   clearTimeout(t); ws.close();
+                   resolve(Object.assign({}, f.msg, {stdout: out}));
                  } else if (f.msg && f.msg.error) {
                    clearTimeout(t); ws.close(); resolve({error:{type:f.msg.error}});
                  }

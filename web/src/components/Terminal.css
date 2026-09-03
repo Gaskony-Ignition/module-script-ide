@@ -42,7 +42,7 @@
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: var(--rule-width) solid var(--border-light);
 }
 
 .terminal-notice.is-error {

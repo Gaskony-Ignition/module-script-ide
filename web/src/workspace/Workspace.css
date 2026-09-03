@@ -26,7 +26,7 @@
   gap: var(--space-3);
   padding: 0 var(--space-3);
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: var(--rule-width) solid var(--border-light);
 }
 
 .workspace-project {
@@ -99,7 +99,7 @@
      of the rail — which looks exactly like a footer that was never rendered. */
   min-height: 0;
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border-light);
+  border-right: var(--rule-width) solid var(--border-light);
 }
 
 .workspace-editor {
@@ -219,7 +219,7 @@
   min-width: 0;
   flex: 0 1 auto;
   padding-left: var(--space-2);
-  border-left: 2px solid var(--warning);
+  border-left: var(--marker-width) solid var(--warning);
   color: var(--text-secondary);
 }
 

@@ -25,6 +25,21 @@ import {
   type ScriptTree,
   type ScriptTypeId,
 } from '../api/scripts';
+import {
+  createNamedQuery,
+  deleteNamedQuery,
+  fetchNamedQueries,
+  isNamedQueryResourcePath,
+  stripResourcePrefix,
+  readNamedQuerySettings,
+  readNamedQuerySql,
+  renameNamedQuery,
+  saveNamedQuerySettings,
+  saveNamedQuerySql,
+  type NamedQueryEntry,
+  type NamedQueryList,
+  type NamedQuerySettings,
+} from '../api/namedQueries';
 import { lspUri, sharedLspClient } from '../api/lspClient';
 import { sharedTransport } from '../api/lspTransport';
 import type { SessionInfo } from '../api/session';
@@ -40,13 +55,36 @@ import Resizer from '../components/Resizer';
 import TerminalView from '../components/Terminal';
 import WebDevConfigDialog from '../components/WebDevConfigDialog';
 import WebDevTree from '../components/WebDevTree';
+import NamedQueryDialog from '../components/NamedQueryDialog';
+import NamedQueryEditor, { showsBuffer, type QueryTab } from '../components/NamedQueryEditor';
+import NamedQueryTree from '../components/NamedQueryTree';
 import NewScriptDialog from '../components/NewScriptDialog';
 import OutlinePanel from '../components/OutlinePanel';
+import ProblemsPanel from '../components/ProblemsPanel';
+import QuickOpen from '../components/QuickOpen';
+import SearchPanel from '../components/SearchPanel';
 import ScriptConsole from '../components/ScriptConsole';
 import type { ActiveSource } from '../components/ScriptConsole';
 import StatusFooter from '../components/StatusFooter';
 import TabStrip from '../components/TabStrip';
-import { docUri, isDirty, isLockedByInheritance, newDoc, newUnsavedDoc, type OpenDoc } from './documents';
+import {
+  FIND_REFERENCES_EVENT,
+  OPEN_LOCATION_EVENT,
+  type FindReferencesDetail,
+  type OpenLocationDetail,
+} from '../components/lspExtension';
+import {
+  QUERY_DATA_KEY,
+  docUri,
+  isDirty,
+  isLockedByInheritance,
+  newDoc,
+  newQueryDoc,
+  newUnsavedDoc,
+  settingsEqual,
+  type OpenDoc,
+} from './documents';
+import { entryForLocation, parseLocationUri } from './locations';
 import './Workspace.css';
 
 export interface WorkspaceProps {
@@ -103,11 +141,61 @@ function storedHeight(key: string, fallback: number): number {
   return storedWidth(key, fallback);
 }
 
+/**
+ * How tall the bottom panel opens when nobody has resized it.
+ *
+ * A fixed 260px was measured CRAMPED on a 1000px viewport in the 02/09/2026
+ * review, and it is worse than the number suggests: the panel is what is left
+ * after the toolbar (34px), the tab strip, the settings row (69px on an
+ * inherited script) and the panel's own 30px head, so a console showed about
+ * eight lines and a terminal eleven rows. A share of the viewport keeps roughly
+ * the same amount of code and the same amount of output visible whatever the
+ * window is, which is what the constant was trying to approximate for one
+ * screen size.
+ *
+ * Clamped at both ends: a laptop must still show usable code above the panel,
+ * and a tall monitor should not hand a third of itself to a console nobody has
+ * asked to grow. 34% of 1000px is 340px, up from 260.
+ */
+export function defaultPanelHeight(viewportHeight: number): number {
+  return Math.round(Math.min(460, Math.max(240, viewportHeight * 0.34)));
+}
+
 export default function Workspace({ session }: WorkspaceProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [project, setProject] = useState<string>('');
   const [tree, setTree] = useState<ScriptTree | null>(null);
   const [treeError, setTreeError] = useState<string>('');
+  /**
+   * The project's named queries.
+   *
+   * A SECOND listing rather than a filter over the first: they are a different
+   * resource type behind their own routes, and the script listing does not
+   * carry them. Fetched with the tree so the Named Queries view and quick open
+   * both have them before anyone asks.
+   */
+  const [queries, setQueries] = useState<NamedQueryList | null>(null);
+  const [queriesError, setQueriesError] = useState<string>('');
+  /**
+   * Which of the three query tabs is showing.
+   *
+   * One value for the workspace rather than one per document: switching tabs is
+   * a mode you are in, and a per-document memory means the same click lands in a
+   * different place depending on which query you opened last.
+   */
+  const [queryTab, setQueryTab] = useState<QueryTab>('authoring');
+  const [creatingQuery, setCreatingQuery] = useState(false);
+  const [renamingQuery, setRenamingQuery] = useState<NamedQueryEntry | null>(null);
+  /**
+   * A folder being moved: its path, and the folder RESOURCE if the gateway has
+   * one. Most folders are implied by the paths under them and are not resources
+   * at all, which is why the rename carries no precondition for those.
+   */
+  const [renamingFolder, setRenamingFolder] =
+    useState<{ folder: string; entry?: NamedQueryEntry } | null>(null);
+  const [queryDialogBusy, setQueryDialogBusy] = useState(false);
+  const [queryDialogError, setQueryDialogError] = useState<string | null>(null);
+  const [pendingQueryDelete, setPendingQueryDelete] = useState<NamedQueryEntry | null>(null);
   const [docs, setDocs] = useState<OpenDoc[]>([]);
   const [activeUri, setActiveUri] = useState<string | null>(null);
   const [attrs, setAttrs] = useState<Record<string, AttrState>>({});
@@ -128,7 +216,9 @@ export default function Workspace({ session }: WorkspaceProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelId>('console');
   const [panelMaximised, setPanelMaximised] = useState(false);
-  const [panelHeight, setPanelHeight] = useState(() => storedHeight('panel', 260));
+  const [panelHeight, setPanelHeight] = useState(
+    () => storedHeight('panel', defaultPanelHeight(window.innerHeight))
+  );
   /**
    * Terminals are mounted lazily and then never unmounted.
    *
@@ -223,7 +313,9 @@ export default function Workspace({ session }: WorkspaceProps) {
    * wrong library.
    */
   const activeSource = useMemo<ActiveSource | undefined>(() => {
-    if (!activeDoc || activeDoc.project !== project) {
+    // A named query is not a script and "Run file" would hand SQL to the Jython
+    // interpreter. Testing a query is its own tab, against the database.
+    if (!activeDoc || activeDoc.kind !== 'script' || activeDoc.project !== project) {
       return undefined;
     }
     const uri = activeDoc.uri;
@@ -272,6 +364,35 @@ export default function Workspace({ session }: WorkspaceProps) {
     };
   }, [project]);
 
+  // Its own effect, and its own error: a gateway whose named-query routes are
+  // missing (an older build of this module's server half) must still give a
+  // working script IDE rather than an empty one.
+  useEffect(() => {
+    if (!project) return;
+    let cancelled = false;
+    setQueries(null);
+    setQueriesError('');
+    fetchNamedQueries(project)
+      .then((next) => {
+        if (!cancelled) setQueries(next);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setQueriesError(describe(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project]);
+
+  /** Re-read the query listing after a create, rename or delete. */
+  const refreshQueries = useCallback(async () => {
+    try {
+      setQueries(await fetchNamedQueries(project));
+    } catch (e: unknown) {
+      setQueriesError(describe(e));
+    }
+  }, [project]);
+
   const openScript = useCallback(
     async (entry: ScriptEntry) => {
       const uri = docUri(project, entry.path, entry.scriptKey);
@@ -307,6 +428,57 @@ export default function Workspace({ session }: WorkspaceProps) {
     [project]
   );
 
+  /**
+   * Open a named query in a tab.
+   *
+   * TWO reads, and both are needed before the document exists: the SQL is the
+   * buffer and the settings are the other half of the same resource, saved
+   * against the same signature. Unlike a script — whose attributes can fail
+   * without costing the user the body — a query with no settings has no type,
+   * no parameters and nothing for the Testing tab to ask for, so a failed
+   * settings read leaves the tab unopened and says why.
+   */
+  const openQuery = useCallback(
+    async (entry: NamedQueryEntry) => {
+      const uri = docUri(project, entry.path, QUERY_DATA_KEY);
+      if (docsRef.current.some((d) => d.uri === uri)) {
+        setActiveUri(uri);
+        return;
+      }
+      try {
+        const [sql, settings] = await Promise.all([
+          readNamedQuerySql(project, entry.path),
+          readNamedQuerySettings(project, entry.path),
+        ]);
+        setDocs((current) =>
+          current.some((d) => d.uri === uri)
+            ? current
+            : [
+                ...current,
+                newQueryDoc({
+                  entry,
+                  project,
+                  sql: sql.sql,
+                  // The CONTENT read's ETag: both halves carry the same resource
+                  // signature, and the SQL read is the one the buffer came from.
+                  // The settings route calls the same value `signature`.
+                  etag: sql.etag || settings.signature,
+                  settings: settings.settings,
+                  databases: settings.databases,
+                  editableSettings: settings.editable,
+                  legacy: settings.legacy,
+                }),
+              ]
+        );
+        setActiveUri(uri);
+        setNotice(null);
+      } catch (e: unknown) {
+        setNotice({ kind: 'error', text: `Could not open ${entry.path}: ${describe(e)}` });
+      }
+    },
+    [project]
+  );
+
   const handleChange = useCallback((uri: string, text: string) => {
     setDocs((current) => current.map((d) => (d.uri === uri ? { ...d, text } : d)));
     setDocRevision((n) => n + 1);
@@ -332,8 +504,21 @@ export default function Workspace({ session }: WorkspaceProps) {
     });
   }, []);
 
-  /** Apply a successful write: base text and signature move together. */
-  const commitSaved = useCallback((uri: string, saved: string, signature: string | undefined) => {
+  /**
+   * Apply a successful write: base text, base settings and signature move
+   * together.
+   *
+   * `savedSettings` is what was actually POSTed, not what the editor holds now:
+   * the user can keep editing during the round trip, and `baseSettings` must
+   * become the version the gateway agreed to or the document reads as clean
+   * over an unsaved change.
+   */
+  const commitSaved = useCallback((
+    uri: string,
+    saved: string,
+    signature: string | undefined,
+    savedSettings?: NamedQuerySettings
+  ) => {
     setDocs((current) =>
       current.map((d) =>
         d.uri === uri
@@ -343,6 +528,11 @@ export default function Workspace({ session }: WorkspaceProps) {
               // A save that returns no signature leaves the old one in place;
               // the next write then 409s rather than overwriting blindly.
               etag: signature ?? d.etag,
+              baseSettings: savedSettings ?? d.baseSettings,
+              // A settings write goes through `toResource`, which stamps the
+              // resource version 2 — so a query that WAS legacy is not any
+              // more, and the editor's notice must go with it.
+              legacy: savedSettings ? false : d.legacy,
               // A first save against an inherited script created a local
               // override, and a first save of a 'new' draft created the
               // resource itself — the tree is stale for this entry either way.
@@ -353,10 +543,27 @@ export default function Workspace({ session }: WorkspaceProps) {
     );
   }, []);
 
+  /**
+   * The gateway's current copy of a document, whichever kind it is.
+   *
+   * One helper because three call sites need it — the conflict dialog, the
+   * keep-mine re-read and the post-conflict refresh — and each of them getting
+   * the branch right independently is three chances to read a query through the
+   * script route and report a 404 as "somebody deleted your file".
+   */
+  const readCurrent = useCallback(async (doc: OpenDoc): Promise<{ text: string; etag: string }> => {
+    if (doc.kind === 'named-query') {
+      const current = await readNamedQuerySql(doc.project, doc.path);
+      return { text: current.sql, etag: current.etag };
+    }
+    const current = await readScriptContent(doc.project, doc.path, doc.scriptKey);
+    return { text: current.text, etag: current.etag };
+  }, []);
+
   /** Read the gateway's current copy and raise the conflict dialog against it. */
   const raiseConflict = useCallback(async (doc: OpenDoc) => {
     try {
-      const current = await readScriptContent(doc.project, doc.path, doc.scriptKey);
+      const current = await readCurrent(doc);
       setConflict({
         uri: doc.uri,
         label: doc.label,
@@ -370,7 +577,59 @@ export default function Workspace({ session }: WorkspaceProps) {
         text: `This script changed on the gateway, and re-reading it also failed: ${describe(e)}`,
       });
     }
-  }, []);
+  }, [readCurrent]);
+
+  /**
+   * Write a named query: SQL first, then settings against the signature that
+   * write returned.
+   *
+   * ONE resource, one signature, and therefore one order — the settings write
+   * must carry the signature the SQL write produced or it 409s against a
+   * version it made itself. Each half is skipped when it is unchanged: posting
+   * settings nobody touched is a write to a live gateway (and a git diff) for
+   * nothing.
+   *
+   * Ctrl+S and the button both come through here, so both halves save together
+   * whichever way the user asks.
+   */
+  const saveQueryDoc = useCallback(
+    async (doc: OpenDoc, source: string, baseSignature?: string) => {
+      let signature: string | undefined = baseSignature ?? doc.etag;
+      if (doc.text !== doc.baseText) {
+        const written = await saveNamedQuerySql({
+          project: doc.project,
+          path: doc.path,
+          sql: source,
+          baseSignature: signature ?? '',
+          csrfToken: session.csrfToken,
+        });
+        signature = written.signature ?? signature;
+      }
+      let savedSettings: NamedQuerySettings | undefined;
+      // A LEGACY resource is written even when nothing was edited: the settings
+      // write is what puts it back through `toResource`, which stamps version 2
+      // and makes the query runnable again. Skipping it because the form was
+      // untouched would leave the repair undone with a save reported as done.
+      if (doc.settings && (doc.legacy || !settingsEqual(doc.settings, doc.baseSettings))) {
+        const written = await saveNamedQuerySettings({
+          project: doc.project,
+          path: doc.path,
+          settings: doc.settings,
+          baseSignature: signature ?? '',
+          csrfToken: session.csrfToken,
+        });
+        signature = written.signature ?? signature;
+        savedSettings = doc.settings;
+      }
+      commitSaved(doc.uri, source, signature, savedSettings);
+      setConflict(null);
+      setNotice({ kind: 'info', text: `Saved ${doc.label}.` });
+      // A first save against an inherited query created the local override, so
+      // the listing's origin and signature for this row are both stale.
+      await refreshQueries();
+    },
+    [commitSaved, refreshQueries, session.csrfToken]
+  );
 
   const saveDoc = useCallback(
     async (uri: string, baseSignature?: string) => {
@@ -389,6 +648,10 @@ export default function Workspace({ session }: WorkspaceProps) {
       // doc.origin off 'new'.
       const wasNew = doc.origin === 'new';
       try {
+        if (doc.kind === 'named-query') {
+          await saveQueryDoc(doc, source, baseSignature);
+          return;
+        }
         const result = await saveScriptContent({
           project: doc.project,
           path: doc.path,
@@ -431,7 +694,7 @@ export default function Workspace({ session }: WorkspaceProps) {
         setSaving(false);
       }
     },
-    [commitSaved, lsp, project, raiseConflict, readOnly, session.csrfToken]
+    [commitSaved, lsp, project, raiseConflict, readOnly, saveQueryDoc, session.csrfToken]
   );
 
   const resolveReloadTheirs = useCallback(() => {
@@ -459,6 +722,11 @@ export default function Workspace({ session }: WorkspaceProps) {
     void fetchScriptTree(project).then(setTree).catch(() => {});
   }, [conflict, project]);
 
+  /** Edit one query's settings. Same derivation as the buffer: no dirty flag. */
+  const changeQuerySettings = useCallback((uri: string, settings: NamedQuerySettings) => {
+    setDocs((current) => current.map((d) => (d.uri === uri ? { ...d, settings } : d)));
+  }, []);
+
   const resolveKeepMine = useCallback(async () => {
     if (!conflict) return;
     const doc = docsRef.current.find((d) => d.uri === conflict.uri);
@@ -467,7 +735,7 @@ export default function Workspace({ session }: WorkspaceProps) {
     // the gateway may have been written again while the user read the diff, and
     // saving against a stale signature just 409s a second time.
     try {
-      const current = await readScriptContent(doc.project, doc.path, doc.scriptKey);
+      const current = await readCurrent(doc);
       if (current.text !== conflict.theirs) {
         setConflict({ ...conflict, theirs: current.text, theirsEtag: current.etag });
         setNotice({
@@ -480,7 +748,7 @@ export default function Workspace({ session }: WorkspaceProps) {
     } catch (e: unknown) {
       setNotice({ kind: 'error', text: `Could not overwrite: ${describe(e)}` });
     }
-  }, [conflict, saveDoc]);
+  }, [conflict, readCurrent, saveDoc]);
 
   const changeAttribute = useCallback((uri: string, name: string, value: AttributeValue) => {
     setAttrs((current) => {
@@ -544,6 +812,17 @@ export default function Workspace({ session }: WorkspaceProps) {
   );
 
   const activeAttrs = activeUri ? attrs[activeUri] : undefined;
+  /** The active tab when it holds a named query; null for a script or none. */
+  const activeQueryDoc = activeDoc?.kind === 'named-query' ? activeDoc : null;
+  /**
+   * Documents the language server actually holds.
+   *
+   * The Problems panel and the outline are both Python-only: a query's buffer is
+   * SQL, the server is a Jython server, and asking it about either would answer
+   * with a syntax error per line. Filtering here rather than inside each panel
+   * keeps the reason in one place.
+   */
+  const scriptDocs = useMemo(() => docs.filter((d) => d.kind === 'script'), [docs]);
   // The tree entry behind the open tab, for its resource type. Looked up rather
   // than stored on the doc: the tree is re-read after every create and delete,
   // and a copy on the doc would go stale the first time that happened.
@@ -590,6 +869,16 @@ export default function Workspace({ session }: WorkspaceProps) {
     [tree, activeDoc]
   );
   /**
+   * Which project the open document actually comes from.
+   *
+   * Looked up in whichever listing owns it: a query is not in `tree.scripts`,
+   * and reading the owner from there would name "a parent project" for a
+   * resource whose parent this workspace knows perfectly well.
+   */
+  const activeOwner = activeDoc?.kind === 'named-query'
+    ? queries?.queries.find((entry) => entry.path === activeDoc.path)?.owner
+    : activeEntry?.owner;
+  /**
    * The inheritance state, as one line for the settings row.
    *
    * The Designer says this with a `(Read-Only)` suffix on the editor header and
@@ -600,7 +889,7 @@ export default function Workspace({ session }: WorkspaceProps) {
   const inheritanceNotice = activeDoc && activeLocked ? (
     <span className="inherited-note" role="status">
       <span className="inherited-note-text">
-        Read-only — inherited from <strong>{activeEntry?.owner ?? 'a parent project'}</strong>
+        Read-only — inherited from <strong>{activeOwner ?? 'a parent project'}</strong>
       </span>
       {!readOnly && (
         <button
@@ -618,7 +907,7 @@ export default function Workspace({ session }: WorkspaceProps) {
     // resource that is not there.
     <span className="inherited-note is-override" role="status">
       <span className="inherited-note-text">
-        Overriding <strong>{activeEntry?.owner ?? 'the parent'}</strong>&rsquo;s copy — the local
+        Overriding <strong>{activeOwner ?? 'the parent'}</strong>&rsquo;s copy — the local
         copy is created when you save
       </span>
     </span>
@@ -707,16 +996,316 @@ export default function Workspace({ session }: WorkspaceProps) {
     }
   }, [closeDoc, pendingDelete, project, session.csrfToken]);
 
+  // ---- named queries: create, rename, delete ---------------------------
+
+  const doCreateQuery = useCallback(
+    async (name: string) => {
+      setQueryDialogBusy(true);
+      setQueryDialogError(null);
+      // The name IS the path: these routes take the query's path inside the
+      // project, with no `ignition/named-query/` prefix.
+      const path = name;
+      try {
+        // Created with empty SQL and the SERVER's own measured defaults — type
+        // Query, enabled, maxReturnSize 100, cacheAmount 1 — rather than a
+        // settings body invented here. The Settings tab is where they are then
+        // chosen, and a create that named a type would be this client guessing
+        // at a value the platform already has an answer for.
+        await createNamedQuery({ project, path, csrfToken: session.csrfToken });
+        setCreatingQuery(false);
+        // Re-read rather than splicing the new entry in: the server decides the
+        // signature, and inventing one would give the first save a base it
+        // never agreed to.
+        const refreshed = await fetchNamedQueries(project);
+        setQueries(refreshed);
+        const entry = refreshed.queries.find((candidate) => candidate.path === path);
+        if (entry) {
+          await openQuery(entry);
+        }
+        setNotice({ kind: 'info', text: `Created ${name}.` });
+      } catch (e) {
+        setQueryDialogError(describe(e));
+      } finally {
+        setQueryDialogBusy(false);
+      }
+    },
+    [openQuery, project, session.csrfToken]
+  );
+
+  const doRenameQuery = useCallback(
+    async (name: string) => {
+      const entry = renamingQuery;
+      if (!entry) return;
+      setQueryDialogBusy(true);
+      setQueryDialogError(null);
+      const newPath = name;
+      try {
+        await renameNamedQuery({
+          project,
+          path: entry.path,
+          newPath,
+          // A QUERY carries its precondition: the move destroys the old path,
+          // so a caller who has not read it must not move one that changed
+          // underneath them.
+          baseSignature: entry.signature,
+          csrfToken: session.csrfToken,
+        });
+        setRenamingQuery(null);
+        // Close any tab on the OLD path: the resource behind it no longer
+        // exists, and the next Ctrl+S there would recreate it under the name
+        // the user has just moved away from.
+        docsRef.current
+          .filter((doc) => doc.project === project && doc.path === entry.path)
+          .forEach((doc) => closeDoc(doc.uri));
+        const refreshed = await fetchNamedQueries(project);
+        setQueries(refreshed);
+        const moved = refreshed.queries.find((candidate) => candidate.path === newPath);
+        if (moved) {
+          await openQuery(moved);
+        }
+        setNotice({ kind: 'info', text: `Renamed to ${name}.` });
+      } catch (e) {
+        setQueryDialogError(describe(e));
+      } finally {
+        setQueryDialogBusy(false);
+      }
+    },
+    [closeDoc, openQuery, project, renamingQuery, session.csrfToken]
+  );
+
+  /**
+   * Move a folder, and every query the project owns under it.
+   *
+   * No precondition unless the gateway holds a folder RESOURCE for it: a folder
+   * is usually implied by the paths beneath it, and there is no signature to
+   * assert for something that is not a resource. The server moves the children
+   * with it, so this re-lists rather than trying to track where each one went.
+   */
+  const doRenameFolder = useCallback(
+    async (name: string) => {
+      const target = renamingFolder;
+      if (!target) return;
+      setQueryDialogBusy(true);
+      setQueryDialogError(null);
+      try {
+        await renameNamedQuery({
+          project,
+          path: target.folder,
+          newPath: name,
+          baseSignature: target.entry?.signature,
+          csrfToken: session.csrfToken,
+        });
+        setRenamingFolder(null);
+        // Close every tab under the OLD folder: those resources no longer exist
+        // at those paths, and the next Ctrl+S in one of them would recreate the
+        // query at the path the user has just moved it away from.
+        const prefix = `${target.folder}/`;
+        docsRef.current
+          .filter((doc) => doc.kind === 'named-query'
+            && doc.project === project
+            && doc.path.startsWith(prefix))
+          .forEach((doc) => closeDoc(doc.uri));
+        await refreshQueries();
+        setNotice({ kind: 'info', text: `Moved ${target.folder} to ${name}.` });
+      } catch (e) {
+        setQueryDialogError(describe(e));
+      } finally {
+        setQueryDialogBusy(false);
+      }
+    },
+    [closeDoc, project, refreshQueries, renamingFolder, session.csrfToken]
+  );
+
+  const doDeleteQuery = useCallback(async () => {
+    const entry = pendingQueryDelete;
+    if (!entry) return;
+    setDeleteBusy(true);
+    try {
+      await deleteNamedQuery({
+        project,
+        path: entry.path,
+        baseSignature: entry.signature,
+        csrfToken: session.csrfToken,
+      });
+      setPendingQueryDelete(null);
+      // Close the tab too — an editor left open on a resource that no longer
+      // exists means the next Ctrl+S recreates it, silently undoing the delete.
+      docsRef.current
+        .filter((doc) => doc.project === project && doc.path === entry.path)
+        .forEach((doc) => closeDoc(doc.uri));
+      await refreshQueries();
+      setNotice({ kind: 'info', text: `Deleted ${entry.name}.` });
+    } catch (e) {
+      const message =
+        e instanceof ApiError && e.isConflict
+          ? 'That query changed on the gateway since this list was loaded. '
+            + 'Nothing was deleted — reopen it to see the current version.'
+          : describe(e);
+      setNotice({ kind: 'error', text: message });
+      setPendingQueryDelete(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [closeDoc, pendingQueryDelete, project, refreshQueries, session.csrfToken]);
+
   // ---- navigation ------------------------------------------------------
 
-  /** Move the caret in the active editor to a zero-based line. */
-  const jumpToLine = useCallback((line: number, character: number) => {
-    // The editor owns its CodeMirror views, so the jump is published as a DOM
-    // event on the document rather than plumbed through five components. The
-    // editor listens for it and moves the view that has the matching URI.
+  /**
+   * Move the caret to a zero-based line — in the active editor, or in the
+   * document named by `uri`.
+   *
+   * The editor owns its CodeMirror views, so the jump is published as a DOM
+   * event rather than plumbed through five components. `uri` is the WORKSPACE
+   * document key, and passing one matters for every cross-file jump: the tab is
+   * opened by React state, so the view may not exist yet when this runs. The
+   * editor holds a reveal it cannot apply and applies it when the view appears
+   * (see CodeEditor's pending-reveal effect), which is why nothing here waits or
+   * retries.
+   */
+  const jumpToLine = useCallback((line: number, character: number, uri?: string) => {
     window.dispatchEvent(
-      new CustomEvent('scriptide:reveal', { detail: { line, character } })
+      new CustomEvent('scriptide:reveal', { detail: { line, character, uri } })
     );
+  }, []);
+
+  /**
+   * Open the place a language-server result points at.
+   *
+   * This is the join the server has been waiting for since P4: go-to-definition,
+   * quick-open, search and references all answer with an `ignition://…` URI, and
+   * nothing turned one back into an open tab before 1.6.0.
+   *
+   * Three answers, all of them real:
+   *
+   * - **A script this tree has** — open it and reveal the line.
+   * - **A script it does not** — the AST index covers INHERITED library modules,
+   *   and the definition of a helper can legitimately live in a parent project's
+   *   module that the tree is not listing. Say which module, rather than opening
+   *   the wrong file or doing nothing.
+   * - **Another project entirely** — refuse, and say so. Switching the project
+   *   selector under someone mid-edit is not a navigation.
+   */
+  const openLocation = useCallback(
+    async (uri: string, line: number, character: number) => {
+      const location = parseLocationUri(uri);
+      if (!location) {
+        setNotice({ kind: 'error', text: `Cannot open ${uri} — not a script on this gateway.` });
+        return;
+      }
+      if (location.project !== project) {
+        setNotice({
+          kind: 'info',
+          text: `That result is in project "${location.project}". Switch to it to open the file.`,
+        });
+        return;
+      }
+      // A named query addresses itself with the same `ignition://` scheme and
+      // is resolved against its OWN listing — the script tree does not carry
+      // one, so falling through would report a query as "not in this project's
+      // script list", which is true and useless.
+      //
+      // BOTH path forms are accepted. The routes and the listing use the path
+      // inside the project (`Orders/Totals`); a caller holding a resource-shaped
+      // `ignition/named-query/Orders/Totals` — an older link, an LSP location —
+      // means the same query, and refusing it would be pedantry with a dead
+      // link on the end of it.
+      const queryPath = stripResourcePrefix(location.path);
+      const query = (queries?.queries ?? []).find(
+        (candidate) => !candidate.isFolder && candidate.path === queryPath
+      );
+      if (query) {
+        await openQuery(query);
+        jumpToLine(line, character, docUri(project, query.path, QUERY_DATA_KEY));
+        return;
+      }
+      if (isNamedQueryResourcePath(location.path)) {
+        setNotice({
+          kind: 'info',
+          text: `${queryPath} is not a named query in this project.`,
+        });
+        return;
+      }
+      const entry = entryForLocation(tree?.scripts ?? [], location);
+      if (!entry) {
+        setNotice({
+          kind: 'info',
+          text: `${location.path} is indexed on the gateway but is not in this project's `
+            + 'script list — it is most likely inherited from a parent project. '
+            + 'Open it there to edit it.',
+        });
+        return;
+      }
+      await openScript(entry);
+      jumpToLine(line, character, docUri(project, entry.path, entry.scriptKey));
+    },
+    [jumpToLine, openQuery, openScript, project, queries, tree]
+  );
+
+  /**
+   * A references request, raised from the editor's Shift+F12.
+   *
+   * The nonce is what makes a second Shift+F12 on the same identifier re-run the
+   * search: the name alone compares equal and the panel would ignore it.
+   */
+  const [referencesRequest, setReferencesRequest] =
+    useState<{ name: string; nonce: number } | null>(null);
+
+  /** Ctrl+P / Ctrl+T. Null when closed; the string is the palette's initial query. */
+  const [quickOpen, setQuickOpen] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onOpenLocationEvent(event: Event) {
+      const detail = (event as CustomEvent<OpenLocationDetail>).detail;
+      if (detail) void openLocation(detail.uri, detail.line, detail.character);
+    }
+    function onFindReferences(event: Event) {
+      const detail = (event as CustomEvent<FindReferencesDetail>).detail;
+      if (!detail?.name) return;
+      // Show the results before they arrive: the panel renders its own busy
+      // state, and a keystroke that appears to do nothing for a second reads as
+      // a keystroke that did nothing.
+      setView('search');
+      setRailOpen(true);
+      setReferencesRequest({ name: detail.name, nonce: Date.now() });
+    }
+    window.addEventListener(OPEN_LOCATION_EVENT, onOpenLocationEvent);
+    window.addEventListener(FIND_REFERENCES_EVENT, onFindReferences);
+    return () => {
+      window.removeEventListener(OPEN_LOCATION_EVENT, onOpenLocationEvent);
+      window.removeEventListener(FIND_REFERENCES_EVENT, onFindReferences);
+    };
+  }, [openLocation]);
+
+  /**
+   * The three navigation shortcuts that are not the editor's.
+   *
+   * Bound on the window rather than in CodeMirror because they must work from
+   * the tree, the console and the search box as well as from a buffer — and
+   * because with no script open there is no CodeMirror view to have bound them.
+   *
+   * Ctrl+P and Ctrl+T are both browser bindings (print, new tab), so both
+   * preventDefault. Ctrl+T is refused by Chrome and cannot be intercepted at
+   * all, which is exactly why `#` in the Ctrl+P palette does the same job: the
+   * shortcut is a convenience, the prefix is the guarantee.
+   */
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === 'p' && !event.shiftKey) {
+        event.preventDefault();
+        setQuickOpen('');
+      } else if (key === 't' && !event.shiftKey) {
+        event.preventDefault();
+        setQuickOpen('#');
+      } else if (key === 'f' && event.shiftKey) {
+        event.preventDefault();
+        setView('search');
+        setRailOpen(true);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   /**
@@ -784,10 +1373,13 @@ export default function Workspace({ session }: WorkspaceProps) {
     setPanelMaximised(false);
     setRailWidth(260);
     setOutlineWidth(240);
-    setPanelHeight(260);
+    // Reset means "the height this viewport would have opened at", not the
+    // height some other viewport once did.
+    const panel = defaultPanelHeight(window.innerHeight);
+    setPanelHeight(panel);
     rememberWidth('rail', 260);
     rememberWidth('outline', 240);
-    rememberWidth('panel', 260);
+    rememberWidth('panel', panel);
   }, []);
 
   /** Open the console in its own browser tab, on the current project. */
@@ -870,7 +1462,7 @@ export default function Workspace({ session }: WorkspaceProps) {
           onClick={() => activeUri && void saveDoc(activeUri)}
           disabled={!activeDoc || !activeWritable || saving || !isDirty(activeDoc)}
         >
-          {saving ? 'Saving…' : 'Save script'}
+          {saving ? 'Saving…' : activeQueryDoc ? 'Save query' : 'Save script'}
         </button>
 
         {readOnly && (
@@ -907,8 +1499,48 @@ export default function Workspace({ session }: WorkspaceProps) {
         {railOpen && (
           <>
             <div className="workspace-rail" style={{ width: railWidth, flex: `0 0 ${railWidth}px` }}>
-              <div className="rail-title">{view === 'webdev' ? 'Web Dev' : 'Scripting'}</div>
-              {view === 'webdev' ? (
+              <div className="rail-title">{RAIL_TITLES[view]}</div>
+              {view === 'named-queries' ? (
+                queries ? (
+                  <NamedQueryTree
+                    queries={queries.queries}
+                    selectedPath={activeQueryDoc?.path ?? null}
+                    onSelect={(entry) => void openQuery(entry)}
+                    // Create, rename and delete are offered only when the
+                    // session can actually perform them. A visible button that
+                    // always 403s teaches people the tool is broken rather than
+                    // that they lack a role.
+                    onCreate={readOnly ? undefined : () => {
+                      setQueryDialogError(null);
+                      setCreatingQuery(true);
+                    }}
+                    onRename={readOnly ? undefined : (entry) => {
+                      setQueryDialogError(null);
+                      setRenamingQuery(entry);
+                    }}
+                    onRenameFolder={readOnly ? undefined : (folder, entry) => {
+                      setQueryDialogError(null);
+                      setRenamingFolder({ folder, entry });
+                    }}
+                    onDelete={readOnly ? undefined : (entry) => setPendingQueryDelete(entry)}
+                  />
+                ) : (
+                  <nav className="file-tree" aria-label="Named Queries">
+                    <p className="file-tree-empty muted">
+                      {queriesError ? queriesError : 'Loading named queries…'}
+                    </p>
+                  </nav>
+                )
+              ) : view === 'search' ? (
+                <SearchPanel
+                  project={project}
+                  lsp={lsp}
+                  referencesRequest={referencesRequest}
+                  onOpenLocation={(uri, line, character) =>
+                    void openLocation(uri, line, character)
+                  }
+                />
+              ) : view === 'webdev' ? (
                 <WebDevTree
                   endpoints={webDevEndpoints}
                   selectedPath={activeDoc?.path ?? null}
@@ -982,7 +1614,31 @@ export default function Workspace({ session }: WorkspaceProps) {
               onSelect={setActiveUri}
               onClose={closeDoc}
             />
-            {activeUri && activeAttrs && (
+            {activeUri && activeQueryDoc && activeQueryDoc.settings && (
+              /* Keyed on the document so each query opens its own editor state
+                 — a parameter table left mid-edit must not follow you to the
+                 next tab. */
+              <NamedQueryEditor
+                key={activeUri}
+                project={activeQueryDoc.project}
+                path={activeQueryDoc.path}
+                sql={activeQueryDoc.text}
+                settings={activeQueryDoc.settings}
+                legacy={activeQueryDoc.legacy}
+                databases={activeQueryDoc.databases ?? []}
+                editable={activeQueryDoc.editableSettings ?? []}
+                tab={queryTab}
+                onTabChange={setQueryTab}
+                onChange={(next) => changeQuerySettings(activeUri, next)}
+                onSave={() => void saveDoc(activeUri)}
+                dirty={isDirty(activeQueryDoc)}
+                readOnly={!activeWritable}
+                saving={saving}
+                csrfToken={session.csrfToken}
+                leading={inheritanceNotice}
+              />
+            )}
+            {activeUri && !activeQueryDoc && activeAttrs && (
               <ConfigStrip
                 // The inheritance state shares the settings row rather than
                 // taking one of its own. Two chrome rows above the code cost
@@ -1008,7 +1664,9 @@ export default function Workspace({ session }: WorkspaceProps) {
               />
             )}
             {docs.length === 0 && (
-              <p className="code-editor-empty">Choose a script on the left to start editing.</p>
+              <p className="code-editor-empty">
+                Choose a script or a named query on the left to start editing.
+              </p>
             )}
             <CodeEditor
               docs={docs}
@@ -1017,6 +1675,10 @@ export default function Workspace({ session }: WorkspaceProps) {
               onChange={handleChange}
               onSave={(uri) => void saveDoc(uri)}
               lsp={lsp}
+              // Hidden, never unmounted, while a query's Settings or Testing tab
+              // has the area: unmounting would destroy every open document's
+              // view along with its undo history. See CodeEditor's `hidden`.
+              hidden={activeQueryDoc ? !showsBuffer(queryTab) : false}
             />
           </section>
 
@@ -1050,6 +1712,22 @@ export default function Workspace({ session }: WorkspaceProps) {
                 maximised={panelMaximised}
                 onToggleMaximise={() => setPanelMaximised((on) => !on)}
                 tabs={[
+                  {
+                    id: 'problems',
+                    label: 'Problems',
+                    content: (
+                      <ProblemsPanel
+                        docs={scriptDocs}
+                        lsp={lsp}
+                        // Already-open documents only, so this is a reveal in a
+                        // view that exists — no location parsing needed.
+                        onOpen={(uri, line, character) => {
+                          setActiveUri(uri);
+                          jumpToLine(line, character, uri);
+                        }}
+                      />
+                    ),
+                  },
                   {
                     id: 'console',
                     label: 'Script Console',
@@ -1133,7 +1811,10 @@ export default function Workspace({ session }: WorkspaceProps) {
               }}
             />
             <OutlinePanel
-              uri={activeUri
+              // Null for a named query: the outline is the Jython symbol table
+              // and SQL has none. An outline that stayed on the last script
+              // would describe a file nobody is looking at.
+              uri={activeUri && !activeQueryDoc
                 ? lspUri(activeDoc?.project ?? project, activeDoc?.path ?? '', activeDoc?.scriptKey)
                 : null}
               revision={docRevision}
@@ -1145,6 +1826,20 @@ export default function Workspace({ session }: WorkspaceProps) {
           </>
         )}
       </div>
+
+      {quickOpen !== null && (
+        <QuickOpen
+          project={project}
+          scripts={tree?.scripts ?? []}
+          queries={queries?.queries ?? []}
+          lsp={lsp}
+          initialQuery={quickOpen}
+          onOpenEntry={(entry) => void openScript(entry)}
+          onOpenQuery={(entry) => void openQuery(entry)}
+          onOpenLocation={(uri, line, character) => void openLocation(uri, line, character)}
+          onClose={() => setQuickOpen(null)}
+        />
+      )}
 
       {creating && (
         <NewScriptDialog
@@ -1227,6 +1922,88 @@ export default function Workspace({ session }: WorkspaceProps) {
         />
       )}
 
+      {(creatingQuery || renamingQuery || renamingFolder) && (
+        <NamedQueryDialog
+          mode={renamingFolder ? 'rename-folder' : renamingQuery ? 'rename' : 'create'}
+          initialName={renamingFolder?.folder ?? renamingQuery?.path ?? ''}
+          // Only a QUERY name can collide with a query name. A folder path may
+          // legitimately match nothing in this list, so the check is skipped
+          // rather than made up.
+          existingNames={
+            renamingFolder
+              ? []
+              : queries?.queries.filter((entry) => !entry.isFolder).map((entry) => entry.path) ?? []
+          }
+          busy={queryDialogBusy}
+          error={queryDialogError}
+          onSubmit={(name) => {
+            if (renamingFolder) void doRenameFolder(name);
+            else if (renamingQuery) void doRenameQuery(name);
+            else void doCreateQuery(name);
+          }}
+          onCancel={() => {
+            setCreatingQuery(false);
+            setRenamingQuery(null);
+            setRenamingFolder(null);
+          }}
+        />
+      )}
+
+      {pendingQueryDelete && (
+        <div className="newscript-backdrop" role="presentation">
+          <div
+            className="newscript-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-query-title"
+          >
+            {/* The same two-actions-one-route distinction the script tree draws:
+                deleting an OVERRIDE removes only this project's copy and the
+                query keeps working, inherited from the parent. */}
+            {pendingQueryDelete.origin === 'override' ? (
+              <>
+                <h2 id="delete-query-title">
+                  Discard overrides on {pendingQueryDelete.name}?
+                </h2>
+                <p className="muted">
+                  This removes <strong>{project}</strong>&rsquo;s copy and returns the query to
+                  the version inherited from <strong>{pendingQueryDelete.owner}</strong>. The
+                  query keeps working; the local changes are lost.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 id="delete-query-title">Delete {pendingQueryDelete.name}?</h2>
+                <p className="muted">
+                  This removes the named query from <strong>{project}</strong> on the gateway.
+                  Anything calling <code>{pendingQueryDelete.path}</code> stops
+                  working. It cannot be undone from here.
+                </p>
+              </>
+            )}
+            <div className="newscript-actions">
+              <button
+                type="button"
+                onClick={() => setPendingQueryDelete(null)}
+                disabled={deleteBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => void doDeleteQuery()}
+                disabled={deleteBusy}
+              >
+                {pendingQueryDelete.origin === 'override'
+                  ? deleteBusy ? 'Discarding…' : 'Discard overrides'
+                  : deleteBusy ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {conflict && (
         <ConflictDialog
           label={conflict.label}
@@ -1283,6 +2060,14 @@ const WEBDEV_STUBS: Record<string, string> = Object.fromEntries(
  * `createKey`, mirrored from `ScriptResourceTypes` because the client has
  * nothing to read one off until the resource exists.
  */
+/** The heading above the rail, per side-bar view. */
+const RAIL_TITLES: Record<ViewId, string> = {
+  scripts: 'Scripting',
+  search: 'Search',
+  webdev: 'Web Dev',
+  'named-queries': 'Named Queries',
+};
+
 const SINGLETON_KEYS: Record<string, string> = {
   startup: 'onStartup.py',
   shutdown: 'onShutdown.py',

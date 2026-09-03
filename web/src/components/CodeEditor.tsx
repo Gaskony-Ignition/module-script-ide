@@ -24,7 +24,7 @@
  * hidden with `display:none` instead, so switching tabs is free and everything
  * the user had survives.
  */
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Annotation, EditorState, Compartment, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
@@ -34,7 +34,9 @@ import { lspExtension } from './lspExtension';
 import { attachDiagnostics } from './lspDiagnostics';
 import { lspUri } from '../api/lspClient';
 import { lintGutter } from '@codemirror/lint';
-import { byteFidelity, editorTheme, findAndReplace, pythonSurface } from './editorCore';
+import {
+  byteFidelity, editorTheme, findAndReplace, folding, goToLine, pythonSurface, sqlSurface,
+} from './editorCore';
 import './CodeEditor.css';
 
 export interface CodeEditorProps {
@@ -59,6 +61,31 @@ export interface CodeEditorProps {
    * the old server holding a file nobody will ever close.
    */
   lsp?: LspClient | null;
+  /**
+   * Hide the buffer without unmounting a single view.
+   *
+   * The named-query editor's Settings and Testing tabs take the whole editor
+   * area, and unmounting this component to make room would destroy every open
+   * document's CodeMirror view along with its undo history and scroll offset.
+   * `[hidden]` is forced to win globally in index.css precisely so a component
+   * can stay mounted and off screen — see the note there.
+   */
+  hidden?: boolean;
+}
+
+/**
+ * What a `scriptide:reveal` event carries.
+ *
+ * `uri` is the WORKSPACE document key (`project::path::key`), not the LSP one —
+ * the views here are keyed by document. Omitting it means "the active view",
+ * which is what the outline panel wants: it is always describing the tab you are
+ * looking at.
+ */
+export interface RevealDetail {
+  uri?: string;
+  /** Zero-based. */
+  line: number;
+  character?: number;
 }
 
 /** One CodeMirror instance plus the DOM node it owns and its read-only switch. */
@@ -70,9 +97,17 @@ interface MountedView {
   detachDiagnostics?: () => void;
 }
 
-export default function CodeEditor({ docs, activeUri, readOnly, onChange, onSave, lsp }: CodeEditorProps) {
+export default function CodeEditor({
+  docs, activeUri, readOnly, onChange, onSave, lsp, hidden = false,
+}: CodeEditorProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const viewsRef = useRef(new Map<string, MountedView>());
+  // Read through a ref so `applyReveal` has one identity for the life of the
+  // component: it is a dependency of the listener effect, and rebinding a window
+  // listener on every tab switch is how a reveal arrives at a listener that has
+  // just been removed.
+  const activeUriRef = useRef(activeUri);
+  activeUriRef.current = activeUri;
 
   // The extensions are built once per view and then never rebuilt, so the
   // callbacks they close over are read through refs — otherwise every render
@@ -197,39 +232,68 @@ export default function CodeEditor({ docs, activeUri, readOnly, onChange, onSave
   }, [docs, activeUri]);
 
   /**
-   * Reveal a line in the active view, for the outline panel and for a clicked
-   * traceback frame.
+   * Reveal a line, for the outline panel, a clicked traceback frame, a search
+   * result and go-to-definition.
    *
    * Driven by a window event rather than a prop, because the caller is two
    * components away and the alternative is threading an imperative handle
-   * through everything in between. Rebound whenever the active view changes, so
-   * it always moves the view the user is actually looking at.
+   * through everything in between.
+   *
+   * **A reveal whose view does not exist yet is REMEMBERED, not dropped.** Every
+   * cross-file jump opens a script and then asks for a line in it, and the open
+   * is React state: the view for that URI is created by an effect on the next
+   * render, which has not run when the caller's `await` resolves. The
+   * traceback-frame path had this race from 1.5.0 and lost the line silently
+   * whenever the file was not already open — the tab appeared at line 1 and
+   * nothing said why. Holding one pending reveal and applying it when the view
+   * appears fixes every caller at once.
    */
+  const pendingRevealRef = useRef<RevealDetail | null>(null);
+
+  const applyReveal = useCallback((detail: RevealDetail): boolean => {
+    const uri = detail.uri ?? activeUriRef.current;
+    if (!uri) return false;
+    const mounted = viewsRef.current.get(uri);
+    if (!mounted) return false;
+    const { view } = mounted;
+    // Clamp: the symbol table can be a moment behind the buffer, and asking
+    // CodeMirror for a line past the end throws rather than saturating.
+    const lineNumber = Math.min(Math.max(detail.line + 1, 1), view.state.doc.lines);
+    const line = view.state.doc.line(lineNumber);
+    const pos = Math.min(line.from + (detail.character ?? 0), line.to);
+    view.dispatch({
+      selection: { anchor: pos },
+      // Centred rather than CodeMirror's default, so the target does not land
+      // against the bottom edge with no context under it.
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    });
+    view.focus();
+    return true;
+  }, []);
+
   useEffect(() => {
     function onReveal(event: Event) {
-      const detail = (event as CustomEvent<{ line: number; character?: number }>).detail;
-      if (!detail || !activeUri) return;
-      const mounted = viewsRef.current.get(activeUri);
-      if (!mounted) return;
-      const { view } = mounted;
-      // Clamp: the symbol table can be a moment behind the buffer, and asking
-      // CodeMirror for a line past the end throws rather than saturating.
-      const lineNumber = Math.min(Math.max(detail.line + 1, 1), view.state.doc.lines);
-      const line = view.state.doc.line(lineNumber);
-      const pos = Math.min(line.from + (detail.character ?? 0), line.to);
-      view.dispatch({
-        selection: { anchor: pos },
-        // Centred rather than CodeMirror's default, so the target does not land
-        // against the bottom edge with no context under it.
-        effects: EditorView.scrollIntoView(pos, { y: 'center' }),
-      });
-      view.focus();
+      const detail = (event as CustomEvent<RevealDetail>).detail;
+      if (!detail) return;
+      if (!applyReveal(detail)) {
+        pendingRevealRef.current = detail;
+      }
     }
     window.addEventListener('scriptide:reveal', onReveal);
     return () => window.removeEventListener('scriptide:reveal', onReveal);
-  }, [activeUri]);
+  }, [applyReveal]);
 
-  return <div className="code-editor" ref={rootRef} data-testid="code-editor" />;
+  // Drain a pending reveal once the view it wanted exists. Runs after the effect
+  // that creates views, because it is declared after it.
+  useEffect(() => {
+    const pending = pendingRevealRef.current;
+    if (!pending) return;
+    if (applyReveal(pending)) {
+      pendingRevealRef.current = null;
+    }
+  }, [docs, activeUri, applyReveal]);
+
+  return <div className="code-editor" hidden={hidden} ref={rootRef} data-testid="code-editor" />;
 }
 
 /**
@@ -266,9 +330,17 @@ function baseExtensions(
   lsp: LspClient | null | undefined
 ): Extension[] {
   const uri = doc.uri;
+  // The language is the document's, not the component's. Everything else —
+  // theme, find and replace, folding, go-to-line, byte fidelity — is identical
+  // for both, because a query and the script that calls it are one piece of
+  // work and two editors that behave differently would make them two tools.
+  const isQuery = doc.kind === 'named-query';
   return [
-    ...pythonSurface,
+    ...(isQuery ? sqlSurface : pythonSurface),
     ...findAndReplace,
+    // Files only — the console shares pythonSurface and has no use for either.
+    ...folding,
+    goToLine,
 
     // ---- byte fidelity ---- see editorCore. Shared with the Script Console, so
     // a tab means the same thing in both.
@@ -299,7 +371,15 @@ function baseExtensions(
     // the line separator are not negotiable.
     // The gutter marker matters as much as the inline squiggle: an error several
     // hundred lines away is otherwise invisible until you scroll onto it.
-    ...(lsp ? [lintGutter(), lspExtension(lsp, { project: doc.project, path: doc.path, scriptKey: doc.scriptKey })] : []),
+    //
+    // NEVER on a SQL view. The language server is a Jython server: it would
+    // parse the SQL as Python, publish a syntax error for every line of it, and
+    // hold a document nothing will ever close. 1.7.0 ships no SQL intelligence
+    // at all (NAMED-QUERIES.md §4) — the database's own error on a test run is
+    // the diagnostic.
+    ...(lsp && !isQuery
+      ? [lintGutter(), lspExtension(lsp, { project: doc.project, path: doc.path, scriptKey: doc.scriptKey })]
+      : []),
 
     EditorView.updateListener.of((update) => {
       if (!update.docChanged) return;

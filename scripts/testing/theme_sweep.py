@@ -43,12 +43,36 @@ MEASURE = """() => {
   return out;
 }"""
 
+def expand_tree(page, passes=6):
+    """Open every branch of the script tree.
+
+    The tree ships COLLAPSED from 1.6.0 (Nigel, 02/09/2026) — quick open is the
+    fast path now, and a whole project's scripts open on landing is a column that
+    has to be scrolled before anything can be chosen. Every suite that clicks a
+    script row has to open its branch first, so this is the shared way to do it.
+
+    Repeated, because opening a package reveals the packages nested inside it.
+    """
+    for _ in range(passes):
+        shut = page.locator('.file-tree [aria-expanded="false"]')
+        count = shut.count()
+        if count == 0:
+            return
+        for index in range(count):
+            try:
+                shut.nth(index).click()
+            except Exception:
+                pass          # a click that re-renders the list is not a failure
+        page.wait_for_timeout(120)
+
+
 with sync_playwright() as p:
     b = p.chromium.launch()
     page = b.new_context(viewport={"width":1600,"height":1000}).new_page()
     login(page)
     page.goto(GATEWAY_URL + SPA, wait_until="load", timeout=30000)
-    page.wait_for_selector(".file-tree-item", timeout=20000)
+    page.wait_for_selector(".file-tree-header", timeout=20000)
+    expand_tree(page)
     page.locator(".file-tree-item").first.click()
     page.wait_for_timeout(2500)
     page.locator('button[aria-label="Toggle panel"]').click()

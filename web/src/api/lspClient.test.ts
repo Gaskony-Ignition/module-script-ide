@@ -369,6 +369,71 @@ describe('language features', () => {
     await expect(pending).resolves.toMatchObject({ documentation: { value: 'Reads tags.' } });
   });
 
+  // ---- navigation (1.6.0) ----
+  //
+  // Every one of these was answered by the gateway from 1.0.0 and called by
+  // nothing; the UI that calls them is new, so the WIRE is what is worth
+  // pinning down here.
+
+  it('normalises a single definition Location into an array', async () => {
+    // LSP allows one Location or an array, and the server sends one. A caller
+    // that branched on the shape would work until the day the server sent two.
+    const { client } = connectedClient();
+    client.didOpen(uri, 'P', 'helpers.compute()');
+    const pending = client.definition(uri, position);
+    const range = { start: { line: 4, character: 0 }, end: { line: 4, character: 0 } };
+    reply('textDocument/definition', { uri: 'ignition://P/ignition/script-python/util', range });
+    await expect(pending).resolves.toEqual([
+      { uri: 'ignition://P/ignition/script-python/util', range },
+    ]);
+  });
+
+  it('answers [] for a definition the server does not have', async () => {
+    // The COMMON case: system.tag.readBlocking has no source file on this
+    // gateway. It must be an empty list, not an error — F12 over a platform call
+    // has to be silent.
+    const { client } = connectedClient();
+    client.didOpen(uri, 'P', 'system.tag.readBlocking()');
+    const pending = client.definition(uri, position);
+    reply('textDocument/definition', null);
+    await expect(pending).resolves.toEqual([]);
+  });
+
+  it('sends caseSensitive with a text search', async () => {
+    // The server has read this flag since 1.0.0 and the client never sent it, so
+    // "Match case" could not have worked whatever the UI showed.
+    const { client } = connectedClient();
+    void client.searchText('P', 'Compute', true);
+    expect(paramsOf('scriptide/searchText')).toEqual({ query: 'Compute', caseSensitive: true });
+  });
+
+  it('defaults a text search to case-insensitive', async () => {
+    const { client } = connectedClient();
+    void client.searchText('P', 'compute');
+    expect(paramsOf('scriptide/searchText')).toEqual({ query: 'compute', caseSensitive: false });
+  });
+
+  it('asks for references by NAME, on the module\'s own method', async () => {
+    // Not textDocument/references: that method promises a type-aware answer this
+    // server cannot give, and answering it would be lying in the protocol.
+    const { client } = connectedClient();
+    const pending = client.references('P', 'compute');
+    expect(methods()).toContain('scriptide/references');
+    expect(paramsOf('scriptide/references')).toEqual({ name: 'compute' });
+    reply('scriptide/references', [
+      { uri: 'ignition://P/ignition/script-python/util', module: 'util', line: 3,
+        character: 8, text: '\treturn compute(x)' },
+    ]);
+    await expect(pending).resolves.toHaveLength(1);
+  });
+
+  it('answers [] when references comes back null', async () => {
+    const { client } = connectedClient();
+    const pending = client.references('P', 'nothing');
+    reply('scriptide/references', null);
+    await expect(pending).resolves.toEqual([]);
+  });
+
   it('returns null hover and signature help rather than throwing', async () => {
     const { client } = connectedClient();
     client.didOpen(uri, 'P', 'system.tag.readBlocking(');

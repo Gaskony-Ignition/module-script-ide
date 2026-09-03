@@ -38,6 +38,14 @@
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
     <Match>
+        <Class name="com.gaskony.scriptide.gateway.routes.NamedQueryRouteHandler" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.routes.NamedQueryTestRouteHandler" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
         <Class name="com.gaskony.scriptide.gateway.exec.PrivateStateRunner" />
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>

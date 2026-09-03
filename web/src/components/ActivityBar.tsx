@@ -7,28 +7,34 @@
  * would disappear along with the thing it controls.
  *
  * It is also where a new top-level area is added, which is why Web Dev is a view
- * here rather than another section inside the script tree: named queries will be
- * a third, and three unrelated resource trees stacked in one scrolling column
- * stops being navigable.
+ * here rather than another section inside the script tree: named queries ARE the
+ * third, since 1.7.0, and three unrelated resource trees stacked in one
+ * scrolling column stops being navigable.
  *
  * The lower group is different in kind and is separated by the gap between them:
  * those two open the bottom PANEL rather than the side bar. Script Console used
  * to be a row in the script tree, where it read as a script among scripts;
  * Nigel asked for it out of the tree once it had an icon of its own.
  *
- * There is no Search icon. Find and replace live in the editor on Ctrl+F and
- * Ctrl+H, and an icon that opened the script tree under the heading "Scripting"
- * was a promise of a view that does not exist.
+ * Search arrived in 1.6.0 and the view behind it is real: it searches every
+ * Project Library script on the gateway through `scriptide/searchText`, and it
+ * is where a references lookup puts its results. Until then this file said there
+ * was deliberately no Search icon, because an icon that reopened the script tree
+ * under a different heading is a promise of a view that does not exist — which
+ * is still the rule, now met rather than avoided. Find and replace within the
+ * open buffer stay where they were, on Ctrl+F and Ctrl+H in the editor.
  */
 import type { ReactNode } from 'react';
-import { IconFiles, IconGlobe, IconPlay, IconTerminal } from './Icons';
+import {
+  IconAlert, IconDatabase, IconFiles, IconGlobe, IconPlay, IconSearch, IconTerminal,
+} from './Icons';
 import './ActivityBar.css';
 
 /** Side-bar views. */
-export type ViewId = 'scripts' | 'webdev';
+export type ViewId = 'scripts' | 'search' | 'webdev' | 'named-queries';
 
 /** Bottom-panel views. */
-export type PanelId = 'console' | 'terminal';
+export type PanelId = 'console' | 'problems' | 'terminal';
 
 export interface ActivityBarProps {
   /** The side-bar view, whether or not the side bar is showing. */
@@ -43,10 +49,13 @@ export interface ActivityBarProps {
 
 const VIEWS: Array<{ id: ViewId; label: string; icon: ReactNode }> = [
   { id: 'scripts', label: 'Scripting', icon: <IconFiles size={22} /> },
+  { id: 'search', label: 'Search', icon: <IconSearch size={20} /> },
   { id: 'webdev', label: 'Web Dev', icon: <IconGlobe size={22} /> },
+  { id: 'named-queries', label: 'Named Queries', icon: <IconDatabase size={20} /> },
 ];
 
 const PANELS: Array<{ id: PanelId; label: string; icon: ReactNode }> = [
+  { id: 'problems', label: 'Problems', icon: <IconAlert size={19} /> },
   { id: 'console', label: 'Script Console', icon: <IconPlay size={18} /> },
   { id: 'terminal', label: 'Terminal', icon: <IconTerminal size={22} /> },
 ];

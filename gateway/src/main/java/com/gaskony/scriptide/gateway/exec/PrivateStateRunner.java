@@ -165,6 +165,34 @@ public final class PrivateStateRunner implements ScriptRunner {
      * @param listener streams output as it is produced; when present the returned
      *                 outcome carries NO stdout or stderr, because everything has
      *                 already been sent (see the class Javadoc)
+     *
+     * <h3 id="runInOneNamespace">The locals map is ALSO the globals map</h3>
+     *
+     * <p><strong>Not a simplification — the alternative silently breaks every
+     * script that defines a function.</strong> Executing module-level code with
+     * two different dicts is exactly the {@code exec(code, globals, locals)}
+     * trap: a top-level {@code x = 41} is an assignment, so it lands in
+     * <em>locals</em>, while a {@code def} compiled in that same module captures
+     * <em>globals</em> as its {@code __globals__}. The function then cannot see
+     * anything the script above it defined.</p>
+     *
+     * <p>Measured on the rig, 02/09/2026, against
+     * {@code scriptManager.getGlobals()} as the globals map — which is empty:
+     * {@code x = 41; def f(): return x + 1} raised
+     * {@code NameError: global name 'x' is not defined}, and so did every
+     * {@code import} and every class body. Worst of all,
+     * {@code def f(): return system.date.now()} raised
+     * {@code global name 'system' is not defined}: {@code system} lives in the
+     * locals map {@code ScriptManager.createLocalsMap()} seeds, so it resolved at
+     * module level and vanished one indent in. Practically every real Ignition
+     * script has a function in it, so the console worked for one-liners and
+     * failed for the actual job.</p>
+     *
+     * <p>Passing the same dict for both is what a real module does, and what the
+     * Designer's console does. It costs nothing: the locals map is already
+     * per-execution (or per-console-session for the REPL), so nothing leaks
+     * between users, and {@code system} plus the project library are in it
+     * because the platform put them there.</p>
      */
     @Override
     public Outcome run(String source, String fileName, PyObject locals,
@@ -190,7 +218,8 @@ public final class PrivateStateRunner implements ScriptRunner {
             // Thread-local: this is what makes the streams private.
             Py.setSystemState(state);
             PyCode code = Py.compile_flags(source, fileName, CompileMode.exec, new CompilerFlags());
-            Py.runCode(code, locals, scriptManager.getGlobals());
+            // ONE dict for locals AND globals — see runInOneNamespace below.
+            Py.runCode(code, locals, locals);
         } catch (PyException e) {
             failure = e;
         } catch (Throwable t) {
@@ -253,7 +282,7 @@ public final class PrivateStateRunner implements ScriptRunner {
             PyCode flush = Py.compile_flags(
                 "import sys\nsys.stdout.flush()\nsys.stderr.flush()\n",
                 "<script-ide-flush>", CompileMode.exec, new CompilerFlags());
-            Py.runCode(flush, locals, scriptManager.getGlobals());
+            Py.runCode(flush, locals, locals);
         } catch (Throwable t) {
             // A failed flush costs at most a truncated tail; it must never mask the
             // script's own result.

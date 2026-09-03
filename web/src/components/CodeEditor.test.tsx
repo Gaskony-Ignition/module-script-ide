@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import CodeEditor from './CodeEditor';
 import type { OpenDoc } from '../workspace/documents';
@@ -19,6 +20,8 @@ const DESIGNER_SOURCE =
 
 function doc(overrides: Partial<OpenDoc> = {}): OpenDoc {
   return {
+    // Every document was a script before 1.7.0, and these cases still are.
+    kind: 'script',
     uri: 'P::ignition/script-python/util/helpers',
     project: 'P',
     path: 'ignition/script-python/util/helpers',
@@ -363,5 +366,145 @@ describe('CodeEditor inheritance lock', () => {
       />
     );
     expect(activeView().state.readOnly).toBe(true);
+  });
+});
+
+// ============================ navigation (1.6.0) ============================
+
+/** Every mounted view, in DOM order. */
+function allViews(): EditorView[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('.code-editor-host .cm-editor'))
+    .map((host) => EditorView.findFromDOM(host))
+    .filter((view): view is EditorView => view !== null);
+}
+
+function reveal(detail: { line: number; character?: number; uri?: string }) {
+  act(() => {
+    window.dispatchEvent(new CustomEvent('scriptide:reveal', { detail }));
+  });
+}
+
+describe('CodeEditor reveal', () => {
+  it('moves the caret in the active view when no uri is given', () => {
+    render(
+      <CodeEditor
+        docs={[doc()]}
+        activeUri={doc().uri}
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    reveal({ line: 2, character: 1 });
+    const view = activeView();
+    expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(3);
+  });
+
+  it('clamps a line past the end of the buffer instead of throwing', () => {
+    // The symbol table can be a moment behind the buffer, and CodeMirror throws
+    // rather than saturating when asked for a line that is not there.
+    render(
+      <CodeEditor
+        docs={[doc()]}
+        activeUri={doc().uri}
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    reveal({ line: 9_999 });
+    const view = activeView();
+    expect(view.state.doc.lineAt(view.state.selection.main.head).number)
+      .toBe(view.state.doc.lines);
+  });
+
+  it('moves the view NAMED by the event, not whichever tab is showing', () => {
+    const other = doc({
+      uri: 'P::ignition/script-python/util/parsing',
+      path: 'ignition/script-python/util/parsing',
+      label: 'parsing',
+    });
+    render(
+      <CodeEditor
+        docs={[doc(), other]}
+        activeUri={doc().uri}
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    reveal({ line: 4, uri: other.uri });
+    const [first, second] = allViews();
+    expect(first.state.selection.main.head).toBe(0);
+    expect(second.state.doc.lineAt(second.state.selection.main.head).number).toBe(5);
+  });
+
+  it('REMEMBERS a reveal for a view that does not exist yet, and applies it on arrival', () => {
+    // Every cross-file jump opens a script and then asks for a line in it, and
+    // the open is React state — the view is created by an effect on the NEXT
+    // render, which has not run when the caller's await resolves. Dropping the
+    // reveal here is what made a clicked traceback frame land on line 1 with
+    // nothing saying why.
+    const other = doc({
+      uri: 'P::ignition/script-python/util/parsing',
+      path: 'ignition/script-python/util/parsing',
+      label: 'parsing',
+    });
+    const view = render(
+      <CodeEditor
+        docs={[doc()]}
+        activeUri={doc().uri}
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    reveal({ line: 3, uri: other.uri });
+    view.rerender(
+      <CodeEditor
+        docs={[doc(), other]}
+        activeUri={other.uri}
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    const second = allViews()[1];
+    expect(second.state.doc.lineAt(second.state.selection.main.head).number).toBe(4);
+  });
+});
+
+describe('CodeEditor folding and go-to-line', () => {
+  it('renders a fold gutter beside the line numbers', () => {
+    // A file is where folding earns a gutter column; the console shares
+    // pythonSurface and deliberately does not get one.
+    render(
+      <CodeEditor
+        docs={[doc()]}
+        activeUri={doc().uri}
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    expect(document.querySelector('.cm-foldGutter')).not.toBeNull();
+  });
+
+  it('binds Ctrl+G to go-to-line', () => {
+    // CodeMirror's own searchKeymap binds gotoLine to Mod-Alt-g, which nobody
+    // arrives here knowing.
+    render(
+      <CodeEditor
+        docs={[doc()]}
+        activeUri={doc().uri}
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    const view = activeView();
+    fireEvent.keyDown(view.contentDOM, { key: 'g', ctrlKey: true });
+    // The command opens CodeMirror's own panel, which is the observable effect.
+    expect(document.querySelector('.cm-panel')).not.toBeNull();
   });
 });

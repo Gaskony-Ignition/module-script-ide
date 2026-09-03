@@ -57,6 +57,24 @@ export const IconGlobe = (p: IconProps) =>
     p
   );
 
+/**
+ * Activity bar: named queries — a database cylinder.
+ *
+ * The one glyph everybody reads as "a database" without a label, which is what
+ * an activity-bar icon has to be: an ellipse for the top and two arcs for the
+ * bands, drawn in strokes like every other icon here so it takes the row's
+ * colour and needs no theme of its own.
+ */
+export const IconDatabase = (p: IconProps) =>
+  svg(
+    <>
+      <ellipse cx="8" cy="3.6" rx="5.4" ry="2" />
+      <path d="M2.6 3.6v8.8c0 1.1 2.4 2 5.4 2s5.4-.9 5.4-2V3.6" />
+      <path d="M2.6 8c0 1.1 2.4 2 5.4 2s5.4-.9 5.4-2" />
+    </>,
+    p
+  );
+
 /** Activity bar: search. */
 export const IconSearch = (p: IconProps) =>
   svg(
@@ -246,6 +264,23 @@ export const IconChevronUp = (p: IconProps) => svg(<path d="M3.5 10 8 5.5 12.5 1
 /** A tick, for the layout menu's checked items. */
 export const IconCheck = (p: IconProps) => svg(<path d="M3.2 8.4 6.4 11.6 12.8 4.6" />, p);
 
+/**
+ * A problem marker: a triangle with a bang in it.
+ *
+ * One glyph for every severity, coloured by the row's own class rather than by
+ * a prop — the estate rule is that a status colour is a CSS variable on a class,
+ * never a hex value handed to a component.
+ */
+export const IconAlert = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M8 2.4 14.6 13.4H1.4z" />
+      <path d="M8 6.4v3.1" />
+      <path d="M8 11.5v.1" />
+    </>,
+    p
+  );
+
 export function iconForType(typeId: string, props: IconProps = {}) {
   switch (typeId) {
     case 'timer':
@@ -262,6 +297,8 @@ export function iconForType(typeId: string, props: IconProps = {}) {
       return <IconPower {...props} />;
     case 'webdev':
       return <IconGlobe {...props} />;
+    case 'named-query':
+      return <IconDatabase {...props} />;
     default:
       return <IconScript {...props} />;
   }

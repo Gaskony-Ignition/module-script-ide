@@ -204,16 +204,97 @@ public final class ProjectIndex {
      */
     public List<TextHit> searchText(String project, String query, boolean caseSensitive,
                                     int limit) {
-        List<TextHit> hits = new ArrayList<>();
         if (query == null || query.isEmpty()) {
-            return hits;
+            return new ArrayList<>();
         }
+        String needle = caseSensitive ? query : query.toLowerCase(Locale.ROOT);
+        return scanLibrary(project, limit,
+            line -> (caseSensitive ? line : line.toLowerCase(Locale.ROOT)).indexOf(needle));
+    }
+
+    /**
+     * Every place a bare NAME appears in the project's library scripts.
+     *
+     * <p><strong>This is name-based, not a type-aware find-references</strong>, and
+     * every caller has to say so: two unrelated classes with a {@code write} method
+     * both answer to {@code write}, and this reports both. A correct implementation
+     * needs the type system {@link ModuleSymbols} does not build — see the "no
+     * find-references" note in the module's docs. What it does buy over a plain text
+     * search is identifier boundaries: {@code compute} no longer matches
+     * {@code recompute}, {@code compute_all} or {@code "computed"} inside a word,
+     * which is the difference between a usable list and a page of noise.</p>
+     *
+     * <p>Refused outright for anything that is not a Python identifier, rather than
+     * quietly degrading to a substring search under a name that promises more.</p>
+     */
+    public List<TextHit> searchReferences(String project, String name, int limit) {
+        if (!isIdentifier(name)) {
+            return new ArrayList<>();
+        }
+        return scanLibrary(project, limit, line -> identifierAt(line, name));
+    }
+
+    /** True for a name this can search: a Python identifier and nothing else. */
+    static boolean isIdentifier(String name) {
+        if (name == null || name.isEmpty() || Character.isDigit(name.charAt(0))) {
+            return false;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            if (!isIdentifierPart(name.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isIdentifierPart(char c) {
+        return c == '_' || Character.isLetterOrDigit(c);
+    }
+
+    /**
+     * The first column at which {@code name} appears in {@code line} as a whole
+     * identifier, or -1.
+     *
+     * <p>The loop matters: the FIRST textual occurrence may be inside a longer word
+     * ({@code recompute} contains {@code compute}), and returning -1 there would
+     * lose a real reference later on the same line.</p>
+     */
+    static int identifierAt(String line, String name) {
+        int from = 0;
+        while (from <= line.length() - name.length()) {
+            int at = line.indexOf(name, from);
+            if (at < 0) {
+                return -1;
+            }
+            int end = at + name.length();
+            boolean leftClear = at == 0 || !isIdentifierPart(line.charAt(at - 1));
+            boolean rightClear = end >= line.length() || !isIdentifierPart(line.charAt(end));
+            if (leftClear && rightClear) {
+                return at;
+            }
+            from = at + 1;
+        }
+        return -1;
+    }
+
+    /** Where in one line a scan matched, or -1 for no match on that line. */
+    private interface LineScan {
+        int matchIn(String line);
+    }
+
+    /**
+     * Walk every library script in a project, reporting the FIRST match per line.
+     *
+     * <p>One hit per line, because the consumer is a results list: a line matching
+     * a name three times is still one line to click on, and three rows reading
+     * identically is how a results panel stops being scannable.</p>
+     */
+    private List<TextHit> scanLibrary(String project, int limit, LineScan scan) {
+        List<TextHit> hits = new ArrayList<>();
         Optional<RuntimeResourceCollection> collectionOpt = projectManager.find(project);
         if (collectionOpt.isEmpty()) {
             return hits;
         }
-        String needle = caseSensitive ? query : query.toLowerCase(Locale.ROOT);
-
         for (Resource resource : collectionOpt.get().getResources()) {
             var type = resource.getResourcePath().getResourceType();
             if (!ScriptResourceTypes.IGNITION_MODULE.equals(type.moduleId())
@@ -227,14 +308,13 @@ public final class ProjectIndex {
             String moduleName = moduleNameOf(resource);
             String[] lines = source.split("\n", -1);
             for (int i = 0; i < lines.length; i++) {
-                String haystack = caseSensitive ? lines[i] : lines[i].toLowerCase(Locale.ROOT);
-                int at = haystack.indexOf(needle);
+                int at = scan.matchIn(lines[i]);
                 if (at < 0) {
                     continue;
                 }
                 String text = lines[i];
                 if (text.length() > 200) {
-                    text = text.substring(0, 200) + "…";
+                    text = text.substring(0, 200) + "\u2026";
                 }
                 hits.add(new TextHit(moduleName, i, at, text));
                 if (hits.size() >= limit) {

@@ -92,6 +92,22 @@ const GATEWAY_EVENT_TYPES: ScriptTypeId[] = [
 ];
 
 /**
+ * Types this tree deliberately does NOT show, because another view owns them.
+ *
+ * Web Dev endpoints have their own activity-bar view — a whole tree of their
+ * own, with the per-endpoint verbs and the config dialog the script tree cannot
+ * offer. Listing them here as well gave every endpoint two homes and made the
+ * one with fewer affordances the first one people found (Nigel, 02/09/2026).
+ *
+ * Distinct from {@link unknownGroups}, which is the catch-all for a type this
+ * build has never heard of: that one still renders, because silently dropping a
+ * resource the gateway sent is how a script becomes uneditable with no message.
+ * This set is the "handled elsewhere" case, and it is the only reason a type may
+ * be omitted.
+ */
+const SHOWN_IN_ANOTHER_VIEW = new Set<string>(['resources']);
+
+/**
  * Labels for a type with no scripts in the open project.
  *
  * Needed because the label normally comes from an ENTRY, and an empty folder
@@ -187,7 +203,20 @@ export default function FileTree({
   onDelete,
   onCreateSingleton,
 }: FileTreeProps) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  /**
+   * Which branches are OPEN. Everything starts shut (Nigel, 02/09/2026).
+   *
+   * Tracked as "expanded" rather than "collapsed" so that default falls out of
+   * the empty set: the alternative — a collapsed set seeded with every key —
+   * has to enumerate keys that do not exist until the project is loaded, and a
+   * branch whose key was missed silently opens itself.
+   *
+   * The tree is a whole project's scripts, and every group open on landing was
+   * a column of forty rows that has to be scrolled before anything can be
+   * chosen. Quick open (Ctrl+P) is the fast path now, and the tree is for
+   * browsing, which starts by choosing a branch.
+   */
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const { library, eventGroups, singletons, unknownGroups } = useMemo(() => {
     const byType = new Map<string, ScriptEntry[]>();
@@ -217,7 +246,7 @@ export default function FileTree({
       // Anything the gateway sent that this build does not know about — better
       // shown under its own heading than silently dropped.
       unknownGroups: [...byType.keys()]
-        .filter((t) => !known.has(t))
+        .filter((t) => !known.has(t) && !SHOWN_IN_ANOTHER_VIEW.has(t))
         .map((typeId) => {
           const entries = byType.get(typeId) ?? [];
           return { typeId, label: entries[0]?.typeLabel ?? typeId, entries };
@@ -226,7 +255,7 @@ export default function FileTree({
   }, [scripts]);
 
   function toggle(key: string) {
-    setCollapsed((previous) => {
+    setExpanded((previous) => {
       const next = new Set(previous);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -234,8 +263,8 @@ export default function FileTree({
     });
   }
 
-  const eventsCollapsed = collapsed.has('group:gateway-events');
-  const libraryCollapsed = collapsed.has('group:library');
+  const eventsCollapsed = !expanded.has('group:gateway-events');
+  const libraryCollapsed = !expanded.has('group:library');
 
   return (
     <nav className="file-tree" aria-label="Scripting">
@@ -258,7 +287,7 @@ export default function FileTree({
           <>
             {eventGroups.map((group) => {
               const key = `type:${group.typeId}`;
-              const isCollapsed = collapsed.has(key);
+              const isCollapsed = !expanded.has(key);
               return (
                 <div key={group.typeId}>
                   <div className="file-tree-header-row">
@@ -363,7 +392,7 @@ export default function FileTree({
             <PackageBranch
               node={buildPackageTree(library)}
               depth={0}
-              collapsed={collapsed}
+              expanded={expanded}
               onToggle={toggle}
               selectedPath={selectedPath}
               onSelect={onSelect}
@@ -375,7 +404,7 @@ export default function FileTree({
       {/* ---- anything unrecognised ---- */}
       {unknownGroups.map((group) => {
         const key = `type:${group.typeId}`;
-        const isCollapsed = collapsed.has(key);
+        const isCollapsed = !expanded.has(key);
         return (
           <section className="file-tree-group" key={group.typeId}>
             <button
@@ -413,7 +442,8 @@ export default function FileTree({
 interface BranchProps {
   node: PackageNode;
   depth: number;
-  collapsed: Set<string>;
+  /** Keys of the branches that are OPEN; everything else is shut. */
+  expanded: Set<string>;
   onToggle: (key: string) => void;
   selectedPath: string | null;
   onSelect: (entry: ScriptEntry) => void;
@@ -423,7 +453,7 @@ interface BranchProps {
 function PackageBranch({
   node,
   depth,
-  collapsed,
+  expanded,
   onToggle,
   selectedPath,
   onSelect,
@@ -433,7 +463,7 @@ function PackageBranch({
     <ul className="file-tree-list">
       {node.children.map((child) => {
         const key = `pkg:${child.key}`;
-        const isCollapsed = collapsed.has(key);
+        const isCollapsed = !expanded.has(key);
         return (
           <li key={child.key}>
             <button
@@ -451,7 +481,7 @@ function PackageBranch({
               <PackageBranch
                 node={child}
                 depth={depth + 1}
-                collapsed={collapsed}
+                expanded={expanded}
                 onToggle={onToggle}
                 selectedPath={selectedPath}
                 onSelect={onSelect}

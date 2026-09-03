@@ -91,4 +91,48 @@ class RouteMountOrderTest {
     void sessionProbeIsMounted() {
         assertThat(recordMountedPaths()).contains(ScriptIdePaths.ROUTE_AUTH_SESSION);
     }
+
+    @Test
+    @DisplayName("every named-query route is mounted, and all of them before the catch-all")
+    void namedQueryRoutesAreMountedBeforeTheCatchAll() {
+        // The generic assertion above only covers paths that START with /api/, so
+        // a named-query route added below the splat would still be caught by it.
+        // This one also asserts the routes EXIST: an API that silently loses a
+        // route presents as a 404 the client reads as "no such query".
+        List<String> mounted = recordMountedPaths();
+        int catchAllIndex = mounted.indexOf(ScriptIdePaths.ROUTE_SPA_CATCH_ALL);
+
+        for (String route : List.of(
+            ScriptIdePaths.ROUTE_NAMED_QUERIES,
+            ScriptIdePaths.ROUTE_NAMED_QUERY_CONTENT,
+            ScriptIdePaths.ROUTE_NAMED_QUERY_SETTINGS,
+            ScriptIdePaths.ROUTE_NAMED_QUERY_RENAME,
+            ScriptIdePaths.ROUTE_NAMED_QUERY_TEST)) {
+            assertThat(mounted).as("%s was never mounted", route).contains(route);
+            assertThat(mounted.indexOf(route))
+                .as("%s is mounted after the catch-all and is therefore unreachable", route)
+                .isLessThan(catchAllIndex);
+        }
+    }
+
+    @Test
+    @DisplayName("the content path is mounted three times — one per verb")
+    void namedQueryContentCarriesThreeVerbs() {
+        // GET, POST and DELETE share one path, and the registrar sets .method()
+        // explicitly on the last two. Omitting it silently defaults to GET, and the
+        // route then shadows the read instead of accepting writes — a regression
+        // this estate has had before, whose only symptom is a write that returns
+        // the file it was supposed to replace.
+        assertThat(recordMountedPaths())
+            .filteredOn(ScriptIdePaths.ROUTE_NAMED_QUERY_CONTENT::equals)
+            .hasSize(3);
+    }
+
+    @Test
+    @DisplayName("the settings path is mounted twice — read and write")
+    void namedQuerySettingsCarriesTwoVerbs() {
+        assertThat(recordMountedPaths())
+            .filteredOn(ScriptIdePaths.ROUTE_NAMED_QUERY_SETTINGS::equals)
+            .hasSize(2);
+    }
 }

@@ -95,13 +95,48 @@ final class HandlerSupport {
     /**
      * The client's expected resource signature: the {@code If-Match} header wins,
      * else the request body's {@code baseSignature}.
+     *
+     * <p>The header is unquoted on the way in — see {@link #unquoteEtag}. The body
+     * value is not: JSON has no entity-tag syntax, so a quote there is part of the
+     * signature rather than framing around it.</p>
      */
     static String expectedSignature(RequestContext req, String bodySignature) {
         String ifMatch = req.getRequest().getHeader("If-Match");
         if (ifMatch != null && !ifMatch.isBlank()) {
-            return ifMatch;
+            return unquoteEtag(ifMatch);
         }
         return bodySignature;
+    }
+
+    /**
+     * An entity tag reduced to the signature inside it.
+     *
+     * <p>RFC 9110 §8.8.3 says an {@code ETag} is a quoted string, optionally with a
+     * {@code W/} weak prefix, and this module emitted the bare signature until
+     * 1.6.0. Both forms now reach the comparison as the same string, which is what
+     * makes the change safe to deploy under a client that has not been reloaded: an
+     * old page holds a bare signature and sends it bare, a new one holds a quoted
+     * value its own reader has already stripped, and a proxy is free to add the
+     * quoting to either. Comparing raw strings would turn any of those into a
+     * permanent 409 that looks exactly like somebody else editing the file.</p>
+     */
+    static String unquoteEtag(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.trim();
+        if (value.startsWith("W/")) {
+            value = value.substring(2).trim();
+        }
+        if (value.length() >= 2 && value.charAt(0) == '"' && value.charAt(value.length() - 1) == '"') {
+            value = value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    /** A resource signature as the {@code ETag} header value — quoted, per RFC 9110. */
+    static String quoteEtag(String signature) {
+        return "\"" + signature + "\"";
     }
 
     /**

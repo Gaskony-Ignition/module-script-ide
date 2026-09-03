@@ -100,12 +100,36 @@ def has_update(page, project):
     return any(e.get("path") == "ignition/update" for e in tree_of(page, project))
 
 
+def expand_tree(page, passes=6):
+    """Open every branch of the script tree.
+
+    The tree ships COLLAPSED from 1.6.0 (Nigel, 02/09/2026) — quick open is the
+    fast path now, and a whole project's scripts open on landing is a column that
+    has to be scrolled before anything can be chosen. Every suite that clicks a
+    script row has to open its branch first, so this is the shared way to do it.
+
+    Repeated, because opening a package reveals the packages nested inside it.
+    """
+    for _ in range(passes):
+        shut = page.locator('.file-tree [aria-expanded="false"]')
+        count = shut.count()
+        if count == 0:
+            return
+        for index in range(count):
+            try:
+                shut.nth(index).click()
+            except Exception:
+                pass          # a click that re-renders the list is not a failure
+        page.wait_for_timeout(120)
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_context(viewport={"width": 1600, "height": 1000}).new_page()
     login(page)
     page.goto(GATEWAY_URL + SPA, wait_until="load", timeout=30000)
-    page.wait_for_selector(".file-tree-item", timeout=20000)
+    page.wait_for_selector(".file-tree-header", timeout=20000)
+    expand_tree(page)
 
     session = page.evaluate(
         "async (spa) => (await (await fetch(spa + 'api/auth/session',"
@@ -130,6 +154,9 @@ with sync_playwright() as p:
 
     # ---------- DRAFT: clicking an absent singleton does not write ----------
     page.select_option(".workspace-project select", INHERIT_PROJECT)
+    page.wait_for_timeout(1500)
+    # Reopen: the tree is re-fetched on a project switch and ships collapsed.
+    expand_tree(page)
     page.wait_for_timeout(2000)
 
     before = has_update(page, INHERIT_PROJECT)
@@ -252,6 +279,8 @@ with sync_playwright() as p:
 
     if folder_entry:
         page.select_option(".workspace-project select", folder_project)
+        page.wait_for_timeout(1500)
+        expand_tree(page)
         page.wait_for_timeout(2000)
         leaf = folder_entry["name"].split("/")[-1]
         folder_row = page.locator(".file-tree-package", has_text=leaf).first

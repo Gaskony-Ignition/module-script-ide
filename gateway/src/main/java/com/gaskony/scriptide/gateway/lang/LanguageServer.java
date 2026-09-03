@@ -168,6 +168,8 @@ public final class LanguageServer {
                 return workspaceSymbol(params);
             case "scriptide/searchText":
                 return searchText(params);
+            case "scriptide/references":
+                return references(params);
             default:
                 // Unknown methods answer null rather than erroring: an LSP client
                 // probes for optional capabilities, and a hard error on each one
@@ -602,16 +604,54 @@ public final class LanguageServer {
             && params.get("caseSensitive").getAsBoolean();
         for (ProjectIndex.TextHit hit
             : projectIndex.searchText(project, query, caseSensitive, 500)) {
-            JsonObject item = new JsonObject();
-            item.addProperty("module", hit.moduleName());
-            item.addProperty("line", hit.line());
-            item.addProperty("character", hit.column());
-            item.addProperty("text", hit.lineText());
-            item.addProperty("uri", "ignition://" + project + "/ignition/script-python/"
-                + hit.moduleName().replace('.', '/'));
-            out.add(item);
+            out.add(hitJson(hit));
         }
         return out;
+    }
+
+    /**
+     * Every place a NAME is written in this project's library scripts.
+     *
+     * <p>Custom rather than {@code textDocument/references}, and deliberately so:
+     * the standard method promises a type-aware answer, and this is
+     * <strong>name-based</strong> — {@link ProjectIndex#searchReferences} matches
+     * whole identifiers, not receivers, so two unrelated {@code write} methods both
+     * appear. Answering the standard method with that would be lying in the
+     * protocol; a method of our own is a claim the client has to opt into, and the
+     * client labels the results as name-based on screen.</p>
+     *
+     * <p>The name comes from the client rather than from a cursor position, because
+     * the same list is wanted from places that have no cursor — a search result, a
+     * symbol in the outline.</p>
+     */
+    private JsonElement references(JsonObject params) {
+        JsonArray out = new JsonArray();
+        if (projectIndex == null || project == null) {
+            return out;
+        }
+        String name = params.has("name") ? params.get("name").getAsString() : "";
+        for (ProjectIndex.TextHit hit : projectIndex.searchReferences(project, name, 500)) {
+            out.add(hitJson(hit));
+        }
+        return out;
+    }
+
+    /**
+     * One cross-file hit as the wire object both search and references return.
+     *
+     * <p>Shared so the two cannot drift: the client renders them through one
+     * results list, and a field present in one shape and absent in the other shows
+     * up as a blank row rather than an error.</p>
+     */
+    private JsonObject hitJson(ProjectIndex.TextHit hit) {
+        JsonObject item = new JsonObject();
+        item.addProperty("module", hit.moduleName());
+        item.addProperty("line", hit.line());
+        item.addProperty("character", hit.column());
+        item.addProperty("text", hit.lineText());
+        item.addProperty("uri", "ignition://" + project + "/ignition/script-python/"
+            + hit.moduleName().replace('.', '/'));
+        return item;
     }
 
     /**

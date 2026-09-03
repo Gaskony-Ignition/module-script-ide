@@ -9,19 +9,26 @@
  * ramp made five of these ten themes illegible. The pack supplies the
  * accent and syntax hues, each checked against every surface it lands on.
  *
+ * The GEOMETRY is taken in full — radius, rule and marker widths, shadow,
+ * row and control heights — because a radius cannot make text illegible.
+ * It is what makes `newsprint-night` square, flat and shadowless beside a
+ * rounded, softly shadowed `aurora-teal` instead of the same shell twice.
+ *
  * 10 themes.
  */
 /* Glass Aurora — Teal — dark */
 :root[data-theme="aurora-teal"] {
   color-scheme: dark;
   --bg-primary: #102735;
-  --bg-secondary: #1c323f;
-  --bg-tertiary: #2b3e4b;
-  --surface: #213643;
+  --bg-secondary: #1c313e;
+  --bg-tertiary: #293d4a;
+  --bg-chrome: #1c313e;
+  --surface: #203542;
   --border-light: #3b4e59;
+  --border-strong: #475d6b;
   --text-primary: #d2d6d9;
   --text-secondary: #9da6ac;
-  --text-muted: #9ea8ad;
+  --text-muted: #9ca5ab;
   --accent-primary: #18baad;
   --error: #fca5a5;
   --warning: #fde08a;
@@ -29,23 +36,35 @@
   --syntax-keyword: #18baad;
   --syntax-string: #86efc9;
   --syntax-number: #fde08a;
-  --syntax-type: #1ab3e5;
+  --syntax-type: #19b3e6;
   --syntax-function: #a5e4fb;
   --syntax-comment: #c7c2e0;
   --accent-primary-bg: color-mix(in srgb, #18baad 30%, transparent);
+  --radius: 8px;
+  --radius-panel: 12px;
+  --radius-row: 6px;
+  --rule-width: 1px;
+  --marker-width: 3px;
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.35);
+  --shadow-popup: 0 12px 36px rgba(0, 0, 0, 0.5);
+  --shadow-control: 0 4px 16px rgba(24, 186, 173, 0.45);
+  --row-height: 22px;
+  --control-height: 24px;
 }
 
 /* Glass Aurora — Violet — dark */
 :root[data-theme="aurora-violet"] {
   color-scheme: dark;
   --bg-primary: #1c1431;
-  --bg-secondary: #28203b;
-  --bg-tertiary: #352e48;
-  --surface: #2c243f;
+  --bg-secondary: #271f3b;
+  --bg-tertiary: #342d47;
+  --bg-chrome: #271f3b;
+  --surface: #2b243f;
   --border-light: #453e56;
+  --border-strong: #554d6a;
   --text-primary: #c9c7ce;
   --text-secondary: #9b98a4;
-  --text-muted: #9c98a5;
+  --text-muted: #9a96a3;
   --accent-primary: #a888f1;
   --error: #fca5a5;
   --warning: #fde08a;
@@ -57,43 +76,67 @@
   --syntax-function: #a5e4fb;
   --syntax-comment: #c7c2e0;
   --accent-primary-bg: color-mix(in srgb, #a888f1 30%, transparent);
+  --radius: 8px;
+  --radius-panel: 12px;
+  --radius-row: 6px;
+  --rule-width: 1px;
+  --marker-width: 3px;
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.35);
+  --shadow-popup: 0 12px 36px rgba(0, 0, 0, 0.5);
+  --shadow-control: 0 4px 16px rgba(168, 136, 241, 0.45);
+  --row-height: 22px;
+  --control-height: 24px;
 }
 
 /* Finance Ledger — light */
 :root[data-theme="finance-ledger"] {
   color-scheme: light;
   --bg-primary: #edf0f2;
-  --bg-secondary: #e2e6e7;
-  --bg-tertiary: #d5d8da;
-  --surface: #e8eced;
-  --border-light: #bdc0c2;
+  --bg-secondary: #e0e4e5;
+  --bg-tertiary: #d1d4d6;
+  --bg-chrome: #dbdee0;
+  --surface: #e7ebed;
+  --border-light: #bcc8c3;
+  --border-strong: #92a59e;
   --text-primary: #363738;
   --text-secondary: #58595a;
-  --text-muted: #5d5e5f;
+  --text-muted: #5b5c5d;
   --accent-primary: #0b3d5c;
   --error: #9e2a2a;
-  --warning: #8f4b00;
+  --warning: #8a4800;
   --success: #0d683f;
   --syntax-keyword: #0b3d5c;
   --syntax-string: #0d683f;
-  --syntax-number: #8f4b00;
-  --syntax-type: #0d6860;
+  --syntax-number: #8a4800;
+  --syntax-type: #0c645c;
   --syntax-function: #2a5f7a;
   --syntax-comment: #5b6b74;
   --accent-primary-bg: color-mix(in srgb, #0b3d5c 20%, transparent);
+  --radius: 3px;
+  --radius-panel: 4px;
+  --radius-row: 3px;
+  --rule-width: 2px;
+  --marker-width: 3px;
+  --shadow-card: 0 1px 2px rgba(11, 23, 33, 0.08);
+  --shadow-popup: 0 6px 16px rgba(11, 23, 33, 0.22);
+  --shadow-control: none;
+  --row-height: 22px;
+  --control-height: 24px;
 }
 
 /* Industrial — Control Room Cyan — dark */
 :root[data-theme="industrial-control-cyan"] {
   color-scheme: dark;
   --bg-primary: #040f13;
-  --bg-secondary: #111b1e;
-  --bg-tertiary: #202a2d;
-  --surface: #162023;
-  --border-light: #323a3d;
+  --bg-secondary: #162024;
+  --bg-tertiary: #2c3538;
+  --bg-chrome: #283134;
+  --surface: #1e272a;
+  --border-light: #26333f;
+  --border-strong: #3a4d5f;
   --text-primary: #bbbebf;
-  --text-secondary: #8e9395;
-  --text-muted: #8b8f91;
+  --text-secondary: #979c9d;
+  --text-muted: #989c9e;
   --accent-primary: #2bb3d6;
   --error: #ff7a7a;
   --warning: #f6b93b;
@@ -101,95 +144,143 @@
   --syntax-keyword: #2bb3d6;
   --syntax-string: #35d39a;
   --syntax-number: #f6b93b;
-  --syntax-type: #5490de;
+  --syntax-type: #699ee2;
   --syntax-function: #62a8ff;
   --syntax-comment: #7e93a3;
   --accent-primary-bg: color-mix(in srgb, #2bb3d6 30%, transparent);
+  --radius: 6px;
+  --radius-panel: 6px;
+  --radius-row: 6px;
+  --rule-width: 1px;
+  --marker-width: 4px;
+  --shadow-card: none;
+  --shadow-popup: none;
+  --shadow-control: 0 0 10px rgba(43, 179, 214, 0.3);
+  --row-height: 20px;
+  --control-height: 22px;
 }
 
 /* Industrial — Day Cyan — light */
 :root[data-theme="industrial-day-cyan"] {
   color-scheme: light;
   --bg-primary: #eef1f3;
-  --bg-secondary: #e3e6e8;
-  --bg-tertiary: #d6d9db;
-  --surface: #e9ecee;
-  --border-light: #bec1c2;
+  --bg-secondary: #dee0e2;
+  --bg-tertiary: #caccce;
+  --bg-chrome: #ccced0;
+  --surface: #e7e9ec;
+  --border-light: #b0b8c4;
+  --border-strong: #99a3b3;
   --text-primary: #373738;
-  --text-secondary: #58595a;
-  --text-muted: #5d5e5f;
+  --text-secondary: #555657;
+  --text-muted: #565657;
   --accent-primary: #33556e;
-  --error: #5e5e5e;
-  --warning: #92400e;
-  --success: #585e6a;
+  --error: #575757;
+  --warning: #8c3d0d;
+  --success: #515761;
   --syntax-keyword: #33556e;
-  --syntax-string: #585e6a;
-  --syntax-number: #92400e;
+  --syntax-string: #515761;
+  --syntax-number: #8c3d0d;
   --syntax-type: #33406e;
   --syntax-function: #1e40af;
   --syntax-comment: #666d7a;
   --accent-primary-bg: color-mix(in srgb, #33556e 20%, transparent);
+  --radius: 2px;
+  --radius-panel: 2px;
+  --radius-row: 2px;
+  --rule-width: 1px;
+  --marker-width: 4px;
+  --shadow-card: none;
+  --shadow-popup: none;
+  --shadow-control: none;
+  --row-height: 20px;
+  --control-height: 22px;
 }
 
 /* Leather Journal — Night Tan — dark */
 :root[data-theme="leather-night-tan"] {
   color-scheme: dark;
   --bg-primary: #1f160d;
-  --bg-secondary: #2a2219;
-  --bg-tertiary: #373028;
-  --surface: #2e261e;
-  --border-light: #474039;
+  --bg-secondary: #2e261e;
+  --bg-tertiary: #403932;
+  --bg-chrome: #3b332b;
+  --surface: #342c24;
+  --border-light: #483423;
+  --border-strong: #674a32;
   --text-primary: #c9c7c5;
-  --text-secondary: #9c9895;
-  --text-muted: #9c9894;
-  --accent-primary: #c28f51;
-  --error: #c48e5f;
-  --warning: #c48e5f;
-  --success: #c48e5f;
-  --syntax-keyword: #a4c251;
-  --syntax-string: #c48e5f;
-  --syntax-number: #c4b25f;
-  --syntax-type: #7bc251;
+  --text-secondary: #a7a3a1;
+  --text-muted: #a7a39f;
+  --accent-primary: #c99b64;
+  --error: #cb9b72;
+  --warning: #cb9b72;
+  --success: #cb9b72;
+  --syntax-keyword: #aec964;
+  --syntax-string: #cb9b72;
+  --syntax-number: #cbbb72;
+  --syntax-type: #8ac964;
   --syntax-function: #8fb4c9;
   --syntax-comment: #ab9578;
-  --accent-primary-bg: color-mix(in srgb, #c28f51 30%, transparent);
+  --accent-primary-bg: color-mix(in srgb, #c99b64 30%, transparent);
+  --radius: 6px;
+  --radius-panel: 10px;
+  --radius-row: 6px;
+  --rule-width: 1px;
+  --marker-width: 3px;
+  --shadow-card: none;
+  --shadow-popup: none;
+  --shadow-control: none;
+  --row-height: 22px;
+  --control-height: 24px;
 }
 
 /* Leather Journal — Parchment Tan — light */
 :root[data-theme="leather-parchment-tan"] {
   color-scheme: light;
   --bg-primary: #faf8f5;
-  --bg-secondary: #eeecea;
-  --bg-tertiary: #e1dfdd;
-  --surface: #f5f3f0;
-  --border-light: #c8c6c4;
+  --bg-secondary: #efedeb;
+  --bg-tertiary: #e2e0de;
+  --bg-chrome: #efedeb;
+  --surface: #f5f3f1;
+  --border-light: #dec9a1;
+  --border-strong: #c7a461;
   --text-primary: #3c3b3b;
   --text-secondary: #5c5c5b;
-  --text-muted: #636261;
+  --text-muted: #646362;
   --accent-primary: #88592a;
   --error: #835b0b;
   --warning: #835b0b;
   --success: #835b0b;
   --syntax-keyword: #88592a;
   --syntax-string: #835b0b;
-  --syntax-number: #606308;
+  --syntax-number: #656809;
   --syntax-type: #6d6322;
   --syntax-function: #3d5a73;
   --syntax-comment: #5a4d3c;
   --accent-primary-bg: color-mix(in srgb, #88592a 20%, transparent);
+  --radius: 8px;
+  --radius-panel: 12px;
+  --radius-row: 6px;
+  --rule-width: 1px;
+  --marker-width: 3px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-popup: 0 6px 16px rgba(16, 24, 40, 0.22);
+  --shadow-control: 0 1px 2px rgba(136, 89, 42, 0.06);
+  --row-height: 22px;
+  --control-height: 24px;
 }
 
 /* Newsprint — Night — dark */
 :root[data-theme="newsprint-night"] {
   color-scheme: dark;
   --bg-primary: #201f1d;
-  --bg-secondary: #2b2a28;
-  --bg-tertiary: #393836;
-  --surface: #302f2d;
-  --border-light: #484746;
+  --bg-secondary: #31302e;
+  --bg-tertiary: #464544;
+  --bg-chrome: #464544;
+  --surface: #383735;
+  --border-light: #403c35;
+  --border-strong: #5c564c;
   --text-primary: #cececd;
-  --text-secondary: #9f9f9e;
-  --text-muted: #a1a09f;
+  --text-secondary: #b2b2b1;
+  --text-muted: #b3b3b2;
   --accent-primary: #e8e2d6;
   --error: #e8a8a8;
   --warning: #dabb5f;
@@ -197,34 +288,56 @@
   --syntax-keyword: #e8e2d6;
   --syntax-string: #8fcf9e;
   --syntax-number: #dabb5f;
-  --syntax-type: #dd8e8e;
+  --syntax-type: #e4a5a5;
   --syntax-function: #8fc1e0;
   --syntax-comment: #a8a196;
   --accent-primary-bg: color-mix(in srgb, #e8e2d6 30%, transparent);
+  --radius: 0;
+  --radius-panel: 0;
+  --radius-row: 0;
+  --rule-width: 1px;
+  --marker-width: 2px;
+  --shadow-card: none;
+  --shadow-popup: none;
+  --shadow-control: none;
+  --row-height: 24px;
+  --control-height: 26px;
 }
 
 /* Nord — Dark Frost — dark */
 :root[data-theme="nord-dark-frost"] {
   color-scheme: dark;
   --bg-primary: #2e3640;
-  --bg-secondary: #38404a;
-  --bg-tertiary: #454c55;
-  --surface: #3d444d;
-  --border-light: #545a62;
+  --bg-secondary: #383f49;
+  --bg-tertiary: #444b54;
+  --bg-chrome: #383f49;
+  --surface: #3c434d;
+  --border-light: #4c566a;
+  --border-strong: #5e6a83;
   --text-primary: #ecedee;
-  --text-secondary: #b6b8bc;
-  --text-muted: #b9bbbf;
-  --accent-primary: #adbdd2;
+  --text-secondary: #b7b9bd;
+  --text-muted: #b7b9bd;
+  --accent-primary: #a9bad0;
   --error: #dfb0b4;
   --warning: #ebcb8b;
   --success: #c5d6b6;
-  --syntax-keyword: #adbdd2;
+  --syntax-keyword: #a9bad0;
   --syntax-string: #c5d6b6;
   --syntax-number: #ebcb8b;
   --syntax-type: #8ec3d2;
   --syntax-function: #b4d7e1;
   --syntax-comment: #d8dee9;
-  --accent-primary-bg: color-mix(in srgb, #adbdd2 30%, transparent);
+  --accent-primary-bg: color-mix(in srgb, #a9bad0 30%, transparent);
+  --radius: 8px;
+  --radius-panel: 12px;
+  --radius-row: 6px;
+  --rule-width: 1px;
+  --marker-width: 3px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-popup: 0 6px 16px rgba(16, 24, 40, 0.22);
+  --shadow-control: 0 1px 2px rgba(169, 186, 208, 0.06);
+  --row-height: 22px;
+  --control-height: 24px;
 }
 
 /* Nord — Light Frost — light */
@@ -232,21 +345,33 @@
   color-scheme: light;
   --bg-primary: #ecf0f4;
   --bg-secondary: #e2e5e9;
-  --bg-tertiary: #d5d8db;
+  --bg-tertiary: #d6d9dd;
+  --bg-chrome: #e2e5e9;
   --surface: #e8ebef;
-  --border-light: #bdc0c3;
+  --border-light: #bbc5d8;
+  --border-strong: #90a1c0;
   --text-primary: #363738;
   --text-secondary: #57595a;
-  --text-muted: #5c5e60;
-  --accent-primary: #455e7d;
+  --text-muted: #5d5f61;
+  --accent-primary: #466080;
   --error: #8a464c;
-  --warning: #7e5144;
+  --warning: #815446;
   --success: #536147;
-  --syntax-keyword: #455e7d;
+  --syntax-keyword: #466080;
   --syntax-string: #536147;
-  --syntax-number: #7e5144;
+  --syntax-number: #815446;
   --syntax-type: #2e6575;
-  --syntax-function: #454a7d;
+  --syntax-function: #464c80;
   --syntax-comment: #4c566a;
-  --accent-primary-bg: color-mix(in srgb, #455e7d 20%, transparent);
+  --accent-primary-bg: color-mix(in srgb, #466080 20%, transparent);
+  --radius: 8px;
+  --radius-panel: 12px;
+  --radius-row: 6px;
+  --rule-width: 1px;
+  --marker-width: 3px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-popup: 0 6px 16px rgba(16, 24, 40, 0.22);
+  --shadow-control: 0 1px 2px rgba(70, 96, 128, 0.06);
+  --row-height: 22px;
+  --control-height: 24px;
 }

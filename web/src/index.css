@@ -19,6 +19,10 @@
   --bg-primary: #1f1f1f;      /* editor */
   --bg-secondary: #181818;    /* side bar */
   --bg-tertiary: #2a2d2e;     /* hovered row, active line */
+  /* The activity bar, the deepest piece of chrome. Flush with the side bar by
+     default; a theme moves it off when it has neither a shadow nor a radius to
+     separate its furniture with. */
+  --bg-chrome: #181818;
   --surface: #252526;         /* panels, dialogs */
 
   --text-primary: #cccccc;
@@ -26,6 +30,11 @@
   --text-muted: #8b8b8b;
 
   --border-light: #2b2b2b;
+  /* The line around something that FLOATS — a dialog, the palette, the layout
+     menu. Load-bearing on the four themes that cast no shadow at all: with
+     --shadow-popup: none, this border is the only thing saying the palette is
+     over the code rather than in it. */
+  --border-strong: #3d3d3d;
 
   --accent-primary: #0078d4;
   --accent-primary-bg: rgba(0, 120, 212, 0.28);
@@ -92,7 +101,11 @@
   --line-height-prose: 1.5;
 
   /* One row height for the tree, the outline and every list, so the eye has a
-     single rhythm to follow. VS Code uses 22px. */
+     single rhythm to follow. VS Code uses 22px. A theme moves it by ONE step
+     either way, from the pack's own content spacing: the two `industrial` packs
+     are a dense control-room layout (20px) and `newsprint-night` is roomy
+     (24px). Seven of the ten packs agree on the spacing, so this is as far as
+     density can go without inventing values the packs do not carry. */
   --row-height: 22px;
   /*
    * One height for every control in the chrome — selects, small buttons.
@@ -103,6 +116,10 @@
    * different heights, and in a 30px bar both looked squashed and the button
    * touched the border (Nigel, 02/09/2026: "squished... bleeding into the
    * edges"). Set the height, not the padding.
+   *
+   * A theme moves it with --row-height, and the band is deliberately narrow
+   * (22-26px): the toolbar and the config strip are both 34px, so a control
+   * above 26px stops having air around it and the 1.4.2 complaint comes back.
    */
   --control-height: 24px;
   --header-height: 35px;
@@ -117,13 +134,43 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* Nearly square. VS Code's chrome is flat; rounded corners read as a web app
-     dropped into a tool, which is exactly the impression to avoid here. */
-  --radius: 3px;
+  /*
+   * Geometry.
+   *
+   * These are the DEFAULTS, and they are today's look: a theme that names none
+   * of them degrades to the flat, nearly-square VS Code chrome the app has
+   * always had rather than to nothing. Every one of them is overridden per
+   * theme by themes.generated.css, from the pack's own geometry — see
+   * tools/build-themes.py.
+   *
+   * Nearly square. VS Code's chrome is flat; rounded corners read as a web app
+   * dropped into a tool, which is exactly the impression to avoid here — but
+   * `nord` and `aurora` are rounded in Perspective, and an IDE that ignores
+   * that is the same shell recoloured (Nigel, 02/09/2026).
+   */
+  --radius: 3px;              /* controls: buttons, inputs, selects, tabs */
+  --radius-panel: 3px;        /* framed and floating surfaces */
+  --radius-row: 0;            /* the highlight behind a list row */
+
+  /* The hairline under a strip or head, and the bar that marks an active tab,
+     activity item or note. Separate, because a theme can be heavy on one and
+     light on the other: `finance-ledger` doubles its rules, `newsprint-night`
+     keeps the thinnest marker of the ten. */
+  --rule-width: 1px;
+  --marker-width: 2px;
+
+  /* Elevation. `none` on the flat themes, deliberately: they separate their
+     layers with --border-strong instead. */
+  --shadow-card: none;
+  --shadow-popup: 0 8px 24px rgba(0, 0, 0, 0.44);
+  --shadow-control: none;
 
   /* Fixed chrome dimensions, referenced by both the layout and its JS. */
   --activity-bar-width: 48px;
-  --panel-default-height: 260px;
+  /* No --panel-default-height: the bottom panel's opening size is a share of
+     the VIEWPORT (see Workspace#defaultPanelHeight), because a fixed 260px was
+     measured cramped at 1000px in the 02/09/2026 review. A token nothing reads
+     is worse than no token — the next reader changes it and nothing moves. */
   --rail-min-width: 170px;
   --rail-default-width: 260px;
   --outline-default-width: 240px;
@@ -222,6 +269,10 @@ button.primary,
 .button.primary {
   background: var(--accent-primary);
   color: #ffffff;
+  /* The pack's own button shadow, recoloured to this theme's accent — the two
+     aurora packs both name a violet glow, including the teal one. `none` on the
+     six packs that name no button shadow. */
+  box-shadow: var(--shadow-control);
 }
 
 button.primary:hover:not(:disabled) {

@@ -566,8 +566,13 @@ function OutputBlock({
  * text, so a frame either resolves to something openable or it does not. A frame
  * that does not still shows: a traceback with holes in it is worse than one with
  * some unclickable lines.
+ *
+ * Exported since 1.7.0 for a failed named-query test run, which the server
+ * answers with the SAME structured error (NAMED-QUERIES.md §2). Two renderings
+ * of one payload would drift, and the one people see less often is the one that
+ * would rot.
  */
-function Traceback({
+export function Traceback({
   error,
   sourcePath,
   onOpenFrame,

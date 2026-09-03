@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.5.4 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.7.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -11,9 +11,10 @@ This file covers only what is specific to this module.
 A browser-based Jython IDE for Ignition 8.3, served from the Gateway. Edit
 Project Library and Gateway event scripts with completions taken from the running
 gateway, live error checking, an outline of the open script, and a script console
-that executes on the Gateway with its output streamed as it is produced. The
-LSP also answers definition, workspace-symbol and project-wide text search, but
-nothing in the UI calls them yet — `ActivityBar` has no Search view.
+that executes on the Gateway with its output streamed as it is produced. Since
+1.6.0 it also NAVIGATES a project: go-to-definition (F12, Ctrl-click), quick open
+(Ctrl+P, `#` for symbols), a Search view over project-wide text search, name-based
+references (Shift+F12), and a Problems panel over every open document.
 
 **Internal/PoC status, like web-designer and playwright: NOT in `modules/release.sh`
 or `test-all.sh`, and never on the public portal.** Build with its own `./gradlew`.
@@ -83,6 +84,41 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   the gateway's own filesystem after `Override Resource`, which had created no
   local resource. The local copy appears on save, through the existing
   own-project write path.
+- **A results list that is name-based must SAY so, wherever it is shown.**
+  `scriptide/references` matches whole identifiers, not receivers — it is
+  deliberately NOT `textDocument/references`, because that method promises a
+  type-aware answer this server cannot give and answering it would be lying in
+  the protocol. Two unrelated classes with a `write` method both answer to
+  `write`. The Search view carries the caveat in its status line and
+  `validate_v16_nav.py` asserts the words are there: a list read as a real
+  find-references is a rename waiting to break an unrelated method.
+- **A cross-file jump publishes a reveal for a view that does not exist yet.**
+  Opening the target is React state, so the CodeMirror view for it is created by
+  an effect on the NEXT render — after the caller's `await` has resolved. The
+  editor therefore REMEMBERS one pending reveal and applies it when the view
+  appears; dropping it lands the caret on line 1 with nothing on screen saying
+  why, which is what the clicked-traceback path did from 1.5.0. Every navigation
+  feature added later goes through the same `scriptide:reveal` event and inherits
+  the fix — do not "simplify" it back to a straight lookup.
+- **The script tree ships COLLAPSED and does not list Web Dev** (Nigel,
+  02/09/2026). Quick open is the fast path now, so the tree is for browsing,
+  which starts by choosing a branch; and Web Dev endpoints have their own
+  activity-bar view with per-endpoint verbs and the config dialog, so listing
+  them in the tree as well made the poorer of two entry points the first one
+  people found. `FileTree` tracks an EXPANDED set rather than a collapsed one so
+  that default falls out of the empty set — the alternative has to enumerate keys
+  that do not exist until the project loads, and a missed key opens itself.
+  `SHOWN_IN_ANOTHER_VIEW` is the only reason a resource type may be omitted;
+  `unknownGroups` still renders anything this build has never heard of, because
+  silently dropping a resource the gateway sent is how a script becomes
+  uneditable with no message.
+- **`ETag` is a quoted entity tag, and `If-Match` is parsed tolerantly.** Quoted
+  per RFC 9110 §8.8.3 since 1.6.0; `HandlerSupport.unquoteEtag` strips `W/` and
+  the quotes on the way in. Both halves are load-bearing together: a page loaded
+  before the change holds a bare signature and sends it bare, a page loaded after
+  it holds a value its own reader already stripped, and a proxy may quote either.
+  Comparing raw strings turns any of those into a permanent 409 that reads on
+  screen as somebody else editing the file.
 - **This module is not becoming a git module** (Nigel, 01/09/2026).
   `Gaskony-Ignition/module-git` exists. git is driven from the terminal's command
   line; anything added later is VS Code-shaped status and diffs on top of the

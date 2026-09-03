@@ -44,7 +44,11 @@
   min-height: var(--row-height);
   padding: 0 var(--space-2);
   border: none;
-  border-radius: 0;
+  /* The highlight behind a row takes the theme's row radius: 0 on
+     `newsprint-night`, 6px on the rounded packs. It is the shape the eye reads
+     most often in this app, which is why it has its own token rather than
+     borrowing the control radius. */
+  border-radius: var(--radius-row);
   background: none;
   color: var(--text-primary);
   font-family: inherit;
@@ -181,6 +185,15 @@
   font-style: normal;
 }
 
+/* "legacy" on a version-1 named query. The ERROR colour, not the warning one:
+   the platform cannot read that resource at all and runNamedQuery raises on it,
+   so the row is broken rather than merely unusual. Upright, like "off", because
+   it is a state of the resource and not a note about where it came from. */
+.badge-legacy {
+  color: var(--error);
+  font-style: normal;
+}
+
 /* ---- row actions --------------------------------------------------------- */
 
 /* The header and its action button share a row, so the "+" sits on the section
@@ -213,7 +226,7 @@
   width: 22px;
   background: none;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius-row);
   color: var(--text-muted);
   cursor: pointer;
   line-height: 0;

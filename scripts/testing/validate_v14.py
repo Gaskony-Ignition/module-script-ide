@@ -27,6 +27,37 @@ def rec(n, ok, d=""):
     print(f"  [{'PASS' if ok else 'FAIL'}] {n}: {d}")
 
 
+def skip(n, d=""):
+    # A pass with the reason stated, matching validate_v15_tree. A check that
+    # cannot run on THIS gateway is not evidence of a defect, and dropping it
+    # silently would leave the tally looking complete when it is not.
+    res.append((n, True, d))
+    print(f"  [SKIP] {n}: {d}")
+
+
+def expand_tree(page, passes=6):
+    """Open every branch of the script tree.
+
+    The tree ships COLLAPSED from 1.6.0 (Nigel, 02/09/2026) — quick open is the
+    fast path now, and a whole project's scripts open on landing is a column that
+    has to be scrolled before anything can be chosen. Every suite that clicks a
+    script row has to open its branch first, so this is the shared way to do it.
+
+    Repeated, because opening a package reveals the packages nested inside it.
+    """
+    for _ in range(passes):
+        shut = page.locator('.file-tree [aria-expanded="false"]')
+        count = shut.count()
+        if count == 0:
+            return
+        for index in range(count):
+            try:
+                shut.nth(index).click()
+            except Exception:
+                pass          # a click that re-renders the list is not a failure
+        page.wait_for_timeout(120)
+
+
 with sync_playwright() as p:
     b = p.chromium.launch()
     page = b.new_context(viewport={"width": 1600, "height": 1000}).new_page()
@@ -37,16 +68,39 @@ with sync_playwright() as p:
     page.on("pageerror", lambda e: errs.append(str(e)))
     login(page)
     page.goto(GATEWAY_URL + SPA, wait_until="load", timeout=30000)
-    page.wait_for_selector(".file-tree-item", timeout=20000)
+    page.wait_for_selector(".file-tree-header", timeout=20000)
+    expand_tree(page)
 
     # ---------- 1. inheritance: read-only until overridden ----------
-    page.select_option(".workspace-project select", INHERIT_PROJECT)
-    page.wait_for_timeout(2500)
-
-    inherited = page.locator(".file-tree-row:has(.badge-inherited) .file-tree-item").first
-    have_fixture = inherited.count() > 0
-    rec("FIXTURE: an inherited script exists to test against",
-        have_fixture, f"project={INHERIT_PROJECT}")
+    #
+    # The fixture project may simply not be on this gateway: the default,
+    # Site_Redgum_Sewer, was removed from the rig with the water-suite projects,
+    # and until 1.6.0 that made the whole suite CRASH in select_option with a
+    # 30-second Playwright timeout and a stack trace — losing the terminal, hint
+    # scope and chrome-sizing checks, none of which need it. An absent fixture is
+    # a skip with its reason, exactly as validate_v15_tree already does.
+    projects = page.locator(".workspace-project select option").all_inner_texts()
+    have_project = any(option.strip().startswith(INHERIT_PROJECT) for option in projects)
+    if have_project:
+        page.select_option(".workspace-project select", INHERIT_PROJECT)
+        page.wait_for_timeout(2500)
+        inherited = page.locator(".file-tree-row:has(.badge-inherited) .file-tree-item").first
+        have_fixture = inherited.count() > 0
+        rec("FIXTURE: an inherited script exists to test against",
+            have_fixture, f"project={INHERIT_PROJECT}")
+        if not have_fixture:
+            skip("INHERITANCE: read-only, override and save checks",
+                 f"'{INHERIT_PROJECT}' has no inherited script — its parent is most "
+                 "likely not marked inheritable, which is a project setting outside "
+                 "this module")
+    else:
+        have_fixture = False
+        skip("FIXTURE: an inherited script exists to test against",
+             f"no project '{INHERIT_PROJECT}' on this gateway "
+             f"(saw: {', '.join(p.strip() for p in projects) or 'none'}). "
+             "Set SI_INHERIT_PROJECT to a project with an inheritable parent.")
+        skip("INHERITANCE: read-only, override and save checks",
+             "needs the fixture project above")
 
     if have_fixture:
         name = inherited.inner_text().strip().split("\n")[0]
@@ -240,20 +294,31 @@ with sync_playwright() as p:
 
     # THE row-count assertion. The inheritance notice and the settings used to
     # be two stacked rows above the code; they are one row now.
-    page.select_option(".workspace-project select", INHERIT_PROJECT)
-    page.wait_for_timeout(2500)
-    page.locator(".file-tree-row:has(.badge-inherited) .file-tree-item").first.click()
-    page.wait_for_timeout(2000)
-    rows = page.evaluate("""() => {
-      const n = document.querySelector('.inherited-note');
-      const s = document.querySelector('.config-strip');
-      if (!n || !s) return null;
-      return { sameRow: s.contains(n),
-               tops: [n.getBoundingClientRect().top, s.getBoundingClientRect().top] };
-    }""")
-    rec("LAYOUT: the inheritance notice shares the settings row",
-        bool(rows and rows["sameRow"]),
-        f"tops {rows['tops']}" if rows else "one of them is missing")
+    #
+    # Guarded on the same fixture as section 1: the notice only renders on an
+    # inherited script, so with no inheritance fixture there is nothing to
+    # measure. Skipped with its reason rather than left to time out.
+    if not have_fixture:
+        skip("LAYOUT: the inheritance notice shares the settings row",
+             "no inherited script on this gateway — see the fixture skip above")
+        skip("LAYOUT: chrome above the code stays under 80px",
+             "needs an inherited script, which sets the taller chrome being measured")
+        rows = None
+    else:
+        page.select_option(".workspace-project select", INHERIT_PROJECT)
+        page.wait_for_timeout(2500)
+        page.locator(".file-tree-row:has(.badge-inherited) .file-tree-item").first.click()
+        page.wait_for_timeout(2000)
+        rows = page.evaluate("""() => {
+          const n = document.querySelector('.inherited-note');
+          const s = document.querySelector('.config-strip');
+          if (!n || !s) return null;
+          return { sameRow: s.contains(n),
+                   tops: [n.getBoundingClientRect().top, s.getBoundingClientRect().top] };
+        }""")
+        rec("LAYOUT: the inheritance notice shares the settings row",
+            bool(rows and rows["sameRow"]),
+            f"tops {rows['tops']}" if rows else "one of them is missing")
     if rows:
         chrome = page.evaluate("""() => {
           const ed = document.querySelector('.workspace-editor').getBoundingClientRect();

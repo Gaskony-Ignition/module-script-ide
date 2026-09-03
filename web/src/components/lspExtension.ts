@@ -165,16 +165,28 @@ async function infoDom(
     /* an unresolvable item still shows its detail line */
   }
   const body = documentationText(resolved.documentation);
-  // The server's resolved `documentation` markdown already OPENS with the
-  // signature as a fenced snippet (LanguageServer#markdownFor puts entry.detail()
-  // in a ```python fence before anything else), and that is the exact same
-  // string as `resolved.detail`. Rendering both blocks put the signature on
-  // screen twice — once as its own line, once as the first line of the body.
-  // Only show `detail` on its own when the body does not already start with it
-  // (a bare `detail` with no documentation at all, say).
-  const detail = resolved.detail && !body.startsWith(resolved.detail) ? resolved.detail : '';
+  const detail = detailToShow(resolved.detail, body);
   if (!body && !detail && !deprecated) return null;
   return textPanel([deprecated ? 'Deprecated.' : '', detail, body]);
+}
+
+/**
+ * The `detail` line to render ABOVE the documentation body, or `''` for none.
+ *
+ * The server's resolved `documentation` markdown already OPENS with the
+ * signature as a fenced snippet (`LanguageServer#markdownFor` puts
+ * `entry.detail()` in a ```python fence before anything else), and that is the
+ * exact same string as `resolved.detail`. Rendering both blocks put the
+ * signature on screen twice — once as its own line, once as the first line of
+ * the body. So `detail` is shown on its own only when the body does not already
+ * start with it (a bare `detail` with no documentation at all, say).
+ *
+ * Pulled out of {@link infoDom} in 1.6.0 purely so the rule is testable: it was
+ * fixed in 1.5.0 and had nothing asserting it, which is how it regresses.
+ */
+export function detailToShow(detail: string | undefined, body: string): string {
+  if (!detail) return '';
+  return body.startsWith(detail) ? '' : detail;
 }
 
 /** A plain-text tooltip body. textContent only — never innerHTML. */
@@ -447,6 +459,114 @@ const lspTheme = EditorView.theme({
   },
 });
 
+// ---- navigation ----
+
+/**
+ * The workspace's request to open a place the server named.
+ *
+ * A window event, for the same reason the reveal event is one: the editor owns
+ * its CodeMirror views and the thing that can open a script is five components
+ * away, so the alternative is threading an imperative handle through everything
+ * in between. See `Workspace#openLocation`, which is the only listener.
+ */
+export interface OpenLocationDetail {
+  /** `ignition://<project>/<path>[#key]`, straight from the server. */
+  uri: string;
+  line: number;
+  character: number;
+}
+
+/** The workspace's request to list every place a name is written. */
+export interface FindReferencesDetail {
+  name: string;
+}
+
+export const OPEN_LOCATION_EVENT = 'scriptide:open-location';
+export const FIND_REFERENCES_EVENT = 'scriptide:find-references';
+
+/**
+ * Go to the definition of the name at `pos`.
+ *
+ * Answering nothing is the COMMON case and must stay silent: a platform call
+ * like `system.tag.readBlocking` has no source file on this gateway, and a
+ * dialog saying so on every F12 over a `system.` call would train people out of
+ * pressing it. Hover already carries that documentation.
+ */
+async function goToDefinition(view: EditorView, client: LspClient, uri: string, pos: number) {
+  let targets: Array<{ uri: string; range: { start: { line: number; character: number } } }> = [];
+  try {
+    targets = await client.definition(uri, offsetToPosition(view.state.doc, pos));
+  } catch {
+    return;
+  }
+  const target = targets[0];
+  if (!target) return;
+  window.dispatchEvent(
+    new CustomEvent<OpenLocationDetail>(OPEN_LOCATION_EVENT, {
+      detail: {
+        uri: target.uri,
+        line: target.range.start.line,
+        character: target.range.start.character,
+      },
+    })
+  );
+}
+
+/**
+ * Go-to-definition and find-references on one view.
+ *
+ * **Ctrl/Cmd-click is bound on `mousedown`, not `click`.** By the time a click
+ * fires CodeMirror has already moved the selection to the pointer, so the
+ * position is still right — but the browser has also begun a drag-select, and
+ * releasing over another line leaves a stray selection behind on a gesture the
+ * user meant as a jump. Handling mousedown and returning true suppresses that.
+ *
+ * The word under the cursor is taken from `wordAt`, not from a dotted name:
+ * references are name-based (see `LspClient#references`) and the name is the
+ * last segment. `util.compute` and `self.compute` are both a reference to
+ * `compute`, and the server is not being asked to pretend otherwise.
+ */
+function lspNavigation(client: LspClient, uri: string): Extension {
+  return [
+    keymap.of([
+      {
+        key: 'F12',
+        preventDefault: true,
+        run: (view) => {
+          void goToDefinition(view, client, uri, view.state.selection.main.head);
+          return true;
+        },
+      },
+      {
+        key: 'Shift-F12',
+        preventDefault: true,
+        run: (view) => {
+          const word = view.state.wordAt(view.state.selection.main.head);
+          if (!word) return true;
+          window.dispatchEvent(
+            new CustomEvent<FindReferencesDetail>(FIND_REFERENCES_EVENT, {
+              detail: { name: view.state.sliceDoc(word.from, word.to) },
+            })
+          );
+          return true;
+        },
+      },
+    ]),
+    EditorView.domEventHandlers({
+      mousedown: (event, view) => {
+        if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+        if (pos === null) return false;
+        // Only over a word: a Ctrl-click on whitespace is someone placing a
+        // multi-cursor, which is what the default handler would have done.
+        if (!view.state.wordAt(pos)) return false;
+        void goToDefinition(view, client, uri, pos);
+        return true;
+      },
+    }),
+  ];
+}
+
 /**
  * Everything the language client contributes to one editor view.
  *
@@ -456,6 +576,7 @@ const lspTheme = EditorView.theme({
 export function lspExtension(client: LspClient, ref: LspDocumentRef): Extension {
   const uri = lspUri(ref.project, ref.path, ref.scriptKey);
   return [
+    lspNavigation(client, uri),
     autocompletion({
       activateOnTyping: true,
       closeOnBlur: true,

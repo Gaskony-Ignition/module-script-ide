@@ -3,7 +3,7 @@
   flex: 0 0 auto;
   overflow-x: auto;
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: var(--rule-width) solid var(--border-light);
 }
 
 .tab {
@@ -80,7 +80,11 @@
 .tab {
   height: var(--tab-height);
   border-bottom: none;
-  border-top: 1px solid transparent;
+  border-top: var(--marker-width) solid transparent;
+  /* Rounded at the top only, and only as much as the theme's controls are: the
+     tab and the editor below it are one surface, so a radius on the bottom
+     corners would draw a line where there is none. */
+  border-radius: var(--radius) var(--radius) 0 0;
   background: var(--bg-secondary);
 }
 

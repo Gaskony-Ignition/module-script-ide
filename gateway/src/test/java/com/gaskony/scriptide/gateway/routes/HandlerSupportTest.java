@@ -92,4 +92,37 @@ class HandlerSupportTest {
         ResourcePath rp = new ResourcePath(new ResourceType("ignition", "timer"), "PlantSim");
         assertThat(HandlerSupport.encodePath(rp)).isEqualTo("ignition/timer/PlantSim");
     }
+
+    // ==================== entity tags (1.6.0) ====================
+
+    @Test
+    @DisplayName("an ETag is emitted quoted, per RFC 9110")
+    void quotesTheSignature() {
+        assertThat(HandlerSupport.quoteEtag("abc123")).isEqualTo("\"abc123\"");
+    }
+
+    @ParameterizedTest(name = "If-Match [{0}] reduces to the bare signature")
+    @ValueSource(strings = {"abc123", "\"abc123\"", "W/\"abc123\"", "  \"abc123\"  ", "W/ \"abc123\""})
+    @DisplayName("every entity-tag form a client or proxy may send compares equal")
+    void unquotesEveryForm(String raw) {
+        // The whole point: a bare value from a page loaded before 1.6.0, a quoted
+        // one from a page loaded after it, and a proxy's weak rewrite of either all
+        // have to reach the comparison as the same string. Anything else is a
+        // permanent 409 that reads on screen as somebody else editing the file.
+        assertThat(HandlerSupport.unquoteEtag(raw)).isEqualTo("abc123");
+    }
+
+    @Test
+    @DisplayName("a signature that merely contains a quote is not mangled")
+    void leavesInteriorQuotesAlone() {
+        assertThat(HandlerSupport.unquoteEtag("ab\"cd")).isEqualTo("ab\"cd");
+    }
+
+    @Test
+    @DisplayName("null stays null — an absent If-Match is not an empty signature")
+    void keepsNullNull() {
+        // The write path distinguishes "no If-Match at all" (428) from a stale one
+        // (409), so turning null into "" here would swap one error for the other.
+        assertThat(HandlerSupport.unquoteEtag(null)).isNull();
+    }
 }

@@ -109,6 +109,56 @@ public final class ScriptIdePaths {
      */
     public static final String ROUTE_WEBDEV_CONFIG = "/api/webdev/config/:path";
 
+    /**
+     * {@code GET /api/named-queries?project=X} — every named query in one
+     * project, with its inheritance origin and the three fields the tree shows.
+     */
+    public static final String ROUTE_NAMED_QUERIES = "/api/named-queries";
+
+    /**
+     * {@code GET|POST|DELETE /api/named-queries/content/:path?project=X} — the
+     * SQL text of one named query.
+     *
+     * <p>{@code :path} is the query's path INSIDE the project
+     * ({@code Folder/Name}), URL-encoded into ONE route segment. Unlike the
+     * script routes it carries no {@code <moduleId>/<typeId>} prefix: the type is
+     * fixed at {@code ignition/named-query}, and this is the same string
+     * {@code system.db.runNamedQuery} takes, which the test-run route needs
+     * anyway.</p>
+     */
+    public static final String ROUTE_NAMED_QUERY_CONTENT = "/api/named-queries/content/:path";
+
+    /**
+     * {@code GET|POST /api/named-queries/settings/:path?project=X} — everything
+     * the Designer's Settings and Authoring tabs hold except the SQL itself:
+     * type, database, caching, fallback, permissions and the parameter list.
+     *
+     * <p>Separate from the content route because the SQL is {@code text/plain}
+     * and these are JSON, and because a client saves them against one ETag but
+     * may read either alone.</p>
+     */
+    public static final String ROUTE_NAMED_QUERY_SETTINGS = "/api/named-queries/settings/:path";
+
+    /**
+     * {@code POST /api/named-queries/rename?project=X} — move one query, or a
+     * folder and everything under it.
+     *
+     * <p>Not a verb on the content route: a rename is two resource operations
+     * (create at the destination, delete at the source) in ONE push, and a folder
+     * rename is 2n of them.</p>
+     */
+    public static final String ROUTE_NAMED_QUERY_RENAME = "/api/named-queries/rename";
+
+    /**
+     * {@code POST /api/named-queries/test?project=X} — run one named query with
+     * supplied parameters and return its result.
+     *
+     * <p>Administrator only, and routed through the same {@code ExecutionService}
+     * as the console: it is arbitrary SQL against a live database, so it must not
+     * have a second, softer gate than running the equivalent Python by hand.</p>
+     */
+    public static final String ROUTE_NAMED_QUERY_TEST = "/api/named-queries/test";
+
     // ==================== Servlets (NOT under /data) ====================
 
     /**

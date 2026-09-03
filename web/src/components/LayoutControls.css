@@ -36,9 +36,9 @@
   min-width: 210px;
   padding: var(--space-1) 0;
   background: var(--surface);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.36);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-popup);
 }
 
 .layout-menu-title {
@@ -53,7 +53,7 @@
   padding: 3px var(--space-3) 3px var(--space-1);
   background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-row);
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   text-align: left;

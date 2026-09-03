@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render as renderRaw, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import FileTree, { buildPackageTree } from './FileTree';
 import type { ScriptEntry } from '../api/scripts';
@@ -63,6 +63,28 @@ const SCRIPTS: ScriptEntry[] = [
     enabled: false,
   }),
 ];
+
+/**
+ * Render the tree with every branch OPEN.
+ *
+ * The tree ships collapsed (Nigel, 02/09/2026): a whole project's scripts with
+ * every group open on landing is a column that has to be scrolled before
+ * anything can be chosen, and quick open is the fast path now. Almost every
+ * check below is about what a branch CONTAINS, though, so they open it first —
+ * the shipped default is asserted on its own, in "collapsed by default".
+ *
+ * Repeated until nothing more opens, because opening a package reveals the
+ * packages nested inside it.
+ */
+function render(ui: React.ReactElement) {
+  const result = renderRaw(ui);
+  for (let pass = 0; pass < 6; pass++) {
+    const shut = screen.queryAllByRole('button', { expanded: false });
+    if (shut.length === 0) break;
+    for (const button of shut) fireEvent.click(button);
+  }
+  return result;
+}
 
 describe('FileTree', () => {
   it('follows the Designer shape: Gateway Events, then Project Library', () => {
@@ -432,5 +454,69 @@ describe('FileTree: sort order', () => {
     // each group is itself case-insensitively ordered.
     expect(tree.children.map((c) => c.name)).toEqual(['aardvark', 'Zebra']);
     expect(tree.scripts.map((s) => s.name)).toEqual(['apple', 'Banana']);
+  });
+});
+
+describe('FileTree defaults', () => {
+  const WITH_WEBDEV: ScriptEntry[] = [
+    ...SCRIPTS,
+    entry({
+      path: 'com.inductiveautomation.webdev/resources/admin',
+      typeId: 'resources',
+      name: 'admin',
+      typeLabel: 'Web Dev',
+      scriptKey: 'doGet.py',
+      methods: ['doGet'],
+    }),
+  ];
+
+  it('ships COLLAPSED — nothing is open until a branch is chosen', () => {
+    // Nigel, 02/09/2026. A whole project's scripts with every group open on
+    // landing is a column of rows that has to be scrolled before anything can be
+    // chosen; quick open (Ctrl+P) is the fast path now, and the tree is for
+    // browsing, which starts by picking a branch.
+    renderRaw(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
+    expect(screen.queryAllByRole('button', { expanded: true })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { expanded: false }).length).toBeGreaterThan(0);
+    // And nothing inside a branch is on screen yet.
+    expect(screen.queryByRole('button', { name: /Poller/ })).toBeNull();
+  });
+
+  it('opens one branch at a time, leaving the rest shut', () => {
+    renderRaw(<FileTree scripts={SCRIPTS} selectedPath={null} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Project Library/ }));
+    expect(screen.getByRole('button', { name: /Project Library/ }))
+      .toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: /Gateway Events/ }))
+      .toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('does NOT list Web Dev endpoints — they have their own view', () => {
+    // Nigel, 02/09/2026: with a Web Dev tab on the activity bar there is no
+    // reason for a second entry point in the script tree. The dedicated view is
+    // the richer one (per-endpoint verbs, the config dialog), and listing them
+    // in both made the poorer one the first that people found.
+    render(<FileTree scripts={WITH_WEBDEV} selectedPath={null} onSelect={vi.fn()} />);
+    expect(screen.queryByText('Web Dev')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /admin/ })).toBeNull();
+  });
+
+  it('still shows a type it has never heard of, rather than dropping it', () => {
+    // The omission above is "handled elsewhere", not "unrecognised". A resource
+    // the gateway sent that this build does not know about must still get a row:
+    // silently dropping one is how a script becomes uneditable with no message.
+    render(
+      <FileTree
+        scripts={[entry({
+          path: 'ignition/some-future-type/Thing',
+          typeId: 'some-future-type' as ScriptEntry['typeId'],
+          name: 'Thing',
+          typeLabel: 'Some Future Type',
+        })]}
+        selectedPath={null}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('button', { name: /Thing/ })).toBeInTheDocument();
   });
 });

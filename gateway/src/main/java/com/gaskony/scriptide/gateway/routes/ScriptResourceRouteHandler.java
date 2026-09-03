@@ -352,7 +352,8 @@ public final class ScriptResourceRouteHandler {
                 "No such data key '" + key + "' on " + resourcePath);
         }
 
-        resp.setHeader("ETag", resource.getResourceSignature().toString());
+        resp.setHeader("ETag",
+            HandlerSupport.quoteEtag(resource.getResourceSignature().toString()));
         // text/plain, not application/json: this is a Python source file, and a
         // JSON content type makes browsers and proxies try to parse it.
         resp.setContentType("text/plain; charset=UTF-8");

@@ -10,8 +10,17 @@
  * Nothing in this file knows about documents, tabs, saving or the language
  * server. Those belong to the component that composes them.
  */
-import { indentUnit, syntaxHighlighting, HighlightStyle, bracketMatching } from '@codemirror/language';
+import {
+  indentUnit,
+  syntaxHighlighting,
+  HighlightStyle,
+  bracketMatching,
+  codeFolding,
+  foldGutter,
+  foldKeymap,
+} from '@codemirror/language';
 import { python } from '@codemirror/lang-python';
+import { sql } from '@codemirror/lang-sql';
 import { EditorState, type Extension } from '@codemirror/state';
 import {
   EditorView,
@@ -24,7 +33,7 @@ import {
   highlightSpecialChars,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
-import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
+import { gotoLine, highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { tags } from '@lezer/highlight';
 
 /**
@@ -111,6 +120,36 @@ export const findAndReplace: Extension[] = [
   keymap.of(searchKeymap),
 ];
 
+/**
+ * Folding, with its gutter — for FILES only, never the console.
+ *
+ * Its own export rather than part of {@link pythonSurface} because the Script
+ * Console shares that surface, and a fold arrow beside a three-line REPL entry
+ * is chrome for a gesture nobody would make. A file is where folding earns the
+ * gutter column.
+ *
+ * `codeFolding` is listed explicitly rather than left to `foldGutter` to pull
+ * in: the gutter renders from the fold STATE, and without the state extension
+ * the arrows appear and do nothing.
+ */
+export const folding: Extension[] = [
+  codeFolding(),
+  foldGutter(),
+  keymap.of(foldKeymap),
+];
+
+/**
+ * Go to line: Ctrl+G, as VS Code binds it.
+ *
+ * CodeMirror's own `searchKeymap` binds `gotoLine` to Mod-Alt-g, which nobody
+ * arrives here knowing. Both work; this adds the one people actually press.
+ * Bound in its own keymap ahead of the defaults so the binding wins whatever
+ * else claims Mod-g later.
+ */
+export const goToLine: Extension = keymap.of([
+  { key: 'Mod-g', run: gotoLine, preventDefault: true },
+]);
+
 /** Editing surface, syntax and history — everything but keymaps and fidelity. */
 export const pythonSurface: Extension[] = [
   lineNumbers(),
@@ -123,6 +162,38 @@ export const pythonSurface: Extension[] = [
   bracketMatching(),
   syntaxHighlighting(highlightStyle, { fallback: true }),
   python(),
+];
+
+/**
+ * Editing surface for a named query's SQL — the same one, with a different
+ * language.
+ *
+ * Everything above the language is deliberately identical to
+ * {@link pythonSurface}: the same theme, the same highlight style, the same
+ * gutters. A named query and the script that calls it are one piece of work
+ * (NAMED-QUERIES.md §Why), and two editors that look different make them read
+ * as two tools.
+ *
+ * `sql()` with no dialect gives standard SQL. A dialect is not chosen here
+ * because the connection decides it and the client is not told which — guessing
+ * MySQL for a Postgres connection would mis-highlight, and the highlighting is
+ * the only thing riding on it.
+ *
+ * The byte-fidelity facets are NOT included, exactly as they are not in
+ * `pythonSurface`: every composer applies them LAST, so a language extension
+ * can never win a precedence tie against them.
+ */
+export const sqlSurface: Extension[] = [
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  highlightSpecialChars(),
+  history(),
+  drawSelection(),
+  rectangularSelection(),
+  highlightActiveLine(),
+  bracketMatching(),
+  syntaxHighlighting(highlightStyle, { fallback: true }),
+  sql(),
 ];
 
 /**

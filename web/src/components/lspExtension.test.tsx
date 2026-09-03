@@ -8,7 +8,10 @@ import { FakeSocket } from '../test/fakeSocket';
 import type { OpenDoc } from '../workspace/documents';
 import CodeEditor from './CodeEditor';
 import {
+  FIND_REFERENCES_EVENT,
+  OPEN_LOCATION_EVENT,
   completionType,
+  detailToShow,
   documentationText,
   isDeprecated,
   markdownToText,
@@ -143,6 +146,7 @@ const SOURCE = 'def compute(values):\n\treturn sum(values)';
 
 function doc(overrides: Partial<OpenDoc> = {}): OpenDoc {
   return {
+    kind: 'script',
     uri: 'P::ignition/script-python/util/helpers',
     project: 'P',
     path: 'ignition/script-python/util/helpers',
@@ -419,5 +423,157 @@ describe('CodeEditor with a language client', () => {
     );
     expect(document.querySelectorAll('.code-editor-host')).toHaveLength(1);
     expect(FakeSocket.instances).toHaveLength(0);
+  });
+});
+
+/**
+ * The signature-twice rule.
+ *
+ * Fixed in 1.5.0 with nothing asserting it, which is how it comes back: the
+ * resolved documentation markdown ALREADY opens with the signature in a
+ * ```python fence, and that fenced line is the same string as `detail`. Render
+ * both and the completion panel shows the signature on its own line and again as
+ * the first line of the body.
+ */
+describe('detailToShow', () => {
+  const signature = 'readBlocking(tagPaths, [timeout])';
+
+  it('drops the detail when the body already starts with it', () => {
+    expect(detailToShow(signature, `${signature}\n\nReads tags.`)).toBe('');
+  });
+
+  it('keeps the detail when there is no body at all', () => {
+    expect(detailToShow(signature, '')).toBe(signature);
+  });
+
+  it('keeps the detail when the body starts with something else', () => {
+    expect(detailToShow(signature, 'Reads tags.')).toBe(signature);
+  });
+
+  it('is empty for an item with no detail', () => {
+    expect(detailToShow(undefined, 'Reads tags.')).toBe('');
+    expect(detailToShow('', 'Reads tags.')).toBe('');
+  });
+
+  it('does not treat a PREFIX of the detail as a repeat', () => {
+    // `read` is not `readBlocking(...)`; dropping the detail here would lose the
+    // signature entirely.
+    expect(detailToShow(signature, 'read')).toBe(signature);
+  });
+});
+
+describe('go-to-definition and find-references', () => {
+  beforeEach(() => {
+    FakeSocket.reset();
+  });
+
+  function client() {
+    const transport = new LspTransport({
+      url: () => 'ws://gateway.test/system/scriptide',
+      createSocket: FakeSocket.factory,
+    });
+    const lsp = new LspClient(transport);
+    transport.connect();
+    FakeSocket.latest().open();
+    FakeSocket.latest().clear();
+    return lsp;
+  }
+
+  function mount(lsp: LspClient) {
+    render(
+      <CodeEditor
+        docs={[doc()]}
+        activeUri={doc().uri}
+        readOnly={false}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        lsp={lsp}
+      />
+    );
+    const host = document.querySelector<HTMLElement>('.code-editor-host .cm-editor');
+    const view = host ? EditorView.findFromDOM(host) : null;
+    if (!view) throw new Error('no EditorView mounted');
+    return view;
+  }
+
+  it('asks the server for a definition on F12', async () => {
+    const lsp = client();
+    const view = mount(lsp);
+    await act(async () => {
+      view.dispatch({ selection: { anchor: 5 } });
+    });
+    FakeSocket.latest().clear();
+    await act(async () => {
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'F12', bubbles: true })
+      );
+    });
+    expect(FakeSocket.latest().methods()).toContain('textDocument/definition');
+  });
+
+  it('publishes the server\'s answer as an open-location event', async () => {
+    const lsp = client();
+    const view = mount(lsp);
+    const seen: Array<{ uri: string; line: number; character: number }> = [];
+    const listener = (event: Event) => {
+      seen.push((event as CustomEvent<{ uri: string; line: number; character: number }>).detail);
+    };
+    window.addEventListener(OPEN_LOCATION_EVENT, listener);
+    try {
+      await act(async () => {
+        view.dispatch({ selection: { anchor: 5 } });
+      });
+      await act(async () => {
+        view.contentDOM.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'F12', bubbles: true })
+        );
+      });
+      const frame = FakeSocket.latest()
+        .frames()
+        .find((f) => (f.msg as { method?: string }).method === 'textDocument/definition');
+      await act(async () => {
+        FakeSocket.latest().deliver({
+          ch: 'lsp',
+          msg: {
+            jsonrpc: '2.0',
+            id: (frame?.msg as { id: number }).id,
+            result: {
+              uri: 'ignition://P/ignition/script-python/util/other',
+              range: { start: { line: 12, character: 4 }, end: { line: 12, character: 4 } },
+            },
+          },
+        });
+      });
+      expect(seen).toEqual([
+        { uri: 'ignition://P/ignition/script-python/util/other', line: 12, character: 4 },
+      ]);
+    } finally {
+      window.removeEventListener(OPEN_LOCATION_EVENT, listener);
+    }
+  });
+
+  it('raises a references request for the WORD under the cursor on Shift+F12', async () => {
+    // The bare name, not a dotted path: references are name-based, and
+    // `util.compute` and `self.compute` are both a reference to `compute`.
+    const lsp = client();
+    const view = mount(lsp);
+    const names: string[] = [];
+    const listener = (event: Event) => {
+      names.push((event as CustomEvent<{ name: string }>).detail.name);
+    };
+    window.addEventListener(FIND_REFERENCES_EVENT, listener);
+    try {
+      await act(async () => {
+        view.dispatch({ selection: { anchor: 6 } });   // inside `compute`
+      });
+      await act(async () => {
+        view.contentDOM.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'F12', shiftKey: true, bubbles: true })
+        );
+      });
+      expect(names).toEqual(['compute']);
+    } finally {
+      window.removeEventListener(FIND_REFERENCES_EVENT, listener);
+    }
   });
 });

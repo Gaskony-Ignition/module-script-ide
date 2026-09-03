@@ -2,13 +2,15 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.5.4 · all phases complete · deployed on `ignition-module-testing`
-(8.3.8) 02/09/2026 — `deploy_gate.py` PASS, `validate_v15_term.py` 6/6,
-`validate_v15_exec.py` 19/19, `validate_v15_tree.py` 15/15 (one stated SKIP)**
+**Version 1.7.0 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
+`deploy_gate.py` PASS (9 routes mounted) and every suite green: `p1_p2` 8/8,
+`lsp` 10/10, `v11` 12/12, `v13` 22/22, `v14` 18/18, `v15_term` 6/6,
+`v15_exec` 20/20, `v15_tree` 15/15, `v16_nav` 25/25, theme sweep no illegible
+themes (worst element 5.07). Java 338 tests, Vitest 446.**
 
 **If this is a fresh chat: the work queue is in "What is next", below the
-status table.** Batches A–C (the 02/09 review fixes) are done; D and E are not
-started.
+status table.** Batches A–F are done and deployed. The one real gap is that
+**batch E has no live suite** — see the top of "What is next".
 
 1.1.0–1.5.0 are post-1.0 feature work driven by Nigel's review, not new phases.
 1.3.0 added a **Gateway terminal**, moved the console into a **bottom panel**, and
@@ -18,6 +20,85 @@ Scope**, and makes the terminal a **root shell** where the host allows it. 1.5.0
 makes the **exec channel non-blocking and streaming**, gives tracebacks
 **structure**, makes **closing a terminal actually close it**, and makes every
 policy switch **changeable on a running gateway**.
+
+### 1.6.1 — the console could not run a function
+
+`PrivateStateRunner` called `Py.runCode(code, locals, scriptManager.getGlobals())`
+— locals and globals were two different dicts. A module-level assignment landed
+in `locals`; a function or class body closes over `globals`, which was the
+manager's own and had nothing the script had just defined in it. Calling the
+function raised `NameError: global name 'x' is not defined`, including for
+`def f(): return system.date.now()` — the console could run assignments and
+expressions and nothing that defined a callable. It now runs
+`Py.runCode(code, locals, locals)`, one dict, with `system` seeded into it
+before the run.
+
+This had been there since P2, when the private-`PySystemState` execution model
+was built. No suite caught it because every exec check written since is a
+one-liner or a bare expression — none of them define a function, so none of
+them could fail this way. A green gate on every release through 1.6.0 proved
+the console could run code, not that it could run a program.
+`validate_v15_exec.py` now carries a permanent check that defines a
+module-level name and reads it back from inside a function.
+
+### 1.6.0 — the navigation the gateway had been answering all along
+
+Batch D. **P4 was marked done and the product could not navigate.** The gateway
+answered `textDocument/definition`, `workspace/symbol` and the module's own
+`scriptide/searchText` from 1.0.0, `lspClient` wrapped all three, and no
+component called any of them — the outline and Ctrl+F were the whole of it. The
+lesson generalises past this module: **"the server does it" is not a feature**,
+and a phase is not done until something a user can press reaches the code.
+
+- **Go to definition** on F12 and Ctrl-click, across files. Silent when there is
+  nothing to open — a `system.` call has no source here, and a dialog saying so
+  on every press teaches people not to press it.
+- **Quick open** on Ctrl+P over the tree (subsequence-matched: `fpa` finds
+  `FooParser`), `#` for project symbols. Files are filtered locally so typing
+  feels like typing; symbols are a live round trip and debounce. `#` is the
+  guarantee and Ctrl+T the convenience — Chrome refuses Ctrl+T and it cannot be
+  intercepted.
+- **A Search view**, the one `ActivityBar` had said was missing since P4. It is
+  also where references land, because both answer "where else does this appear?"
+  and a list you can leave open beats a peek that closes when you click it.
+- **References on Shift+F12**, over a new `scriptide/references`. NOT
+  `textDocument/references`, and that is the whole design: the standard method
+  promises a type-aware answer this server cannot give. What it does buy over a
+  text search is identifier boundaries — `compute` does not match `recompute` —
+  and the panel says on screen that the match is by name.
+- **A Problems panel** over every OPEN document. Its empty state names the limit,
+  so it cannot be read as "the project is clean".
+- **A fold gutter** (files only; the console shares the surface and has no use
+  for one) and **Ctrl+G** for go-to-line, which is what people press.
+- **The tree ships collapsed and drops Web Dev** (Nigel, 02/09): quick open is
+  the fast path, and Web Dev has a richer view of its own.
+- **`ETag` is quoted** per RFC 9110 and `If-Match` is parsed tolerantly. Both
+  halves together, or a page loaded across the change 409s for ever.
+- **The bottom panel opens at 34% of the viewport** — 340px at the 1000px the
+  02/09 review measured as cramped, not 260px.
+
+Three things found on the way, all of them the same shape — a fix with nothing
+asserting it:
+
+- **A cross-file jump landed on line 1.** The view for a just-opened document
+  does not exist when the reveal is published (React state), and the editor
+  dropped it silently. It holds one pending reveal now. The clicked-traceback
+  path had carried this since 1.5.0.
+- **`validate_p1_p2.py` had not been a gate since 1.5.0.** It read
+  `finished.stdout`, which 1.5.0 emptied by contract; `deploy_gate.py` was
+  updated at the time and this file was not, so byte fidelity and the 500/500
+  concurrency check reported 0 lines and looked like an execution failure.
+- **`validate_v14.py` crashed** when its fixture project was absent — the
+  water-suite projects have gone from the rig — taking the terminal, hint-scope
+  and chrome checks down with the inheritance ones. It SKIPs with a reason now.
+
+And one worth remembering about testing a browser: **the suite's own caret
+placement was wrong, and it looked exactly like the feature being unbound.**
+Estimating a column from the line's width ÷ character count drifts on any line
+with a tab in it (one character, four columns), so the click landed beside the
+identifier and F12 correctly did nothing. `CARET_ON` uses a DOM `Range` around
+the real text node. Before blaming a keybinding, prove the caret is where you
+think it is.
 
 ### 1.5.1–1.5.4 — what the v15 suites found once they ran
 
@@ -65,6 +146,7 @@ PY=/home/nigel/Ignition-Work/ignition-toolbox/backend/.venv/bin/python
 $PY validate_v15_term.py
 SI_EXEC_PROJECT=_wd_scratch_ $PY validate_v15_exec.py
 SI_INHERIT_PROJECT=_si_child_ $PY validate_v15_tree.py
+$PY validate_v16_nav.py            # batch D; builds and removes its own fixture
 ```
 
 - **The exec frame handler no longer waits for the script.** `ScriptIdeSocket` is
@@ -274,7 +356,7 @@ much room it takes up, not only what it is called.
 | P1 — read/write script resources, byte-perfect | **Done.** Byte-identical on disk, verified with `cat -A` |
 | P2 — execution | **Done.** 0 cross-user output leakage under concurrency |
 | P3 — completions, signature help, hover | **Done.** Sourced from the running gateway |
-| P4 — project navigation | **Done in the LSP; only the OUTLINE is wired into the UI.** `lspClient` has `definition`, `workspaceSymbols` and `scriptide/searchText`, and nothing calls them — `ActivityBar` has no Search view, by its own comment |
+| P4 — project navigation | **Done, and reachable since 1.6.0.** It was "done in the LSP" from 1.0.0 to 1.5.4 with nothing in the UI calling it: go-to-definition, quick open, the Search view, references and Problems all landed in batch D |
 | P5 — diagnostics | **Done.** Real Jython parser; valid Python 2 never flagged |
 | P6 — cross-file search, polish | **Done** |
 | P7 — hardening, docs, 1.0.0 | **Done.** Security review clean |
@@ -287,29 +369,49 @@ Designer at the functions it is designed for". Read access may be BROADER than
 the Designer's. Named queries are in scope: the programming workflow builds
 named queries and Python together and needs them side by side.
 
-**Batch D — navigation (1.6.0).** The LSP already answers all of these; the UI
-calls none of them.
-- Go-to-definition (F12 / Ctrl-click) via `lspClient.definition`, across files.
-- Quick-open (Ctrl-P) over `workspace/symbol` + script paths.
-- Project text search panel over `scriptide/searchText`, with a Search view in
-  `ActivityBar` (its own comment says it is missing).
-- Problems panel listing every open document's diagnostics, click to jump.
-- Server-side references (name-based, scoped by the AST index; say it is
-  name-based in the UI).
-- Fold gutter; go-to-line (Ctrl-G).
-- Bottom panel height at a 1000 px viewport (measured cramped in the 02/09
-  review); the signature-twice check; ETag quoting (`"…"` per RFC 9110 — the
-  value is currently bare).
+**Batch D — navigation (1.6.0). DONE 02/09/2026**, gated by
+`validate_v16_nav.py` (25/25): go-to-definition (F12 / Ctrl-click),
+quick-open (Ctrl+P, `#` for symbols), the Search view over
+`scriptide/searchText`, a Problems panel, name-based references
+(`scriptide/references`, Shift+F12), fold gutter, Ctrl+G, the bottom-panel
+height at 1000px, the signature-twice check and quoted ETags. Two extras
+Nigel asked for the same day: the tree ships collapsed, and Web Dev is no
+longer duplicated in it.
 
-**Batch E — Named Queries (1.7.0).** `ignition/named-query` resources.
-- Tree section under the project, folders, create/rename/delete.
-- SQL editor (CodeMirror `@codemirror/lang-sql`), byte-fidelity like scripts.
-- Settings / Authoring / Testing parity with the Designer workspace: type
-  (Query/Update/Scalar), database, caching, parameters with types, and a
-  test-run through `system.db.runNamedQuery` with a parameter form and a result
-  grid. Measure the resource shape on the rig FIRST (`query.sql` + `resource.json`
-  attributes) — do not guess attribute keys, per the Tag Change rule above.
-- Named-query name completion inside Python (`system.db.runNamedQuery("…")`).
+**Batch E — Named Queries (1.7.0). CODE COMPLETE 03/09/2026**, not yet
+live-gated (waiting on batch F so one build covers both). Five routes under
+`/api/named-queries`, a Named Queries view with folders and rename, a SQL editor
+on `@codemirror/lang-sql`, Settings/Authoring/Testing parity, a test run against
+the live database that runs THE DRAFT, and named queries ranked into quick open
+beside scripts. The measured contract is `docs/NAMED-QUERIES.md` — read §1
+before touching any attribute, and see the findings below for why.
+
+**Batch F — the themes pass. DONE 03/09/2026, shipped in 1.7.0** alongside
+batch E rather than as its own 1.8.0, because the two were built and gated as one
+artefact. The packs' GEOMETRY is now taken as well as their colour — radius,
+marker and rule widths, row and control height, popup shadow — which is the axis
+that differentiates without risk, plus the pack's own border colour and a
+`--bg-chrome` stepped by a geometry-derived softness score. **No `surface.*`
+token is mapped onto a neutral**: that is the 1.2.0 defect and nothing has made
+it safe. Sweep: no illegible themes, worst element 5.07, four themes better than
+their 1.6.1 figures. One thing left for Nigel: `industrial-day-cyan` resolves
+`--error` and `--success` to greys, because that pack's red cannot clear 4.5:1 on
+its light surfaces without losing its hue — accepting less contrast or repainting
+the pack are both his call, not the generator's.
+
+**FIRST, before anything else — batch E has NO LIVE SUITE.** Every other batch
+is gated by one (`validate_v11`, `v13`, `v14`, `v15_*`, `v16_nav`); named
+queries shipped in 1.7.0 with 127 Java tests and 134 Vitest tests and **nothing
+that drives the real browser against the real gateway**. Unit tests did not catch
+the batch-D caret bug, the batch-D `finished.stdout` staleness or the 1.6.1
+namespace defect either. `validate_v17_nq.py` should create a fixture query, edit
+its SQL, set typed parameters, run the test tab against `Postgres_Test` and
+assert the returned rows, prove the draft (not the saved copy) is what runs,
+round-trip every settings field, rename a query AND a folder, and — the one only
+a live gate can do — open one of the 37 dead version-1 queries in `Whiteboard`,
+confirm the legacy badge, save it, and confirm `system.db.runNamedQuery` then
+succeeds where it previously threw. Until that exists, batch E is built and
+deployed but not PROVED.
 
 **Then — the review against purpose.** Once D and E are live-gated: review the
 module as a product against Nigel's brief and deliver recommendations for going
@@ -330,9 +432,15 @@ beyond the Designer (offer the write-up as an artifact page).
 
 ## What is proved on a real gateway
 
-Six suites plus a per-theme contrast sweep, all green on 1.4.3, all run against
-the live gateway rather than mocks. The three 1.5.0 suites below them are written
-and not yet run green on 1.5.0.
+Eight suites plus a per-theme contrast sweep, **all green on 1.6.0**, all run
+against the live gateway rather than mocks.
+
+Two of them had stopped being gates and were repaired in 1.6.0, which is worth
+knowing before trusting a tally: `validate_p1_p2.py` had been reading
+`finished.stdout` since 1.5.0 emptied it by contract, so byte fidelity and the
+concurrency check reported 0 lines; and `validate_v14.py` crashed outright when
+its fixture project was absent from the rig. **A suite that cannot pass is not a
+gate, and neither of these announced itself.**
 
 **`deploy_gate.py` — 6 checks.** Served bundle hash matches the build; Config ▸
 Modules shows the built version ACTIVE; a real cookie session gets `authenticated:true` with a
@@ -381,8 +489,20 @@ editor and restore bringing it back; the UI font not resolving to a serif and th
 editor font resolving to a monospace; ten themes with no two sharing a palette;
 and no failed request or console error attributable to this module.
 
+**`validate_v16_nav.py` — 25 checks, all in a real browser, the batch-D gate.**
+Quick open filters by path and opens what it highlighted; `#` searches project
+SYMBOLS on the gateway; F12 opens the DEFINING file **and lands the caret on
+`def compute`**, not line 1; Shift+F12 finds three writes of `compute` and does
+NOT report `recompute`, under a status line that says the match is by name;
+Match case changes the answer (2 hits → 0), proving the flag reaches the server;
+a syntax error typed into a tab that is then switched AWAY from appears in the
+Problems panel and clicks back to it; the fold gutter exists; Ctrl+G opens
+go-to-line; a quoted `ETag` round-trips through `If-Match` as a 200; and the
+bottom panel opens at 340px on a 1000px viewport. The fixture — two library
+modules, one calling the other — is created and deleted by the suite.
+
 **`validate_v15_exec.py`, `validate_v15_term.py`, `validate_v15_tree.py` — the
-1.5.0 suites, WRITTEN AND NOT YET RUN GREEN AGAINST 1.5.0 ON THE RIG.** exec
+1.5.0 suites, green on 1.6.0 (19/19, 6/6, 15/15).** exec
 covers Stop landing mid-run, the socket still answering terminal keystrokes while
 a script spins, the first printed line appearing before the last, a traceback that
 names its exception type and its functions, a syntax error carrying no internal
@@ -448,18 +568,70 @@ gutter marker.
    the module never tries to elevate itself: a process cannot raise its own
    privilege.
 
+10. **"The server does it" is not a feature.** P4 was marked done for five
+    versions while `definition`, `workspace/symbol` and `searchText` had no
+    caller in the UI — the phase table said navigation was finished and the
+    product had an outline and Ctrl+F. A phase is done when something a user can
+    press reaches the code, and the gate for it runs in a browser.
+11. **A suite that cannot pass is not a gate, and it does not announce itself.**
+    Two of them had quietly stopped gating: `validate_p1_p2.py` read a field
+    1.5.0 had emptied by contract (so the byte-fidelity and 500/500 isolation
+    checks reported 0 lines and read as an execution failure), and
+    `validate_v14.py` crashed on an absent fixture project, losing every
+    unrelated check with it. When a contract changes, grep every suite for the
+    field — not just the one you remember updating.
+12. **Prove the caret is where you think before blaming a keybinding.** The
+    batch-D suite estimated a column as line width ÷ character count, which
+    drifts on any line with a tab in it (one character, four columns). The click
+    landed beside the identifier, F12 correctly did nothing, and it looked
+    exactly like the binding being absent — an hour spent on 02/09/2026 proving
+    the feature worked. `CARET_ON` uses a DOM `Range` around the real text node.
+13. **Running code with two different dicts for locals and globals breaks every
+    function and class, and a one-liner test suite cannot see it.**
+    `Py.runCode(code, locals, scriptManager.getGlobals())` put a module-level
+    assignment in one dict and had a function's closure read the other, empty,
+    one — `NameError` on the first call, since P2. Every exec check written
+    before 1.6.1 was a bare expression or a single assignment, so a green gate
+    on five releases proved only that the console could evaluate a line, not
+    that it could run a program. A namespace check needs a `def` in it, or it
+    tests nothing this bug touches.
+
+14. **A `"version": 1` named query is DEAD, not merely mis-keyed.**
+    `fromResource` returns a blank `NamedQuery` whatever the attributes say, with
+    or without a deserializer, because the legacy branch reads a `data.bin` a
+    hand-written resource does not have. The platform agrees:
+    `system.db.runNamedQuery` on one throws
+    `NullPointerException: … getType() is null`. All 37 in the rig's
+    `Whiteboard` project are like this. A hand-built resource is not "slightly
+    wrong" — it does not run. This is the same lesson as finding 2
+    (`setApplicationScope`), one resource type along: **use the platform's own
+    serialiser, never hand-build attributes.**
+15. **A label is not a name.** `ParameterType.Parameter.toString()` returns
+    `"Value"` and `Type.ScalarQuery.toString()` returns `"Scalar Query"`. A
+    design note written from the Designer's screen said the parameter type was
+    called `Value`; there is no such constant. Read `values()` and `name()`, not
+    the UI.
+16. **The platform's own writer and reader can disagree.** `NamedQuery.toResource`
+    writes `description` to the resource's `documentation`; `fromResource` reads
+    it from the attributes. So a description written by the platform does not come
+    back through the platform. Round-trip anything you believe about a resource
+    THROUGH BOTH HALVES before trusting it.
+
 ## Known gaps and deliberate omissions
 
 - **No breakpoint debugging.** The only serious Ignition debugger needs a live
   Designer and blocks a gateway worker thread; neither fits a browser IDE.
-- **No project-wide navigation in the UI.** The gateway answers
-  `textDocument/definition`, `workspace/symbol` and the module's own
-  `scriptide/searchText`, and `lspClient` wraps all three, but no component calls
-  them: the outline is the only navigation a user can reach, plus Ctrl+F in the
-  buffer. Anything claiming go-to-definition, quick-open or a search panel is
-  describing the server, not the product.
-- **No find-references.** A correct references implementation needs the type
-  system the AST index does not build.
+- **References are NAME-based, and every surface says so.** A correct
+  find-references needs the type system the AST index does not build, so
+  `scriptide/references` matches whole identifiers instead — `compute` does not
+  match `recompute`, but two unrelated `write` methods both answer to `write`.
+  It is deliberately not `textDocument/references`: answering the standard
+  method with this would be lying in the protocol. The gap is narrowed, not
+  closed, and the UI must keep saying which.
+- **The Problems panel covers OPEN documents only.** The server publishes
+  diagnostics for documents this client opened, so a project-wide problem list
+  would need every script opened on the server. The empty state names the limit
+  rather than reading as "the project is clean".
 - **Diagnostics are syntax-only.** Undefined-name, unused-import and arity checks
   were designed but not shipped: the release bar was zero false positives, and one
   wrong squiggle on correct code costs more trust than ten missed problems.

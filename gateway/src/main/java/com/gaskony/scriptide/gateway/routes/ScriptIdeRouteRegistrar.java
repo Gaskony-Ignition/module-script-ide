@@ -39,6 +39,8 @@ public class ScriptIdeRouteRegistrar {
     private final ScriptResourceRouteHandler scriptResourceRouteHandler;
     private final ScriptAttributesRouteHandler scriptAttributesRouteHandler;
     private final WebDevConfigRouteHandler webDevConfigRouteHandler;
+    private final NamedQueryRouteHandler namedQueryRouteHandler;
+    private final NamedQueryTestRouteHandler namedQueryTestRouteHandler;
 
     public ScriptIdeRouteRegistrar(GatewayContext context) {
         this.spaAssetRouteHandler = new SpaAssetRouteHandler();
@@ -50,6 +52,15 @@ public class ScriptIdeRouteRegistrar {
         this.scriptAttributesRouteHandler =
             new ScriptAttributesRouteHandler(projectManager, scriptResourceRouteHandler);
         this.webDevConfigRouteHandler = new WebDevConfigRouteHandler(projectManager);
+        this.namedQueryRouteHandler = new NamedQueryRouteHandler(projectManager, context);
+        // The execution service and the audit recorder are SUPPLIERS, not values.
+        // Both are published by the hook into ScriptIdeSocketRegistry at startup
+        // and cleared at shutdown, so a route that captured them here would hold a
+        // reference to a dead service after a redeploy — and the null a supplier
+        // returns is what the test route turns into a clean 503.
+        this.namedQueryTestRouteHandler = new NamedQueryTestRouteHandler(projectManager,
+            com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecutionService,
+            com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecAudit);
     }
 
     /**
@@ -144,6 +155,71 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_JSON)
             .accessControl(admin)
             .handler(webDevConfigRouteHandler::write)
+            .mount();
+
+        // ==================== Named queries ====================
+        // A named query and the Python that calls it are one piece of work, which
+        // is the whole point of batch E. Same gate split as the scripts above:
+        // reads authenticated, writes Administrator.
+
+        routes.newRoute(ScriptIdePaths.ROUTE_NAMED_QUERIES)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(namedQueryRouteHandler::list)
+            .mount();
+
+        // text/plain: a named query's body is SQL, not JSON.
+        routes.newRoute(ScriptIdePaths.ROUTE_NAMED_QUERY_CONTENT)
+            .type(RouteGroup.TYPE_PLAIN_TEXT)
+            .accessControl(authed)
+            .handler(namedQueryRouteHandler::readContent)
+            .mount();
+
+        // .method(POST) set EXPLICITLY — omitting it silently defaults to GET, and
+        // the route then shadows the read above instead of accepting writes.
+        routes.newRoute(ScriptIdePaths.ROUTE_NAMED_QUERY_CONTENT)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(namedQueryRouteHandler::writeContent)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_NAMED_QUERY_CONTENT)
+            .method(HttpMethod.DELETE)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(namedQueryRouteHandler::delete)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_NAMED_QUERY_SETTINGS)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(namedQueryRouteHandler::readSettings)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_NAMED_QUERY_SETTINGS)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(namedQueryRouteHandler::writeSettings)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_NAMED_QUERY_RENAME)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(namedQueryRouteHandler::rename)
+            .mount();
+
+        // Administrator, not authed: a test-run is arbitrary SQL against a live
+        // database and must not have a softer gate than running the equivalent
+        // Python in the console. The handler re-checks ExecPolicy per request for
+        // the same reason the exec socket does.
+        routes.newRoute(ScriptIdePaths.ROUTE_NAMED_QUERY_TEST)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(namedQueryTestRouteHandler::test)
             .mount();
 
         // ==================== SPA static assets (catch-all) ====================

@@ -149,8 +149,15 @@ export class ApiError extends Error {
   }
 }
 
-/** Header the Gateway's WebUiSession CSRF filter reads. Must match exactly. */
-const CSRF_HEADER = 'X-CSRF-Token';
+/**
+ * Header the Gateway's WebUiSession CSRF filter reads. Must match exactly.
+ *
+ * Exported since 1.7.0 for the named-query client, which mirrors these routes
+ * exactly. A second copy of the header name is a second thing to get wrong, and
+ * the failure — the write rejected as cross-site — reads as a permissions
+ * problem rather than a typo.
+ */
+export const CSRF_HEADER = 'X-CSRF-Token';
 
 /**
  * URL for a per-resource route.
@@ -166,8 +173,14 @@ export function scriptRouteUrl(base: '/api/scripts/content' | '/api/scripts/attr
   return `${apiUrl(`${base}/${encodeURIComponent(path)}`)}?${query.toString()}`;
 }
 
-/** Turn a non-OK response into an ApiError carrying the server's message. */
-async function toApiError(response: Response): Promise<ApiError> {
+/**
+ * Turn a non-OK response into an ApiError carrying the server's message.
+ *
+ * Exported for the named-query client: the status codes ARE the contract there
+ * too (428 no base, 409 stale), and a second implementation would be a second
+ * place for a 409 to become a generic failure.
+ */
+export async function toApiError(response: Response): Promise<ApiError> {
   let message = `HTTP ${response.status}`;
   try {
     const text = await response.text();
@@ -198,7 +211,11 @@ async function getJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function postJson(url: string, body: unknown, csrfToken: string | undefined, baseSignature: string): Promise<SaveResult> {
+/**
+ * A precondition-carrying POST. Shared with the named-query client, which posts
+ * to routes that mirror these ones header for header.
+ */
+export async function postJson(url: string, body: unknown, csrfToken: string | undefined, baseSignature: string): Promise<SaveResult> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -267,7 +284,7 @@ export async function readScriptContent(
  * rewrite it as `W/"..."`, and the server compares If-Match by exact string —
  * so a quoted value round-trips as a permanent 409.
  */
-function readEtag(response: Response): string {
+export function readEtag(response: Response): string {
   const raw = response.headers.get('ETag') ?? '';
   return raw.replace(/^W\//, '').replace(/^"(.*)"$/, '$1');
 }

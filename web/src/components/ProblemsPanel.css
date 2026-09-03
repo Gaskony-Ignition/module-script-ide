@@ -1,0 +1,85 @@
+/*
+ * The Problems tab.
+ *
+ * Rows are the panel's own rhythm rather than the tree's: a problem row carries
+ * a message that can be a full sentence, so it gets the panel's 13px body size
+ * and a little more vertical room than a 22px tree row.
+ */
+
+.problems {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.problems-list {
+  margin: 0;
+  padding: var(--space-1) 0;
+  list-style: none;
+}
+
+.problems-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 2px var(--space-3);
+  border: none;
+  border-radius: var(--radius-row);
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  line-height: 1.55;
+  text-align: left;
+  cursor: pointer;
+}
+
+.problems-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.problems-row:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -1px;
+}
+
+.problems-icon {
+  align-self: center;
+  flex: 0 0 auto;
+}
+
+/* Severity is carried by colour AND by the icon's position in a sorted list, so
+   an error is distinguishable without relying on colour alone. */
+.problems-icon.is-error {
+  color: var(--error);
+}
+
+.problems-icon.is-warning {
+  color: var(--warning);
+}
+
+.problems-icon.is-info,
+.problems-icon.is-hint {
+  color: var(--text-muted);
+}
+
+/* The message takes the width and wraps: truncating a parser's message loses
+   the part that says what to do about it. */
+.problems-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.problems-where {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.problems-empty {
+  margin: 0;
+  padding: var(--space-3);
+  font-size: 12px;
+}

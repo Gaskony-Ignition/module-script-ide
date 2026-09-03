@@ -3,8 +3,12 @@
   flex-direction: column;
   flex: 0 0 var(--activity-bar-width);
   width: var(--activity-bar-width);
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border-light);
+  /* Its own surface, not the rail's. On a flat theme (no shadow, square
+     corners) the pack has nothing but a step to separate its furniture with, so
+     --bg-chrome moves well off the page; on a rounded, shadowed one it is flush
+     with the rail and the border does the work. */
+  background: var(--bg-chrome);
+  border-right: var(--rule-width) solid var(--border-light);
 }
 
 .activity-item {
@@ -20,8 +24,9 @@
   color: var(--text-muted);
   cursor: pointer;
   /* The active marker is a left border drawn in the transparent state too, so
-     activating an item does not shift its icon by 2px. */
-  border-left: 2px solid transparent;
+     activating an item does not shift its icon when it lights up. Its WIDTH is
+     the theme's: 2px on `newsprint-night`, 4px on both `industrial` packs. */
+  border-left: var(--marker-width) solid transparent;
 }
 
 .activity-item:hover {

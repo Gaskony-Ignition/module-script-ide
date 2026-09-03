@@ -2,6 +2,248 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.7.0] — 2026-09-03
+
+feat: named queries — the SQL and the Python that calls it, in one workspace.
+
+Batch E. The Designer keeps named queries in a different workspace from scripts,
+and Nigel's brief is that they are ONE piece of work: a script calling
+`system.db.runNamedQuery("Orders/Insert", …)` and the query it names are edited
+together or not at all.
+
+Everything in `docs/NAMED-QUERIES.md` §1 was **measured** — off the platform jars
+and then off the running 8.3.8 gateway through this module's own exec socket —
+before a line was written. That was the right call three times over; see
+"What the platform actually holds" below.
+
+### Added
+- **A Named Queries view** on the activity bar: folders from the path, create,
+  rename (queries AND folders), delete, with inherited/override badges matching
+  the script tree.
+- **A SQL editor** with `@codemirror/lang-sql`, sharing the script editor's theme,
+  gutters and byte-fidelity facets — so a tab means the same thing in both.
+- **Settings, Authoring and Testing**, the Designer's own three concerns: type,
+  database, caching, fallback, max return size, auto-batch, permissions, and
+  typed parameters with the platform's ten legal SQL types.
+- **A test run** against the live database, with a parameter form and a result
+  grid — and it runs **the draft, not the saved copy**, through the
+  prepared-statement route with `:identifier` placeholders converted to
+  positional `?`. Testing what is on screen is the whole point; testing the saved
+  version while showing the draft is the class of quiet lie this module keeps
+  finding. A `QueryString` parameter substitutes textually, because that is its
+  platform semantic.
+- **Named queries in quick open** (Ctrl+P), ranked in ONE list with scripts
+  rather than appended after them.
+- **Five routes** under `/api/named-queries` — listing, content, settings, rename
+  and test. `<path>` is the project-relative query path (`Folder/Sub/Name`), the
+  same string `runNamedQuery` takes, with no resource prefix.
+
+### What the platform actually holds (measured, and three of these contradicted the design)
+- **There is no `Value` parameter type.** The enum names are `Database`,
+  `QueryString` and **`Parameter`**; `Parameter.toString()` returns `"Value"`,
+  which is the Designer's LABEL — exactly as `ScalarQuery.toString()` returns
+  "Scalar Query". The wire carries the name; `Value` is accepted as an alias.
+- **`cacheUnit` has eight values, not seven** — `MS` was missing from the design.
+- **`description` is not an attribute.** `toResource` writes it to the resource's
+  `documentation` while `fromResource` reads it from the attributes, so the
+  platform's own writer and reader disagree about it. This module reads
+  `getDocumentation()` with an attribute fallback and writes only through
+  `toResource`.
+- **`isValidParamName("database")` is false, yet `database` is exactly what the
+  Designer names a `Database` parameter** — the reserved name is required for
+  that one kind and refused for every other.
+- **A parameter's `sqlType` is written as an INTEGER** (`String` is 7), by the
+  registered Gson adapter. Ten types are legal, and `Date` is not one of them.
+
+### Fixed
+- **A version-1 named query is DEAD, and this release makes that visible.**
+  `fromResource` returns a blank query whatever its attributes say — with or
+  without a deserializer — and so does the platform:
+  `system.db.runNamedQuery` on one throws
+  `NullPointerException: … getType() is null`. **All 37 queries in the rig's
+  `Whiteboard` project are in that state.** They list with a `legacy` badge, open
+  with their SQL intact and a notice saying the gateway cannot run them, and a
+  save repairs them by putting the resource back through `toResource`. The write
+  path deliberately does not short-circuit on unchanged settings, or the repair
+  would silently do nothing, and it falls back to the `query.sql` data key so the
+  repair cannot erase the SQL. Both halves are pinned by tests.
+
+### Added — the themes pass (batch F)
+
+Nigel, 02/09/2026: "The themes in this project don't look nothing like what they
+do in the perspective projects. Why? Aren't they equally as nice?" He was right,
+and the answer was scope: a Perspective gateway theme is a ~1,300-line
+`globals.css` with 40 tokens plus component chrome, while this module emitted
+**nineteen tokens per theme, all colour**. Ten themes, one shape.
+
+- **The packs' GEOMETRY is now taken as well as their colour** — control, panel
+  and row radius, marker and rule widths, row and control height, and popup
+  shadow. That is the axis that differentiates without risk, because geometry
+  cannot make text illegible. `newsprint-night` is square and flush with 24px
+  rows and no shadow; `aurora-*` is 12px-rounded with a deep shadow; the two
+  `industrial` packs sit at 20px rows and 2–6px radius. Values are the packs'
+  own, clamped into a band the chrome can wear.
+- **`--border-light` and `--border-strong` carry the pack's own line colour**,
+  held in a 1.5–4.0:1 band against the page. This is the ONE pack surface colour
+  that reaches the IDE, and it is safe for the exact reason the 1.2.0 mapping was
+  not: nothing is ever painted *on* a border. Translucent pack values are refused
+  rather than flattened, because dropping the alpha on
+  `rgba(255,255,255,0.22)` yields white.
+- **A `--bg-chrome` for the activity bar**, derived from the page and stepped by
+  a "softness" score built from the pack's geometry: flat packs separate their
+  furniture with a step, soft packs sit flush and let the border do it.
+
+**What was deliberately NOT done, and why.** No `surface.*` token is mapped onto
+`--bg-secondary`, `--surface` or `--bg-tertiary`. That is precisely the 1.2.0
+defect — a Perspective pack is a SEMANTIC palette, not a lightness ramp, and a
+"sidebar" is branded chrome that is dark navy in a light theme — and nothing has
+changed to make it safe. `--border-width` is not emitted either: all ten packs
+say 1px, so it would be a token nobody reads. `font.body` stays dropped, and a
+new test now fails on ANY `font-*` property in a theme block rather than only the
+two stacks it knew by name.
+
+### Fixed
+- **A shadow that exists must be visible.** Four rounded themes were generating
+  `0 3px 6px` at 0.18 alpha, which a pixel transect across the popup edge could
+  not find at all — worse-separated than the themes that deliberately have none.
+  A floor now puts any popup shadow at `0 6px 16px` and 0.22 alpha or better.
+
+### Known, and Nigel's call rather than a generator change
+- **`industrial-day-cyan` resolves `--error` to a grey** (`#575757`), and
+  `--success` likewise. That pack's red cannot clear 4.5:1 on its light surfaces
+  without losing its hue. Fixing it means either accepting less than 4.5:1 or
+  repainting the pack.
+
+### Measured on the rig (1.7.0, 8.3.8)
+- Java **338 tests** (was 211; 127 new across six suites, `RouteMountOrderTest`
+  extended from 3 to 6). Vitest **446** (was 312).
+- Painted-element contrast sweep: **no illegible themes, nothing below 4.5**,
+  worst element 5.07. Four themes IMPROVED on their 1.6.1 figures
+  (`newsprint-night` 5.41 → 6.21, `industrial-control-cyan` 5.37 → 5.97,
+  `leather-night-tan` 5.47 → 5.94, `industrial-day-cyan` 5.18 → 5.54).
+
+## [1.6.1] — 2026-09-02
+
+fix: the console could not run a function or a class — every script with one raised NameError.
+
+### Fixed
+- **`PrivateStateRunner` ran a script's locals and globals as two different
+  dicts.** It called `Py.runCode(code, locals, scriptManager.getGlobals())`, so
+  a module-level assignment (`x = 41`) landed in `locals` while a function or
+  class body closes over `globals` — which was the manager's own, unrelated,
+  and empty of anything the script had just defined. Any script with a `def` or
+  a `class` raised `NameError: global name 'x' is not defined` the moment the
+  function was called, including `def f(): return system.date.now()`. It now
+  runs `Py.runCode(code, locals, locals)` — one dict, so a function sees the
+  names its own script defined, `system` included, because `system` is seeded
+  into `locals` before the run. `ExecNamespaceTest` covers it with 6 cases.
+- **No suite had caught it.** Every existing exec check across `validate_p1_p2.py`
+  and `validate_v15_exec.py` is a one-liner or a bare expression — none of them
+  define a function. A one-liner cannot fail this way, so a green gate on every
+  prior release proved nothing about the one construct the bug lived in.
+  `validate_v15_exec.py` now carries a permanent check, "NAMESPACE: a function
+  sees the script's own names", that defines a module-level name and reads it
+  back from inside a function.
+
+### Measured on the rig (1.6.1, 8.3.8)
+- `deploy_gate.py` PASS (6).
+- Live socket probe, five cases that all raised `NameError` before this fix and
+  now all return a value: module-level var seen by a function → `'42'`;
+  module-level import seen by a function → `'1.0'`; `globals()` identity — the
+  module-level and in-function key lists match; a class body reading a
+  module-level name → `'7'`; `system.*` inside a function → `'True'`.
+- Regression: `validate_v15_exec.py` **20/20** (19 plus the new NAMESPACE
+  check), `validate_p1_p2.py` 8/8.
+
+## [1.6.0] — 2026-09-02
+
+feat: the IDE navigates a project — go-to-definition, quick open, search, references and problems.
+
+Batch D of the 02/09/2026 review queue. Everything the gateway needed for this
+was answered from 1.0.0 and called by NOTHING: `textDocument/definition`,
+`workspace/symbol` and the module's own `scriptide/searchText` all worked,
+`lspClient` wrapped all three, and no component invoked any of them. P4 read
+"done" and the product had an outline and Ctrl+F. This release is the join.
+
+### Added
+- **Go to definition — F12 and Ctrl-click**, across files. A platform call like
+  `system.tag.readBlocking` has no source on this gateway and stays SILENT: a
+  dialog on every F12 over a `system.` call teaches people not to press it.
+- **Quick open — Ctrl+P** over the script tree, subsequence-matched, with `#`
+  (or Ctrl+T) switching to project symbols from the AST index. The prefix is the
+  guarantee and the shortcut the convenience: Chrome refuses Ctrl+T outright and
+  it cannot be intercepted.
+- **A Search view** on the activity bar, over `scriptide/searchText` — the view
+  `ActivityBar` had said was missing since P4. Results are grouped by file and
+  click to open at the line.
+- **Name-based references — Shift+F12**, over a new `scriptide/references`.
+  Deliberately NOT `textDocument/references`: that method promises a type-aware
+  answer this server cannot give, and answering it would be lying in the
+  protocol. The server matches whole IDENTIFIERS, so `compute` no longer matches
+  `recompute`, and the results panel says on screen that the match is by name.
+- **A Problems panel**, third tab in the bottom dock, listing every OPEN
+  document's diagnostics with the errors first; click to jump. The inline
+  squiggle and the gutter marker are per-file, so with six tabs open a syntax
+  error in the one you are not looking at was invisible. The empty state says
+  only open scripts are checked, so it cannot be read as "the project is clean".
+- **A fold gutter** on files (not the console, which shares the same editing
+  surface and has no use for it) and **go-to-line on Ctrl+G**, which is what
+  people press — CodeMirror's own binding is Mod-Alt-g.
+
+### Changed
+- **The script tree ships COLLAPSED and no longer lists Web Dev endpoints**
+  (Nigel, 02/09/2026). Quick open is the fast path now, so the tree is for
+  browsing, which starts by choosing a branch; and Web Dev has its own
+  activity-bar view with per-endpoint verbs and the config dialog, so listing
+  endpoints in both made the poorer entry point the first one people found. A
+  type this build has never heard of still gets a row — that is a different case
+  from "handled elsewhere", and silently dropping a resource the gateway sent is
+  how a script becomes uneditable with no message.
+- **`ETag` is a quoted entity tag**, per RFC 9110 §8.8.3, and `If-Match` is now
+  parsed tolerantly (`W/` and quotes stripped). Both halves matter together: a
+  page loaded before this holds a bare signature, one loaded after holds a value
+  its own reader already stripped, and a proxy may quote either — comparing raw
+  strings turns any of those into a permanent 409 that reads on screen as
+  somebody else editing the file.
+- **The bottom panel opens at 34% of the viewport** (clamped 240–460px) instead
+  of a fixed 260px, which was measured cramped at 1000px in the 02/09 review:
+  340px there now.
+- `LspClient.searchText` sends `caseSensitive`. The server has read that flag
+  since 1.0.0 and the client never sent it, so "Match case" could not have
+  worked whatever a UI offered.
+
+### Fixed
+- **A cross-file jump landed the caret on line 1.** Opening the target is React
+  state, so the CodeMirror view for it does not exist when the reveal is
+  published — the editor dropped it silently. It now holds one pending reveal
+  and applies it when the view appears, which also fixes the clicked-traceback
+  frame path that had carried the bug since 1.5.0.
+- **The completion panel's signature-twice rule had nothing asserting it.**
+  Fixed in 1.5.0 and untested, which is how it comes back; the rule is a pure
+  function (`detailToShow`) with its own cases now.
+- **`validate_p1_p2.py` had been reporting 0 lines of output since 1.5.0** and
+  was not a gate. It read `finished.stdout`, which 1.5.0 emptied by contract —
+  every line goes out as an `output` frame, and `deploy_gate.py` was updated at
+  the time while this file was not. Byte fidelity and the 500/500 concurrency
+  isolation check are live again.
+- **`validate_v14.py` crashed** when its fixture project was absent (the
+  water-suite projects have gone from the rig), taking the terminal, hint-scope
+  and chrome checks down with the inheritance ones. An absent fixture is a
+  stated SKIP now, as it already was in `validate_v15_tree.py`.
+
+### Measured on the rig (1.6.0, 8.3.8)
+- `deploy_gate.py` PASS (6). `validate_v16_nav.py` **25/25** — quick open by
+  path and by symbol, F12 opening the defining file with the caret on
+  `def compute`, references finding three sites and NOT `recompute`, Match case
+  changing the answer, a syntax error in a background tab reaching the Problems
+  panel, the fold gutter, Ctrl+G, a quoted ETag round-tripping through If-Match,
+  and a 340px panel at a 1000px viewport.
+- Regression: `validate_p1_p2` 8/8, `validate_lsp` 10/10, `validate_v11` 12/12,
+  `validate_v13` 22/22, `validate_v14` 18/18 (4 stated skips), `validate_v15_term`
+  6/6, `validate_v15_exec` 19/19, `validate_v15_tree` 15/15 (1 stated skip).
+- Vitest 217 → **312 checks**; the Java suite gained `ProjectIndexReferencesTest`
+  and the entity-tag cases in `HandlerSupportTest`.
+
 ## [1.5.4] — 2026-09-02
 
 feat: the project listing says where inherited scripts come from.

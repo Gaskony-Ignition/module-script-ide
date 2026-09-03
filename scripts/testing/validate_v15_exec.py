@@ -186,6 +186,29 @@ def panel(page, label):
     page.wait_for_timeout(600)
 
 
+def expand_tree(page, passes=6):
+    """Open every branch of the script tree.
+
+    The tree ships COLLAPSED from 1.6.0 (Nigel, 02/09/2026) — quick open is the
+    fast path now, and a whole project's scripts open on landing is a column that
+    has to be scrolled before anything can be chosen. Every suite that clicks a
+    script row has to open its branch first, so this is the shared way to do it.
+
+    Repeated, because opening a package reveals the packages nested inside it.
+    """
+    for _ in range(passes):
+        shut = page.locator('.file-tree [aria-expanded="false"]')
+        count = shut.count()
+        if count == 0:
+            return
+        for index in range(count):
+            try:
+                shut.nth(index).click()
+            except Exception:
+                pass          # a click that re-renders the list is not a failure
+        page.wait_for_timeout(120)
+
+
 with sync_playwright() as p:
     b = p.chromium.launch()
     page = b.new_context(viewport={"width": 1600, "height": 1000}).new_page()
@@ -196,7 +219,8 @@ with sync_playwright() as p:
     page.on("pageerror", lambda e: errs.append(str(e)))
     login(page)
     page.goto(GATEWAY_URL + SPA, wait_until="load", timeout=30000)
-    page.wait_for_selector(".file-tree-item", timeout=20000)
+    page.wait_for_selector(".file-tree-header", timeout=20000)
+    expand_tree(page)
 
     if PROJECT:
         page.select_option(".workspace-project select", PROJECT)
@@ -346,6 +370,18 @@ with sync_playwright() as p:
     rec("RESET: the binding is gone afterwards",
         "NameError" in fresh, fresh.strip().replace("\n", " ")[:80])
     shot(page, "reset")
+
+    # ---------- (g) a function sees the script's own module-level names ----------
+    # Regression guard for 1.6.1: `PrivateStateRunner` used to call
+    # `Py.runCode(code, locals, scriptManager.getGlobals())` — locals and globals
+    # were two different dicts, so `x = 41` landed in locals while `f`'s closure
+    # read an empty globals, and EVERY script with a function or class raised
+    # `NameError: global name 'x' is not defined`. Every check above this one is a
+    # bare one-liner, so none of them could have caught it — that is the actual
+    # lesson, not just the bug. Fixed by running `Py.runCode(code, locals, locals)`.
+    namespace_text = run_and_wait(page, "x = 41\ndef f():\n\treturn x + 1\nprint f()\n")
+    rec("NAMESPACE: a function sees the script's own names",
+        "42" in namespace_text, namespace_text.strip().replace("\n", " | ")[:90])
 
     rec("CONSOLE: no page errors from our own code", not errs, "; ".join(errs[:3]))
     b.close()

@@ -23,7 +23,7 @@
      crowded against it. */
   padding: 0 var(--space-4) 0 var(--space-3);
   background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: var(--rule-width) solid var(--border-light);
 }
 
 .app-header h1 {
@@ -59,7 +59,8 @@
   padding: var(--space-5);
   background: var(--surface);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-card);
 }
 
 .notice-card h2 {

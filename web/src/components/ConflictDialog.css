@@ -22,7 +22,8 @@
   padding: var(--space-5);
   background: var(--surface);
   border: 1px solid var(--warning);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-popup);
 }
 
 .conflict-dialog h2 {
@@ -39,7 +40,7 @@
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--border-light);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   background: var(--bg-primary);
 }
 

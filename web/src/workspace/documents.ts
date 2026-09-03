@@ -7,6 +7,7 @@
  * can drift out of step with the buffer.
  */
 import type { ScriptEntry, ScriptOrigin } from '../api/scripts';
+import type { NamedQueryEntry, NamedQuerySettings } from '../api/namedQueries';
 
 /**
  * Where a DOCUMENT comes from — a superset of {@link ScriptOrigin}.
@@ -20,7 +21,25 @@ import type { ScriptEntry, ScriptOrigin } from '../api/scripts';
  */
 export type DocOrigin = ScriptOrigin | 'new';
 
+/**
+ * What a tab holds.
+ *
+ * A tab strip does not care what is in it (NAMED-QUERIES.md §3), so a named
+ * query is an ordinary document with a different `kind` rather than a second
+ * document model. The kind is what decides three things and nothing else: which
+ * CodeMirror surface the buffer gets, whether the language server is attached,
+ * and whether the settings half of {@link isDirty} applies.
+ */
+export type DocKind = 'script' | 'named-query';
+
 export interface OpenDoc {
+  /**
+   * `'script'` for everything this IDE edited before 1.7.0.
+   *
+   * Required rather than optional on purpose: every construction site states
+   * it, so a new one cannot inherit a default that happens to be wrong for it.
+   */
+  kind: DocKind;
   /** Stable key: project + resource path. A script is per-project, not global. */
   uri: string;
   project: string;
@@ -47,6 +66,29 @@ export interface OpenDoc {
    * is unlock an `inherited` document. See {@link isLockedByInheritance}.
    */
   overridden: boolean;
+  /**
+   * Named queries only: the settings as edited, and as the gateway last agreed
+   * to them.
+   *
+   * ONE etag covers both halves — the contract saves SQL and settings against
+   * the same resource signature — so `etag` is not duplicated here. Both are
+   * absent on a script document.
+   */
+  settings?: NamedQuerySettings;
+  baseSettings?: NamedQuerySettings;
+  /** The gateway's database connections, for the Settings tab's dropdown. */
+  databases?: string[];
+  /** Settings keys the server will accept; empty means all of them. */
+  editableSettings?: string[];
+  /**
+   * A version-1 named query, which the PLATFORM cannot read either.
+   *
+   * Not cosmetic: `runNamedQuery` NPEs on one and its settings come back as the
+   * defaults, so the editor must say why the form looks empty. Saving through
+   * the ordinary path is the repair — the server rewrites it through
+   * `toResource`, which stamps version 2.
+   */
+  legacy?: boolean;
 }
 
 /**
@@ -94,9 +136,62 @@ export function docUri(project: string, path: string, scriptKey?: string): strin
  * been agreed with the gateway at all — there is no resource yet for
  * `baseText` to be "the last read of" — so text-equality would say "clean" for
  * a document that, if closed right now, discards a script nobody has created.
+ *
+ * For a named query the SETTINGS count too. They are half the resource and they
+ * are saved by the same Ctrl+S against the same signature, so a document whose
+ * SQL is untouched and whose cache unit has been changed is dirty — otherwise
+ * the Save button is disabled over an edit the user can see on screen.
  */
 export function isDirty(doc: OpenDoc): boolean {
-  return doc.origin === 'new' || doc.text !== doc.baseText;
+  if (doc.origin === 'new' || doc.text !== doc.baseText) return true;
+  if (doc.kind !== 'named-query') return false;
+  // A LEGACY query is always dirty, for the same reason a `'new'` draft is:
+  // what the gateway holds is not what this document represents. Its settings
+  // read back as the platform's defaults because the platform cannot read the
+  // resource at all, and saving is the repair — so a Save button disabled by
+  // text-equality would leave the editor's own "saving it converts it" notice
+  // pointing at a control that does nothing.
+  if (doc.legacy) return true;
+  return !settingsEqual(doc.settings, doc.baseSettings);
+}
+
+/**
+ * Deep equality for a settings object.
+ *
+ * Structural rather than a JSON.stringify compare, which is what the script
+ * attributes strip can afford: those two objects come from one server response
+ * and only ever have VALUES replaced, so their key order is stable. A query's
+ * parameter and permission rows are rebuilt by the UI, in this file's key order
+ * rather than the server's, and stringify would then report every read-back
+ * document as dirty.
+ */
+export function settingsEqual(
+  a: NamedQuerySettings | undefined,
+  b: NamedQuerySettings | undefined
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.type === b.type
+    && a.enabled === b.enabled
+    && a.database === b.database
+    && a.description === b.description
+    && a.fallbackEnabled === b.fallbackEnabled
+    && a.fallbackValue === b.fallbackValue
+    && a.useMaxReturnSize === b.useMaxReturnSize
+    && a.maxReturnSize === b.maxReturnSize
+    && a.cacheEnabled === b.cacheEnabled
+    && a.cacheAmount === b.cacheAmount
+    && a.cacheUnit === b.cacheUnit
+    && a.autoBatchEnabled === b.autoBatchEnabled
+    && a.permissions.length === b.permissions.length
+    && a.permissions.every((row, i) => row.zone === b.permissions[i].zone
+      && row.role === b.permissions[i].role)
+    && a.parameters.length === b.parameters.length
+    && a.parameters.every((row, i) => row.type === b.parameters[i].type
+      && row.identifier === b.parameters[i].identifier
+      && row.sqlType === b.parameters[i].sqlType)
+  );
 }
 
 /**
@@ -117,6 +212,7 @@ export function labelFor(entry: ScriptEntry): string {
 export function newDoc(entry: ScriptEntry, project: string, text: string, etag: string): OpenDoc {
   return {
     uri: docUri(project, entry.path, entry.scriptKey),
+    kind: 'script',
     project,
     path: entry.path,
     scriptKey: entry.scriptKey,
@@ -157,6 +253,7 @@ export function newUnsavedDoc(params: {
 }): OpenDoc {
   return {
     uri: docUri(params.project, params.path, params.scriptKey),
+    kind: 'script',
     project: params.project,
     path: params.path,
     scriptKey: params.scriptKey,
@@ -170,4 +267,60 @@ export function newUnsavedDoc(params: {
     text: '',
     overridden: false,
   };
+}
+
+/**
+/** The single data key a named-query resource carries. */
+export const QUERY_DATA_KEY = 'query.sql';
+
+/**
+ * Build a document for a named query from its listing entry and the SQL and
+ * settings just read for it.
+ *
+ * `path` here is the query's path INSIDE the project — `Folder/Sub/Name`, the
+ * string `system.db.runNamedQuery` takes — not a resource path. That is what
+ * the routes take and what the tab is addressed by.
+ */
+export function newQueryDoc(params: {
+  entry: NamedQueryEntry;
+  project: string;
+  sql: string;
+  etag: string;
+  settings: NamedQuerySettings;
+  databases?: string[];
+  editableSettings?: string[];
+  legacy?: boolean;
+}): OpenDoc {
+  const { entry, project } = params;
+  return {
+    uri: docUri(project, entry.path, QUERY_DATA_KEY),
+    kind: 'named-query',
+    project,
+    path: entry.path,
+    // The resource's one data key, and a real one — the content route reads
+    // `query.sql` rather than `NamedQuery.getQuery()`, which is what lets a
+    // legacy resource still open. Keeping it in the URI also makes a collision
+    // with a script impossible: no script's key is ever `query.sql`, and a query
+    // path carries no `ignition/` prefix to collide on in the first place.
+    scriptKey: QUERY_DATA_KEY,
+    typeLabel: 'Named Query',
+    label: entry.name || namedQueryLabel(entry.path),
+    origin: entry.origin,
+    // The read's ETag is the authority; the listing's signature may be minutes
+    // old, and is only a fallback for a listing-only open.
+    etag: params.etag || entry.signature,
+    baseText: params.sql,
+    text: params.sql,
+    overridden: false,
+    settings: params.settings,
+    baseSettings: params.settings,
+    databases: params.databases ?? [],
+    editableSettings: params.editableSettings ?? [],
+    legacy: params.legacy === true,
+  };
+}
+
+/** The tab label for a query path — its last segment. */
+export function namedQueryLabel(path: string): string {
+  return path.split('/').filter(Boolean).pop() ?? path;
 }

@@ -123,12 +123,23 @@ export interface SymbolInformation {
   location: { uri: string; range: Range };
 }
 
-/** One hit from `scriptide/searchText` — a project-wide text search. */
+/**
+ * One hit from `scriptide/searchText` or `scriptide/references`.
+ *
+ * The two methods return the SAME shape deliberately — one results list renders
+ * both, and a field present in one and absent in the other shows up as a blank
+ * row rather than an error. See `LanguageServer#hitJson`.
+ */
 export interface TextSearchHit {
+  /** `ignition://<project>/ignition/script-python/<module/path>`. */
   uri: string;
-  path?: string;
+  /** Dotted module name, for the results heading. */
+  module?: string;
+  /** Zero-based. */
   line: number;
-  /** The matching line, for the results list. */
+  /** Zero-based column of the match itself, not of the line. */
+  character?: number;
+  /** The matching line, truncated by the server, for the results list. */
   text: string;
 }
 
@@ -509,13 +520,48 @@ export class LspClient {
     return result ?? [];
   }
 
-  /** Project-wide plain-text search — the module's own method, not standard LSP. */
-  async searchText(project: string, query: string): Promise<TextSearchHit[]> {
+  /**
+   * Project-wide plain-text search — the module's own method, not standard LSP.
+   *
+   * `caseSensitive` has been read by the server since 1.0.0 and had no way to be
+   * set: this client sent `{query}` and nothing else, so every search was
+   * case-insensitive whatever the UI offered. Passing it is what makes the
+   * Search view's "Match case" box mean anything.
+   */
+  async searchText(
+    project: string,
+    query: string,
+    caseSensitive = false
+  ): Promise<TextSearchHit[]> {
     this.ensureSynced(project);
     const result = await this.transport.request<TextSearchHit[] | null>(
       'lsp',
       'scriptide/searchText',
-      { query },
+      { query, caseSensitive },
+      project
+    );
+    return result ?? [];
+  }
+
+  /**
+   * Every place a NAME is written in the project's library scripts.
+   *
+   * **Name-based, and callers must say so on screen.** It is `scriptide/references`
+   * rather than `textDocument/references` for exactly that reason: the standard
+   * method promises a type-aware answer this server cannot give, so answering it
+   * would be lying in the protocol. What the server does give is identifier
+   * boundaries — `compute` does not match `recompute` — which is the difference
+   * between a usable list and a page of noise.
+   *
+   * Takes a name rather than a position because the same list is wanted from
+   * places that have no cursor: a search result, a symbol in the outline.
+   */
+  async references(project: string, name: string): Promise<TextSearchHit[]> {
+    this.ensureSynced(project);
+    const result = await this.transport.request<TextSearchHit[] | null>(
+      'lsp',
+      'scriptide/references',
+      { name },
       project
     );
     return result ?? [];
