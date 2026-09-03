@@ -1846,6 +1846,13 @@ export default function Workspace({ session }: WorkspaceProps) {
               onChange={handleChange}
               onSave={(uri) => void saveDoc(uri)}
               lsp={lsp}
+              // A ruler mark: put the caret on the problem AND open Problems on
+              // it, so the message is readable and copyable in one click —
+              // the Designer stops at the hover (Nigel, 03/09/2026).
+              onRevealProblem={(line, character) => {
+                jumpToLine(line, character);
+                showPanel('problems');
+              }}
               // Hidden, never unmounted, while a query's Settings or Testing tab
               // has the area: unmounting would destroy every open document's
               // view along with its undo history. See CodeEditor's `hidden`.

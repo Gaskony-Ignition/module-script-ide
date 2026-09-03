@@ -2,6 +2,60 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.7] — 2026-09-03
+
+feat: the Designer's error ruler, and the copy that makes it better than the Designer's.
+
+Nigel's item 2 of 03/09/2026: a narrow strip right of the code with a mark in
+line with every problem line, hover for the message — *"Ideally i would like to
+take this one step further and if i click on it I can copy the error text
+description for further analysis elsewhere."*
+
+### Added
+- **An overview ruler** beside the editor. A mark per problem LINE, positioned
+  proportionally to the **document**, not the viewport — the whole point is a
+  problem that is scrolled off screen; a ruler that only marked visible lines
+  would say what the squiggles already say.
+  - Several problems on one line merge into one mark carrying the worst
+    severity, with the card listing all of them. Three marks at identical
+    offsets read as one mark with a dirty edge.
+  - Severity by colour **and** by width, so an error and a hint are still
+    distinguishable without relying on colour.
+  - Hover shows a card with the parser's message and a **Copy** button. The card
+    is shown on hovering the SLOT, not the mark, so the pointer can travel onto
+    it — otherwise the copy button can never be clicked.
+  - Clicking a mark puts the caret on the problem **and** opens the Problems
+    panel on it.
+- **Copy on every Problems row too**, carrying file, line and message
+  (`CellSim:28:9 no viable alternative at input '='`).
+- **`validate_v19_ruler.py`** — 16 checks: geometry against the editor's own
+  bounding box, the mark's position as a fraction of the ruler, the hover card,
+  a real clipboard round trip, the click-through, and the mark clearing when the
+  line is fixed.
+
+### Fixed
+- **Both Copy buttons did nothing at all, silently.** This gateway is served
+  over **HTTP**, and the async Clipboard API is gated on a secure context — so
+  `navigator.clipboard` is not "present and refuses", it is `undefined`, and the
+  `navigator.clipboard?.writeText(...)` both buttons used was a no-op. New
+  `clipboard.ts` falls back to `document.execCommand('copy')` over an off-screen
+  textarea, restores focus afterwards (or copying from the ruler steals the
+  caret out of the editor), and **reports whether it actually worked** so the
+  button never claims "Copied" when nothing was.
+
+  The unit tests passed throughout, because jsdom lets a test assign
+  `navigator.clipboard` — the one environment that mattered was the only one
+  nothing checked. Caught by the live suite on the first run.
+
+### Two test bugs found by the same run, worth recording
+- The suite verified the copy with `navigator.clipboard.readText`, which is
+  **equally unavailable over HTTP** — it was testing the missing API from the
+  other side. It now pastes into a scratch field, which is also closer to what
+  the text is actually for.
+- Opening the Problems panel puts a SECOND CodeMirror on the page (the console),
+  so a bare `.cm-content` selector became ambiguous mid-suite. Every editor
+  interaction is scoped to `.code-editor` now.
+
 ## [1.8.5] — 2026-09-03
 
 feat: a favicon, sidebar state that survives a view switch, and pull-from-gateway.

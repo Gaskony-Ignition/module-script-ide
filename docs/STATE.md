@@ -2,7 +2,7 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.8.5 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
+**Version 1.8.7 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
 `deploy_gate.py` PASS (9 routes mounted) and every suite green: `p1_p2` 8/8,
 `lsp` 10/10, `v11` 12/12, `v13` 22/22, `v14` 18/18, `v15_term` 6/6,
 `v15_exec` 20/20, `v16_nav` 25/25, theme sweep no illegible themes (worst
@@ -387,13 +387,10 @@ much room it takes up, not only what it is called.
 Done in 1.8.5: favicon; sidebar trees keep their open branches across a view
 switch; pull-from-gateway with stale markers. Still open, in this order:
 
-1. **The Designer's error ruler.** A narrow strip right of the editor with a
-   mark per problem line, hover for the message, click to reveal it in the
-   Problems panel — and copyable, which the Designer does not offer. The
-   diagnostics themselves work (reproduced on the rig); what fails is
-   discoverability. Problems lists only OPEN tabs, sits in a collapsed panel,
-   and covers neither WebDev nor named-query documents, which are not registered
-   with the language server.
+1. ~~The Designer's error ruler.~~ **DONE in 1.8.7**, `validate_v19_ruler.py`
+   16/16. Still true and still open: Problems covers neither WebDev nor
+   named-query documents, because neither is registered with the language
+   server — so the ruler is absent on those too.
 2. **WebDev static resources.** Measured on `Machine_HMI_Demo`: `cell3D` is
    `{"resource-type": "text-resource", "content-type": "text/html", "text": "…"}`
    — the whole page lives in the `text` field of `config.json`. The module

@@ -1,5 +1,6 @@
 .code-editor {
   position: relative;
+  display: flex;
   flex: 1 1 auto;
   /* Without a zero minimum a long script pushes the editor past the viewport
      instead of scrolling inside its own pane. */
@@ -17,6 +18,15 @@
   background-color: var(--bg-primary);
   background-image: var(--page-glow);
   background-attachment: fixed;
+}
+
+/* The column the CodeMirror hosts are appended to. Takes everything the ruler
+   beside it does not; the zero minimum is what lets a long line scroll inside
+   the editor instead of widening the pane. */
+.code-editor-views {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
 }
 
 /* One host per open document. All but the active one are display:none — see the

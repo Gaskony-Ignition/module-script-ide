@@ -138,7 +138,9 @@ describe('ProblemsPanel', () => {
     const onOpen = vi.fn();
     render(<ProblemsPanel docs={[a]} lsp={lsp.client} onOpen={onOpen} />);
     lsp.publish(lspUri('P', a.path, 'code.py'), [diagnostic(4, 'bad indent')]);
-    fireEvent.click(screen.getByRole('button'));
+    // Two buttons per row since 1.8.6 — open and copy — so the query names
+    // the row by its message rather than taking the only button.
+    fireEvent.click(screen.getByRole('button', { name: /^bad indent/ }));
     expect(onOpen).toHaveBeenCalledWith(a.uri, 4, 2);
   });
 

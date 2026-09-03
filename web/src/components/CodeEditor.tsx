@@ -32,6 +32,7 @@ import type { LspClient } from '../api/lspClient';
 import { isLockedByInheritance, type OpenDoc } from '../workspace/documents';
 import { lspExtension } from './lspExtension';
 import { attachDiagnostics } from './lspDiagnostics';
+import ProblemRuler from './ProblemRuler';
 import { lspUri } from '../api/lspClient';
 import { lintGutter } from '@codemirror/lint';
 import {
@@ -61,6 +62,11 @@ export interface CodeEditorProps {
    * the old server holding a file nobody will ever close.
    */
   lsp?: LspClient | null;
+  /**
+   * A mark on the overview ruler was clicked: put the caret on that problem
+   * and, where the workspace can, reveal it in the Problems panel too.
+   */
+  onRevealProblem?: (line: number, character: number) => void;
   /**
    * Hide the buffer without unmounting a single view.
    *
@@ -98,7 +104,7 @@ interface MountedView {
 }
 
 export default function CodeEditor({
-  docs, activeUri, readOnly, onChange, onSave, lsp, hidden = false,
+  docs, activeUri, readOnly, onChange, onSave, lsp, onRevealProblem, hidden = false,
 }: CodeEditorProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const viewsRef = useRef(new Map<string, MountedView>());
@@ -293,7 +299,22 @@ export default function CodeEditor({
     }
   }, [docs, activeUri, applyReveal]);
 
-  return <div className="code-editor" hidden={hidden} ref={rootRef} data-testid="code-editor" />;
+  const activeDoc = docs.find((d) => d.uri === activeUri) ?? null;
+
+  return (
+    // The views live in their own child, NOT on this element: the hosts are
+    // appended imperatively, and React reconciling its own children beside
+    // nodes it did not create is how a view ends up removed on the next
+    // render. The ruler is a React sibling of that child, never of a host.
+    <div className="code-editor" hidden={hidden} data-testid="code-editor">
+      <div className="code-editor-views" ref={rootRef} />
+      <ProblemRuler
+        doc={activeDoc}
+        lsp={lsp}
+        onSelect={(line, character) => onRevealProblem?.(line, character)}
+      />
+    </div>
+  );
 }
 
 /**

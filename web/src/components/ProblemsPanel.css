@@ -17,6 +17,41 @@
   list-style: none;
 }
 
+/* A row is the open-it button plus a copy button beside it, so the two are
+   laid side by side and only the first one takes the width. */
+.problems-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-2);
+}
+
+.problems-copy {
+  flex: 0 0 auto;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  /* Quiet until the row is under the pointer; a column of Copy buttons is
+     louder than the problems they belong to. */
+  opacity: 0;
+}
+
+.problems-list li:hover .problems-copy,
+.problems-copy:focus-visible {
+  opacity: 1;
+}
+
+.problems-copy:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
 .problems-row {
   display: flex;
   align-items: baseline;

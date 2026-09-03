@@ -17,6 +17,7 @@ import type { LspClient, LspDiagnostic } from '../api/lspClient';
 import { lspUri } from '../api/lspClient';
 import type { OpenDoc } from '../workspace/documents';
 import { IconAlert } from './Icons';
+import { copyText } from './clipboard';
 import './ProblemsPanel.css';
 
 export interface ProblemsPanelProps {
@@ -164,6 +165,22 @@ export default function ProblemsPanel({ docs, lsp, onOpen }: ProblemsPanelProps)
                 <span className="problems-where">
                   {row.label} · {line + 1}:{character + 1}
                 </span>
+              </button>
+              {/* Take the text away. A parser message is what you paste into a
+                  search or a question, and selecting it out of a button by hand
+                  is not something a button lets you do (Nigel, 03/09/2026). */}
+              <button
+                type="button"
+                className="problems-copy"
+                aria-label={`Copy: ${row.diagnostic.message}`}
+                title="Copy this message"
+                onClick={() => {
+                  void copyText(
+                    `${row.label}:${line + 1}:${character + 1} ${row.diagnostic.message}`
+                  );
+                }}
+              >
+                Copy
               </button>
             </li>
           );
