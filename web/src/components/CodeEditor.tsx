@@ -24,7 +24,7 @@
  * hidden with `display:none` instead, so switching tabs is free and everything
  * the user had survives.
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Annotation, EditorState, Compartment, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
@@ -32,7 +32,7 @@ import type { LspClient } from '../api/lspClient';
 import { isLockedByInheritance, type OpenDoc } from '../workspace/documents';
 import { lspExtension } from './lspExtension';
 import { attachDiagnostics } from './lspDiagnostics';
-import ProblemRuler from './ProblemRuler';
+import ProblemRuler, { geometryOffset } from './ProblemRuler';
 import { lspUri } from '../api/lspClient';
 import { lintGutter } from '@codemirror/lint';
 import {
@@ -301,6 +301,55 @@ export default function CodeEditor({
 
   const activeDoc = docs.find((d) => d.uri === activeUri) ?? null;
 
+  /**
+   * Where a line sits in the active view, as a percentage of the ruler.
+   *
+   * Measured from CodeMirror rather than computed from the line count: a
+   * document that does not fill the pane occupies only part of it, and spreading
+   * the lines evenly put every mark below the code it described (Nigel,
+   * 04/09/2026). `lineBlockAt` also gets wrapped lines and folded ranges right,
+   * which no arithmetic on line numbers can.
+   */
+  const offsetOfLine = useCallback((line: number): number | null => {
+    const mounted = activeUri ? viewsRef.current.get(activeUri) : null;
+    if (!mounted) return null;
+    const { view } = mounted;
+    try {
+      // Clamp: a diagnostic describes the buffer as the server last parsed it,
+      // and the user may have deleted lines since.
+      const number = Math.min(Math.max(1, line + 1), view.state.doc.lines);
+      const block = view.lineBlockAt(view.state.doc.line(number).from);
+      // The MIDDLE of the line, not its top. The mark is 4px tall and pulled up
+      // by half of that, so centring it on the line's centre makes the two read
+      // as level; aligning to the top left it a consistent half-line high.
+      return geometryOffset(
+        block.top + block.height / 2, view.contentHeight, view.dom.clientHeight
+      );
+    } catch {
+      return null;
+    }
+  }, [activeUri]);
+
+  /**
+   * Bumped whenever the active view's geometry could have moved, so the ruler
+   * re-measures. A scroll does NOT move a mark — the ruler represents the whole
+   * document — but a resize, an edit and a fold all do.
+   */
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  useEffect(() => {
+    const mounted = activeUri ? viewsRef.current.get(activeUri) : null;
+    if (!mounted) return;
+    const bump = () => setLayoutVersion((n) => n + 1);
+    bump();
+    // Guarded: an environment without ResizeObserver still gets an editor, it
+    // just does not re-measure the ruler on a resize. A missing browser API
+    // must never be the reason the code surface fails to mount.
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(bump);
+    observer.observe(mounted.view.dom);
+    return () => observer.disconnect();
+  }, [activeUri, docs]);
+
   return (
     // The views live in their own child, NOT on this element: the hosts are
     // appended imperatively, and React reconciling its own children beside
@@ -311,6 +360,8 @@ export default function CodeEditor({
       <ProblemRuler
         doc={activeDoc}
         lsp={lsp}
+        offsetOfLine={offsetOfLine}
+        layoutVersion={layoutVersion}
         onSelect={(line, character) => onRevealProblem?.(line, character)}
       />
     </div>

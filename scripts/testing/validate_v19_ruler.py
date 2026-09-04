@@ -122,15 +122,35 @@ with sync_playwright() as p:
     rec("MARK: it is an error, not a hint",
         "is-error" in (mark.get_attribute("class") or ""), mark.get_attribute("class"))
 
-    # The mark's vertical position is proportional to where the line is in the
-    # DOCUMENT. The broken line is the last one, so the mark is at the bottom
-    # of the ruler — whatever is scrolled into view.
+    # THE check, and the one Nigel's complaint was about: the mark must be level
+    # with the line it describes, not merely somewhere on the ruler.
+    #
+    # 1.8.7 spread the line count evenly over the ruler's height, which is only
+    # right when the document fills the pane. A 28-line script fills about two
+    # thirds of an 819px editor, so the last line's mark was drawn at the bottom
+    # while its code sat at 62% — "it seems to just appear randomly". Measured
+    # against the real DOM position of the line, not against a formula.
     mark_box = mark.bounding_box() or {}
-    rec("MARK: positioned by document, near the bottom for the last line",
-        bool(mark_box) and bool(box)
-        and (mark_box["y"] - box["y"]) / max(1, box["height"]) > 0.85,
-        f"mark at {(mark_box.get('y', 0) - box.get('y', 0)) / max(1, box.get('height', 1)):.0%} "
-        f"of the ruler")
+    line_box = page.evaluate("""() => {
+      for (const el of document.querySelectorAll('.code-editor .cm-line')) {
+        if (el.textContent && el.textContent.includes('not python')) {
+          const r = el.getBoundingClientRect();
+          return {y: r.y, height: r.height};
+        }
+      }
+      return null;
+    }""")
+    if mark_box and line_box:
+        mark_mid = mark_box["y"] + mark_box["height"] / 2
+        line_mid = line_box["y"] + line_box["height"] / 2
+        drift = abs(mark_mid - line_mid)
+    else:
+        drift = 9999
+    # Half a line height: close enough that the eye reads them as level.
+    rec("MARK: sits level with the line it describes",
+        drift <= max(10, (line_box or {}).get("height", 0) / 2 + 4),
+        f"mark centre {mark_mid:.0f}px vs line centre {line_mid:.0f}px, drift {drift:.0f}px"
+        if mark_box and line_box else "could not measure")
 
     # ---------- hover shows the message ----------
     card = page.locator(".problem-ruler-card").first

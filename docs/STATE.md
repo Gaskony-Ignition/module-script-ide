@@ -2,7 +2,7 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.8.7 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
+**Version 1.8.10 · deployed on `ignition-module-testing` (8.3.8) 03/09/2026 —
 `deploy_gate.py` PASS (9 routes mounted) and every suite green: `p1_p2` 8/8,
 `lsp` 10/10, `v11` 12/12, `v13` 22/22, `v14` 18/18, `v15_term` 6/6,
 `v15_exec` 20/20, `v16_nav` 25/25, theme sweep no illegible themes (worst

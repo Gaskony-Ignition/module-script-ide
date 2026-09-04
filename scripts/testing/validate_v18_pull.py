@@ -158,6 +158,14 @@ with sync_playwright() as p:
         page.locator(".tab-stale").count() == 1,
         f"{page.locator('.tab-stale').count()} marker(s)")
     toolbar = page.locator(".workspace-stale")
+    # The bar over the buffer. The tab marker and the toolbar count were both
+    # missable (Nigel, 04/09/2026: "a bit to easy to miss"), so the document
+    # itself carries the notice.
+    bar = page.locator(".workspace-stale-bar")
+    rec("DETECT: a bar on the document says so in words",
+        bar.count() == 1 and MODULE in bar.first.inner_text(),
+        repr(bar.first.inner_text()[:90]) if bar.count() else "absent")
+
     rec("DETECT: the toolbar offers a counted pull",
         toolbar.count() == 1 and "1" in (toolbar.first.inner_text() if toolbar.count() else ""),
         toolbar.first.inner_text() if toolbar.count() else "absent")
@@ -208,10 +216,47 @@ with sync_playwright() as p:
         rec("CONFLICT: the dialog shows BOTH copies",
             "12345" in body and "local edit" in body,
             f"theirs={'12345' in body} mine={'local edit' in body}")
-        page.keyboard.press("Escape")
+        # Cancel, explicitly. Escape works too (1.8.9) but clicking the button
+        # is what proves the dialog can be dismissed WITHOUT choosing a side —
+        # and it leaves no backdrop to intercept the next step's clicks.
+        dialog.first.locator('button:has-text("Cancel")').click()
         page.wait_for_timeout(500)
     else:
         rec("CONFLICT: the dialog shows BOTH copies", False, "no dialog to inspect")
+
+    # ---------- closing a dirty tab must ask ----------
+    # Nigel, 04/09/2026: "I can close a tab that has unsaved changes without any
+    # notice or anything." The close button sits a few pixels from the tab you
+    # meant to click, so this is the easiest way in the app to lose work.
+    page.locator(".code-editor .cm-content").click()
+    page.keyboard.press("Control+End")
+    page.keyboard.type("\n# unsaved\n")
+    page.wait_for_timeout(600)
+    page.locator(f'.tab-close[aria-label*="{MODULE}"]').first.click()
+    page.wait_for_timeout(800)
+    asked = page.locator('[role="alertdialog"]')
+    rec("CLOSE: closing a dirty tab asks before discarding",
+        asked.count() == 1, f"{asked.count()} dialog(s)")
+    rec("CLOSE: the tab is still open while the question stands",
+        page.locator(".tab-strip button").count() > 0,
+        f"{page.locator('.tab-strip button').count()} tab button(s)")
+    if asked.count():
+        rec("CLOSE: it offers save-and-close, not just discard-or-cancel",
+            asked.first.locator('button:has-text("Save and close")').count() == 1,
+            "; ".join(asked.first.locator("button").all_inner_texts()))
+        asked.first.locator('button:has-text("Cancel")').click()
+        page.wait_for_timeout(400)
+        rec("CLOSE: cancelling keeps the buffer",
+            page.locator(".tab-dirty").count() == 1,
+            f"dirty={page.locator('.tab-dirty').count()}")
+        # Now discard it deliberately, so the fixture can be deleted.
+        page.locator(f'.tab-close[aria-label*="{MODULE}"]').first.click()
+        page.wait_for_timeout(600)
+        page.locator('[role="alertdialog"] button:has-text("Discard")').click()
+        page.wait_for_timeout(600)
+    else:
+        rec("CLOSE: it offers save-and-close, not just discard-or-cancel", False, "no dialog")
+        rec("CLOSE: cancelling keeps the buffer", False, "no dialog")
 
     # ---------- clean up ----------
     signature = signature_of(page, project, MODULE)

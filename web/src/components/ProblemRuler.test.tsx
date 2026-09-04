@@ -2,7 +2,9 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { LspClient, LspDiagnostic } from '../api/lspClient';
 import type { OpenDoc } from '../workspace/documents';
-import ProblemRuler, { markOffset, severityName, worstSeverity } from './ProblemRuler';
+import ProblemRuler, {
+  geometryOffset, markOffset, severityName, worstSeverity,
+} from './ProblemRuler';
 
 function doc(text: string, partial: Partial<OpenDoc> = {}): OpenDoc {
   return {
@@ -67,6 +69,34 @@ describe('markOffset', () => {
   });
 });
 
+describe('geometryOffset', () => {
+  it('divides by the PANE when the document does not fill it', () => {
+    // The 1.8.7 defect (Nigel, 04/09/2026: the mark "seems to just appear
+    // randomly"). A 28-line script fills about 530px of an 819px pane, so
+    // line-count arithmetic drew the last line's mark at the bottom of the
+    // ruler while the code sat two thirds up. Dividing by the pane puts the
+    // mark exactly beside its line.
+    expect(geometryOffset(530, 530, 819)).toBe(64.71);
+    expect(geometryOffset(0, 530, 819)).toBe(0);
+  });
+
+  it('divides by the CONTENT when the document is taller than the pane', () => {
+    // Then the ruler represents the whole file, which is the point of one.
+    expect(geometryOffset(1000, 4000, 800)).toBe(25);
+    expect(geometryOffset(4000, 4000, 800)).toBe(100);
+  });
+
+  it('refuses geometry it cannot use rather than dividing by zero', () => {
+    expect(geometryOffset(10, 0, 0)).toBeNull();
+    expect(geometryOffset(Number.NaN, 100, 100)).toBeNull();
+  });
+
+  it('clamps a line measured past the end of the content', () => {
+    expect(geometryOffset(9999, 100, 100)).toBe(100);
+    expect(geometryOffset(-20, 100, 100)).toBe(0);
+  });
+});
+
 describe('severity helpers', () => {
   it('names the four LSP levels', () => {
     expect([1, 2, 3, 4, undefined].map(severityName))
@@ -111,6 +141,39 @@ describe('ProblemRuler', () => {
     expect(marks).toHaveLength(1);
     expect(marks[0]).toHaveClass('is-error');
     expect(marks[0]).toHaveAccessibleName('error on line 4: a warning\nan error');
+  });
+
+  it('prefers the editor\'s measured geometry over the line count', () => {
+    // Both are available here and they disagree; the measured one must win, or
+    // the fix for "appears randomly" is only in the helper and not in the UI.
+    const { client } = fakeLsp([diagnostic(5, 'x')]);
+    render(
+      <ProblemRuler
+        doc={doc('1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n')}
+        lsp={client}
+        onSelect={vi.fn()}
+        offsetOfLine={() => 12.5}
+      />
+    );
+    const slot = document.querySelector('.problem-ruler-slot') as HTMLElement;
+    expect(slot.style.top).toBe('12.5%');
+  });
+
+  it('falls back to the line count when the editor cannot be measured', () => {
+    // A view that has not laid out yet returns null rather than a wrong number.
+    const { client } = fakeLsp([diagnostic(5, 'x')]);
+    render(
+      <ProblemRuler
+        doc={doc('1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n')}
+        lsp={client}
+        onSelect={vi.fn()}
+        offsetOfLine={() => null}
+      />
+    );
+    const slot = document.querySelector('.problem-ruler-slot') as HTMLElement;
+    // 12 lines, not 11: the trailing newline makes a final empty one, exactly
+    // as CodeMirror counts it. Line 5 of 12 is 5/11.
+    expect(slot.style.top).toBe('45.45%');
   });
 
   it('reports the caret position of the problem when a mark is clicked', () => {

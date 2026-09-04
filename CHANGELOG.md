@@ -2,6 +2,59 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.10] — 2026-09-04
+
+fix: the ruler marks the wrong line, closing a tab throws work away, and pull is missable.
+
+Nigel's three follow-ups of 04/09/2026. Two are defects in 1.8.5–1.8.7.
+
+### Fixed
+- **The ruler mark was not level with its error.** *"it seems to just appear
+  randomly."* It was — `markOffset` spread the line COUNT evenly over the
+  ruler's height, which is only right when the document fills the pane. A
+  28-line script fills about two thirds of an 819px editor, so the last line's
+  mark was drawn at the bottom while its code sat at 62%.
+
+  Marks are now placed from CodeMirror's own layout (`lineBlockAt().top`,
+  divided by the greater of content and pane height), which also gets wrapped
+  lines and folded ranges right — no arithmetic on line numbers can. Centred on
+  the line rather than aligned to its top, which was a consistent half-line
+  high. **Measured drift on the rig: 14px → 4px**, against the real DOM position
+  of the line.
+
+- **A dirty tab closed silently.** *"I can close a tab that has unsaved changes
+  without any notice or anything."* The close button is a few pixels from the
+  tab you meant to select, which makes it the easiest way in the app to lose
+  work. It now asks, with **three** answers: Cancel, Discard changes, and **Save
+  and close** — "cancel or lose it" is a false choice, and forcing someone to
+  cancel, save, then close again is how a confirmation becomes something people
+  click past. Save-and-close only closes if the save actually landed: a 409
+  leaves the conflict dialog up, and closing under it would discard the very
+  buffer being compared.
+
+- **Pull was easy to miss.** The tab arrow and the toolbar count are both
+  somewhere you are not looking, which is at the code. A bar now sits between
+  the tab strip and the buffer, for the active document only, saying which
+  script changed and whether you also have unsaved edits — with the action on
+  it. The toolbar button is filled rather than outlined; an outlined button in a
+  row of outlined buttons is just another button.
+
+- **Escape did not dismiss the conflict dialog.** Cancel existed so nothing was
+  unrecoverable, but a modal that ignores Escape is one people fight. Wired on
+  both it and the new close dialog.
+
+### Two test bugs, both encoding the old behaviour
+- `validate_v19_ruler` asserted the mark sat "near the bottom for the last
+  line" — the 1.8.7 defect written down as a requirement. It now measures the
+  mark's centre against the **real DOM position** of the line, which is what
+  Nigel's complaint was actually about.
+- The pull suite left the conflict dialog open (Escape did nothing then), and
+  its backdrop intercepted every later click. It cancels explicitly now.
+
+- `ResizeObserver` does not exist in jsdom; unstubbed it threw during commit and
+  **29 unrelated tests failed with it**. Stubbed in setup, and guarded in the
+  component so no environment can fail to mount the code surface over it.
+
 ## [1.8.7] — 2026-09-03
 
 feat: the Designer's error ruler, and the copy that makes it better than the Designer's.

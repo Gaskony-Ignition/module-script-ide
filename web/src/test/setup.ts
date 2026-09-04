@@ -83,3 +83,19 @@ if (typeof HTMLCanvasElement !== 'undefined') {
     translate: () => {},
   })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 }
+
+/**
+ * jsdom has no ResizeObserver, and the editor uses one to re-measure the problem
+ * ruler when its pane changes size. Unstubbed it throws during commit, which
+ * React reports as an uncaught error and 29 unrelated tests fail with it.
+ *
+ * A no-op that records the callback: nothing in jsdom has a size to observe, so
+ * firing it would be inventing a layout that does not exist.
+ */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}

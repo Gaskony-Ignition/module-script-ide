@@ -48,7 +48,7 @@ import ConfigStrip from '../components/ConfigStrip';
 import ConflictDialog from '../components/ConflictDialog';
 import ActivityBar, { type PanelId, type ViewId } from '../components/ActivityBar';
 import FileTree from '../components/FileTree';
-import { IconExternal, IconPlus } from '../components/Icons';
+import { IconAlert, IconExternal, IconPlus } from '../components/Icons';
 import LayoutControls, { type LayoutState } from '../components/LayoutControls';
 import Panel from '../components/Panel';
 import Resizer from '../components/Resizer';
@@ -252,6 +252,8 @@ export default function Workspace({ session }: WorkspaceProps) {
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ScriptEntry | null>(null);
+  // A tab whose close would discard unsaved work, awaiting an answer.
+  const [pendingClose, setPendingClose] = useState<OpenDoc | null>(null);
   const [configEntry, setConfigEntry] = useState<ScriptEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   // Bumped on every edit so the outline re-requests. A counter rather than the
@@ -567,7 +569,13 @@ export default function Workspace({ session }: WorkspaceProps) {
     setDocRevision((n) => n + 1);
   }, []);
 
-  const closeDoc = useCallback((uri: string) => {
+  /**
+   * Close a tab, discarding its buffer.
+   *
+   * Private on purpose — every caller goes through `closeDoc`, which refuses to
+   * discard unsaved work without asking. See there.
+   */
+  const forceCloseDoc = useCallback((uri: string) => {
     // Computed from the ref rather than inside a setState updater: an updater
     // must be pure, and React runs it twice under StrictMode.
     const current = docsRef.current;
@@ -586,6 +594,38 @@ export default function Workspace({ session }: WorkspaceProps) {
       return remaining;
     });
   }, []);
+
+  /**
+   * Close a tab — asking first when that would throw work away.
+   *
+   * Until 1.8.8 this discarded an unsaved buffer silently (Nigel, 04/09/2026:
+   * "I can close a tab that has unsaved changes without any notice or
+   * anything"). Nothing else in this app destroys user input without a prompt,
+   * and a close button is the easiest thing on screen to hit by accident —
+   * it sits a few pixels from the tab you meant to select.
+   *
+   * A 'new' document counts as unsaved even when its buffer is empty: closing
+   * it discards a script the gateway has never seen. That falls out of
+   * `isDirty` and is not special-cased here.
+   */
+  // Escape cancels the close question, as it does every other modal here.
+  useEffect(() => {
+    if (!pendingClose) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPendingClose(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [pendingClose]);
+
+  const closeDoc = useCallback((uri: string) => {
+    const doc = docsRef.current.find((d) => d.uri === uri);
+    if (doc && isDirty(doc)) {
+      setPendingClose(doc);
+      return;
+    }
+    forceCloseDoc(uri);
+  }, [forceCloseDoc]);
 
   /**
    * Apply a successful write: base text, base settings and signature move
@@ -1785,6 +1825,26 @@ export default function Workspace({ session }: WorkspaceProps) {
               onClose={closeDoc}
               onPull={(uri) => void pullDoc(uri)}
             />
+            {/* A bar on the document itself, not only a marker in the strip.
+                The tab's arrow and the toolbar count were both missable
+                (Nigel, 04/09/2026: "a bit to easy to miss"), and neither is
+                where you are looking — which is at the code. This sits between
+                the tab and the buffer it is about, and only for the document
+                actually on screen. */}
+            {activeDoc && staleUris.has(activeDoc.uri) && (
+              <div className="workspace-stale-bar" role="status">
+                <IconAlert size={14} />
+                <span>
+                  <strong>{activeDoc.label}</strong> has changed on the gateway
+                  {isDirty(activeDoc)
+                    ? ' — and you have unsaved edits here.'
+                    : '. You are looking at an older copy.'}
+                </span>
+                <button type="button" className="button" onClick={() => void pullDoc(activeDoc.uri)}>
+                  {isDirty(activeDoc) ? 'Compare…' : 'Pull the current copy'}
+                </button>
+              </div>
+            )}
             {activeUri && activeQueryDoc && activeQueryDoc.settings && (
               /* Keyed on the document so each query opens its own editor state
                  — a parameter table left mid-edit must not follow you to the
@@ -2083,6 +2143,65 @@ export default function Workspace({ session }: WorkspaceProps) {
                 {pendingDelete.origin === 'override'
                   ? deleteBusy ? 'Discarding…' : 'Discard overrides'
                   : deleteBusy ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingClose && (
+        <div className="newscript-backdrop" role="presentation">
+          <div
+            className="newscript-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="close-title"
+          >
+            <h2 id="close-title">
+              Save {pendingClose.label} before closing?
+            </h2>
+            <p className="muted">
+              {pendingClose.origin === 'new'
+                ? 'This script has never been saved to the gateway. Closing it '
+                  + 'discards it entirely.'
+                : 'It has unsaved changes. Closing it discards them; the copy on '
+                  + 'the gateway is unaffected.'}
+            </p>
+            {/* Three buttons, not two. "Cancel or lose it" is a false choice —
+                the answer someone almost always wants is to save and then
+                close, and making them cancel, save, and close again is how a
+                confirmation becomes something people click past. */}
+            <div className="newscript-actions">
+              <button type="button" onClick={() => setPendingClose(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  forceCloseDoc(pendingClose.uri);
+                  setPendingClose(null);
+                }}
+              >
+                Discard changes
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={!activeWritable && pendingClose.uri === activeUri}
+                onClick={() => {
+                  const uri = pendingClose.uri;
+                  setPendingClose(null);
+                  void saveDoc(uri).then(() => {
+                    // Only close if the save actually landed. A 409 leaves the
+                    // conflict dialog up, and closing the tab under it would
+                    // throw away the very buffer being compared.
+                    const after = docsRef.current.find((d) => d.uri === uri);
+                    if (after && !isDirty(after)) forceCloseDoc(uri);
+                  });
+                }}
+              >
+                Save and close
               </button>
             </div>
           </div>

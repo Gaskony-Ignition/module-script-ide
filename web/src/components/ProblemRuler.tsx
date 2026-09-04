@@ -29,6 +29,18 @@ export interface ProblemRulerProps {
   lsp?: LspClient | null;
   /** Move the caret to a problem and, where the workspace offers it, reveal it. */
   onSelect: (line: number, character: number) => void;
+  /**
+   * Where a line sits, as a percentage of the ruler, measured from the editor's
+   * own layout. Absent — or returning null — falls back to spreading the line
+   * count evenly, which is only right when the document fills the pane.
+   */
+  offsetOfLine?: (line: number) => number | null;
+  /**
+   * Bumped by the editor whenever its layout changes (a resize, a scroll, an
+   * edit). The ruler has no other way to know that `offsetOfLine` would now
+   * answer differently, because the function's identity does not change.
+   */
+  layoutVersion?: number;
 }
 
 /** LSP DiagnosticSeverity → the word used in the class and the label. */
@@ -48,13 +60,44 @@ export function severityName(severity: number | undefined): string {
 /**
  * Where a mark sits, as a percentage of the ruler's height.
  *
- * Clamped so that a diagnostic on the last line is still fully on screen rather
- * than half-drawn past the bottom edge, and so that a document shorter than one
- * line — which happens while a buffer is empty — does not divide by zero.
+ * The FALLBACK only — used when the editor cannot be measured (a test, or a
+ * view that has not laid out yet). It spreads the line count evenly over the
+ * ruler, which is wrong whenever the document does not fill the editor: a
+ * 28-line script in an 819px pane occupies about 530px of it, so line 28 was
+ * drawn at the bottom of the ruler while the code it described sat two thirds
+ * up. Nigel, 04/09/2026: "it seems to just appear randomly."
+ *
+ * `geometryOffset` below is the real answer and is used whenever a view exists.
  */
 export function markOffset(line: number, lineCount: number): number {
   if (lineCount <= 1) return 0;
   const ratio = Math.min(1, Math.max(0, line / (lineCount - 1)));
+  return Math.round(ratio * 10000) / 100;
+}
+
+/**
+ * Where a mark sits, from the editor's OWN layout.
+ *
+ * `top` is the line's offset within the content, and the denominator is the
+ * taller of the content and the visible pane:
+ *
+ * - a document SHORTER than the pane divides by the pane height, so a mark
+ *   lands exactly beside the line it describes;
+ * - a document TALLER than the pane divides by the content height, so the ruler
+ *   represents the whole file — which is the point of having one, and is what
+ *   both VS Code and the Designer do.
+ *
+ * Returns null when the geometry is not usable yet, so the caller can fall back
+ * rather than divide by zero.
+ */
+export function geometryOffset(
+  top: number,
+  contentHeight: number,
+  paneHeight: number
+): number | null {
+  const span = Math.max(contentHeight, paneHeight);
+  if (!Number.isFinite(top) || !Number.isFinite(span) || span <= 0) return null;
+  const ratio = Math.min(1, Math.max(0, top / span));
   return Math.round(ratio * 10000) / 100;
 }
 
@@ -66,7 +109,9 @@ export function worstSeverity(diagnostics: LspDiagnostic[]): number {
   );
 }
 
-export default function ProblemRuler({ doc, lsp, onSelect }: ProblemRulerProps) {
+export default function ProblemRuler({
+  doc, lsp, onSelect, offsetOfLine, layoutVersion = 0,
+}: ProblemRulerProps) {
   const [diagnostics, setDiagnostics] = useState<LspDiagnostic[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -108,10 +153,13 @@ export default function ProblemRuler({ doc, lsp, onSelect }: ProblemRulerProps) 
         line,
         group,
         severity: severityName(worstSeverity(group)),
-        offset: markOffset(line, lineCount),
+        offset: offsetOfLine?.(line) ?? markOffset(line, lineCount),
         text: group.map((d) => d.message).join('\n'),
       }));
-  }, [diagnostics, lineCount]);
+    // `layoutVersion` is a dependency deliberately: it is the only signal
+    // that the editor's geometry moved under us, since the function's
+    // identity does not change when the layout does.
+  }, [diagnostics, lineCount, offsetOfLine, layoutVersion]);
 
   const copy = useCallback((key: string, text: string) => {
     // Through `copyText`, NOT `navigator.clipboard` directly: this gateway is

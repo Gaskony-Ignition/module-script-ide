@@ -12,7 +12,7 @@
  * and saves against that, which is exactly the overwrite the 409 prevented. It is
  * safe only because the other version is on screen beside it.
  */
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { diffLines } from '../workspace/lineDiff';
 import './ConflictDialog.css';
 
@@ -41,6 +41,17 @@ export default function ConflictDialog({
   onCancel,
 }: ConflictDialogProps) {
   const rows = useMemo(() => diffLines(mine, theirs), [mine, theirs]);
+
+  // Escape cancels, as it does for every other modal here. Bound on the
+  // document rather than the dialog: focus may be inside the diff panes, which
+  // are scrollable regions of their own.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onCancel();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [busy, onCancel]);
 
   return (
     <div className="conflict-backdrop" role="presentation">

@@ -262,8 +262,48 @@
 
 /* The pull affordance. Warning-coloured, not error: nothing is broken and
    nothing is lost — the gateway simply has a newer copy than this tab. It only
-   exists while there IS something to pull, so its presence is the notice. */
+   exists while there IS something to pull, so its presence is the notice.
+   FILLED, not outlined: an outlined button in a row of outlined buttons is
+   another button, and this one has to be seen. */
 .workspace-stale {
   border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.workspace-stale:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 34%, transparent);
+}
+
+/* The bar over the buffer. Between the tab strip and the code, because that is
+   where the eye already is — the toolbar count and the tab marker were both
+   somewhere you are not looking. */
+.workspace-stale-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in srgb, var(--warning) 16%, var(--bg-secondary));
+  border-bottom: var(--rule-width) solid var(--warning);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+}
+
+.workspace-stale-bar svg {
+  flex: 0 0 auto;
   color: var(--warning);
+}
+
+/* The message takes the width so the button stays hard right, where it is in
+   the same place every time rather than wherever the sentence happens to end. */
+.workspace-stale-bar span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspace-stale-bar .button {
+  flex: 0 0 auto;
+  border-color: var(--warning);
 }
