@@ -9,12 +9,21 @@
   /* Never let a fast drag select the text either side of the divider. */
   touch-action: none;
   user-select: none;
+  /* ABOVE the panes either side, and the reason is measured (04/09/2026):
+     without it the divider between two editors received no pointer event at
+     all. `elementFromPoint` on its own centre returned the neighbouring
+     CodeMirror's line-number gutter — a 1px divider between two flex children
+     loses the half-pixel to whichever paints last, and the drag simply did
+     nothing while every static check said the divider was there. */
+  z-index: 2;
 }
 
+/* The GRAB area, three pixels either side of a one-pixel line. A divider you
+   have to hit exactly is a divider people conclude does not move. */
 .resizer::after {
   content: '';
   position: absolute;
-  inset: 0 -2px;
+  inset: 0 -3px;
 }
 
 .resizer:hover,
@@ -33,5 +42,5 @@
 }
 
 .resizer.resizer-horizontal::after {
-  inset: -2px 0;
+  inset: -3px 0;
 }

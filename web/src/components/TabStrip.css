@@ -140,3 +140,32 @@
 .tab-stale:hover {
   background: var(--bg-tertiary);
 }
+
+/*
+ * The split control, at the far end of the strip.
+ *
+ * `margin-left: auto` rather than a fixed position: the tabs are the content
+ * and this is what is left over, so a strip with one tab and a strip with ten
+ * both put it in the same place — hard against the right edge — without the
+ * tabs having to know it is there.
+ */
+.tab-strip-action {
+  margin-left: auto;
+  flex: 0 0 auto;
+  align-self: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-row);
+}
+
+.tab-strip-action:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}

@@ -5,6 +5,7 @@
  * separately — a dirty flag and a buffer drift apart, and the one place that
  * shows up is a tab that says "saved" over unsaved work.
  */
+import type { ReactNode } from 'react';
 import { isDirty, isLockedByInheritance, type OpenDoc } from '../workspace/documents';
 import './TabStrip.css';
 
@@ -21,12 +22,24 @@ export interface TabStripProps {
   onClose: (uri: string) => void;
   /** Re-read one document from the gateway. Absent hides the affordance. */
   onPull?: (uri: string) => void;
+  /**
+   * Move the active document to the other editor pane. Absent hides the button.
+   *
+   * A pane-level action rather than a per-tab one, and placed at the END of the
+   * strip for that reason: it is about where this pane's current document
+   * lives, not about any of the tabs beside it.
+   */
+  onSplit?: (uri: string) => void;
+  /** What the split button will do — it moves BOTH ways, so it must say which. */
+  splitLabel?: string;
+  /** Rendered when this pane has no documents, in place of nothing at all. */
+  empty?: ReactNode;
 }
 
 export default function TabStrip({
-  docs, activeUri, staleUris, onSelect, onClose, onPull,
+  docs, activeUri, staleUris, onSelect, onClose, onPull, onSplit, splitLabel, empty,
 }: TabStripProps) {
-  if (docs.length === 0) return null;
+  if (docs.length === 0) return empty ? <>{empty}</> : null;
 
   return (
     <div className="tab-strip" role="tablist" aria-label="Open scripts">
@@ -94,6 +107,17 @@ export default function TabStrip({
           </div>
         );
       })}
+      {onSplit && activeUri && (
+        <button
+          type="button"
+          className="tab-strip-action"
+          aria-label={splitLabel ?? 'Move to the other editor'}
+          title={splitLabel ?? 'Move to the other editor'}
+          onClick={() => onSplit(activeUri)}
+        >
+          ⇹
+        </button>
+      )}
     </div>
   );
 }

@@ -307,3 +307,35 @@
   flex: 0 0 auto;
   border-color: var(--warning);
 }
+
+/* ---- split editors (v1.9.0) -------------------------------------------
+ *
+ * Nigel, 03/09/2026: "I'm not seeing a way to split the screen between 2 or
+ * more scripts so that I can do comparisons or copy and paste between."
+ *
+ * A ROW, unlike the editor/panel split above it: two buffers are compared side
+ * by side, where a console prints lines and wants the width. The panes carry
+ * `min-width: 0` for the reason every flex child in this file does — without
+ * it a long line in one buffer sets that pane's minimum and the divider stops
+ * moving.
+ */
+.workspace-panes {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The divider is the only thing between them; a border on the pane would move
+   with the resize and double up against the resizer's own hover state. */
+.workspace-panes.is-split > .workspace-pane + .workspace-pane {
+  border-left: 1px solid var(--border);
+}

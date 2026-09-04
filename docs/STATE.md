@@ -2,10 +2,10 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.9.0 · deployed on `ignition-module-testing` (8.3.8) 04/09/2026 —
+**Version 1.10.0 · deployed on `ignition-module-testing` (8.3.8) 04/09/2026 —
 `deploy_gate.py` PASS (6 checks) and every suite green: `v13` 23/23,
-`v16_nav` 25/25, `v18_pull` 20/20, `v19_ruler` 16/16, `v20_webdev` 29/29.
-Java 365 tests, Vitest 505.**
+`v16_nav` 25/25, `v18_pull` 20/20, `v19_ruler` 16/16, `v20_webdev` 29/29,
+`v21_split` 21/21. Java 365 tests, Vitest 521.**
 
 **Running the live suites needs a venv with playwright**, which is not on the
 system python and was absent on 03/09/2026:
@@ -38,6 +38,42 @@ Scope**, and makes the terminal a **root shell** where the host allows it. 1.5.0
 makes the **exec channel non-blocking and streaming**, gives tracebacks
 **structure**, makes **closing a terminal actually close it**, and makes every
 policy switch **changeable on a running gateway**.
+
+### 1.10.0 — two editors, side by side
+
+Nigel, 03/09/2026: *"I'm not seeing a way to split the screen between 2 or more
+scripts so that I can do comparisons or copy and paste between etc. This is a
+major limitation on the designer."*
+
+**A document lives in exactly ONE pane, and splitting MOVES it.** That is
+smaller than VS Code's split and it is the honest version here: `CodeEditor`
+keeps one `EditorView` per document — deliberately, so scroll position and undo
+history survive a tab switch — and two views over one buffer would need
+synchronising on every keystroke. That is an editing model, not a layout. The
+live suite proves the moved editor keeps its undo stack.
+
+The rules are pure functions in `panes.ts`, tested on their own, because this is
+the part that is easy to get subtly wrong and impossible to see going wrong: a
+pane showing a tab strip and no buffer, a document in both panes at once, or a
+second pane left open with nothing in it. `PaneState` is three fields and there
+is deliberately **no "is split" flag** — an empty set is one pane, and a flag
+and the set behind it drift apart.
+
+`activeUri` keeps its old meaning throughout: the document you are working in,
+and the one the outline, Problems, the config strip and "Run file" describe.
+Which PANE that is falls out of the split set, so the two cannot disagree. The
+chrome above the buffer is built once and rendered into whichever pane holds the
+focused document — never duplicated, for the same reason the inheritance note
+shares the settings row rather than taking one of its own.
+
+**The divider between two panes received no pointer event at all** on the first
+build. `elementFromPoint` on its own centre returned the neighbouring
+CodeMirror's line-number gutter: a 1px divider between two flex children loses
+the half pixel to whichever paints last. Every static check passed — the
+divider was in the DOM, at the right x, the right height, with its handlers
+bound — and dragging it did nothing. `.resizer` now takes `z-index: 2` and a
+3px grab area, which fixes the rail and panel dividers too; `v21` asserts
+`elementFromPoint` hits it, not merely that a drag changed a number.
 
 ### 1.9.0 — Web Dev has two shapes, and this module knew one
 
@@ -438,10 +474,10 @@ much room it takes up, not only what it is called.
 
 ## What is next
 
-### Nigel's 03/09/2026 list — one left
+### Nigel's 03/09/2026 list — all six done
 
 Done in 1.8.5: favicon; sidebar trees keep their open branches across a view
-switch; pull-from-gateway with stale markers. Still open, in this order:
+switch; pull-from-gateway with stale markers. The rest followed:
 
 1. ~~The Designer's error ruler.~~ **DONE in 1.8.7**, `validate_v19_ruler.py`
    16/16. Still true and still open: Problems covers neither WebDev nor
@@ -449,11 +485,8 @@ switch; pull-from-gateway with stale markers. Still open, in this order:
    server — so the ruler is absent on those too.
 2. ~~WebDev static resources.~~ **DONE in 1.9.0**, `validate_v20_webdev.py`
    29/29 against the real `Machine_HMI_Demo` endpoints. See "1.9.0" below.
-3. **Split view.** Two scripts side by side to compare and copy between.
-   `CodeEditor` already keeps one live `EditorView` per open document precisely
-   so scroll and undo survive a tab switch, so nothing needs tearing down — what
-   is hard-coded is "one `activeUri`, one `TabStrip`, one `CodeEditor`" in
-   `Workspace.tsx`, and `viewsRef` keyed by uri rather than by (pane, uri).
+3. ~~Split view.~~ **DONE in 1.10.0**, `validate_v21_split.py` 21/21. See
+   "1.10.0" below.
 
 ### Parked — themes, for further review (Nigel, 03/09/2026)
 

@@ -87,6 +87,9 @@ import {
   type OpenDoc,
 } from './documents';
 import { entryForLocation, parseLocationUri } from './locations';
+import {
+  focusIsRight, forgetInPanes, moveAcross, paneActives, selectInPanes, type PaneState,
+} from './panes';
 import './Workspace.css';
 
 /**
@@ -212,6 +215,62 @@ export default function Workspace({ session }: WorkspaceProps) {
   const [pendingQueryDelete, setPendingQueryDelete] = useState<NamedQueryEntry | null>(null);
   const [docs, setDocs] = useState<OpenDoc[]>([]);
   const [activeUri, setActiveUri] = useState<string | null>(null);
+  /**
+   * Documents shown in the SECOND editor pane.
+   *
+   * Nigel, 03/09/2026: *"I'm not seeing a way to split the screen between 2 or
+   * more scripts so that I can do comparisons or copy and paste between."*
+   *
+   * A document lives in exactly ONE pane, and splitting MOVES it rather than
+   * duplicating it. That is a smaller feature than VS Code's and it is the
+   * honest one here: `CodeEditor` keeps one `EditorView` per document —
+   * deliberately, so scroll and undo survive a tab switch — and two views over
+   * one document would need the buffer synchronised between them on every
+   * keystroke, which is a whole editing model rather than a layout.
+   *
+   * An empty set means one pane. There is no separate "is split" flag, because
+   * a flag and the set behind it drift apart.
+   */
+  const [splitUris, setSplitUris] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * The active document in whichever pane is NOT focused.
+   *
+   * `activeUri` stays what it always was — the document you are working in, and
+   * the one the outline, Problems, the config strip and "Run file" all describe.
+   * Which pane that is falls out of `splitUris`, so the two can never disagree.
+   */
+  const [otherActive, setOtherActive] = useState<string | null>(null);
+
+  /**
+   * Select a tab, in either pane.
+   *
+   * Crossing between panes moves the focus AND parks the document you left, so
+   * the pane you came from keeps showing what it was showing. Selecting within
+   * a pane leaves the other one entirely alone — which is the point of having
+   * two.
+   */
+  // Through refs, and STABLE: every open path calls this, so a callback whose
+  // identity changed with `activeUri` would change `openScript`'s identity on
+  // every tab switch and re-run everything that depends on it. Assigned during
+  // render, exactly as `docsRef` is above.
+  const paneStateRef = useRef<PaneState>({ activeUri: null, otherActive: null, split: new Set() });
+  paneStateRef.current = { activeUri, otherActive, split: splitUris };
+
+  /** Apply one of the pure pane rules and publish the three pieces it returns. */
+  const applyPanes = useCallback((next: PaneState) => {
+    // Written through before the state lands, so two calls in one tick — an
+    // open followed by a reveal — see each other rather than both acting on the
+    // render's value.
+    paneStateRef.current = next;
+    setActiveUri(next.activeUri);
+    setOtherActive(next.otherActive);
+    setSplitUris(next.split);
+  }, []);
+
+  const selectDoc = useCallback((uri: string) => {
+    applyPanes(selectInPanes(paneStateRef.current, uri));
+  }, [applyPanes]);
+
   const [attrs, setAttrs] = useState<Record<string, AttrState>>({});
   const [saving, setSaving] = useState(false);
   const [savingAttrs, setSavingAttrs] = useState(false);
@@ -248,6 +307,14 @@ export default function Workspace({ session }: WorkspaceProps) {
   // visit is worse than one that is not resizable.
   const [railOpen, setRailOpen] = useState(true);
   const [railWidth, setRailWidth] = useState(() => storedWidth('rail', 260));
+  /**
+   * Width of the LEFT editor pane when split, in pixels.
+   *
+   * Pixels rather than a fraction because that is what `Resizer` speaks and
+   * what the other two dividers here store, and because a fraction re-derived
+   * on every window resize moves a divider the user placed deliberately.
+   */
+  const [splitWidth, setSplitWidth] = useState(() => storedWidth('split', 640));
   const [outlineWidth, setOutlineWidth] = useState(() => storedWidth('outline', 240));
   const [creating, setCreating] = useState<ScriptTypeId | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
@@ -490,7 +557,7 @@ export default function Workspace({ session }: WorkspaceProps) {
     async (entry: ScriptEntry) => {
       const uri = docUri(project, entry.path, entry.scriptKey);
       if (docsRef.current.some((d) => d.uri === uri)) {
-        setActiveUri(uri);
+        selectDoc(uri);
         return;
       }
       try {
@@ -500,7 +567,7 @@ export default function Workspace({ session }: WorkspaceProps) {
             ? current
             : [...current, newDoc(entry, project, content.text, content.etag)]
         );
-        setActiveUri(uri);
+        selectDoc(uri);
         setNotice(null);
       } catch (e: unknown) {
         setNotice({ kind: 'error', text: `Could not open ${entry.path}: ${describe(e)}` });
@@ -535,7 +602,7 @@ export default function Workspace({ session }: WorkspaceProps) {
     async (entry: NamedQueryEntry) => {
       const uri = docUri(project, entry.path, QUERY_DATA_KEY);
       if (docsRef.current.some((d) => d.uri === uri)) {
-        setActiveUri(uri);
+        selectDoc(uri);
         return;
       }
       try {
@@ -563,7 +630,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                 }),
               ]
         );
-        setActiveUri(uri);
+        selectDoc(uri);
         setNotice(null);
       } catch (e: unknown) {
         setNotice({ kind: 'error', text: `Could not open ${entry.path}: ${describe(e)}` });
@@ -593,15 +660,59 @@ export default function Workspace({ session }: WorkspaceProps) {
     setDocs(next);
     // Closing the active tab moves to its right-hand neighbour, or its left one
     // if it was last — the same rule every editor uses.
-    setActiveUri((active) =>
-      active === uri ? (next[index] ?? next[index - 1])?.uri ?? null : active
-    );
+    const nextActive = uri === paneStateRef.current.activeUri
+      ? (next[index] ?? next[index - 1])?.uri ?? null
+      : paneStateRef.current.activeUri;
+    setActiveUri(nextActive);
     setAttrs((attributes) => {
       const remaining = { ...attributes };
       delete remaining[uri];
       return remaining;
     });
+    // Release the pane assignment with the document — see forgetInPanes.
+    const panes = forgetInPanes(paneStateRef.current, uri);
+    paneStateRef.current = { ...panes, activeUri: nextActive };
+    setSplitUris(panes.split);
+    setOtherActive(panes.otherActive);
   }, []);
+
+  const focusedPaneIsRight = focusIsRight({ activeUri, otherActive, split: splitUris });
+
+  /**
+   * The documents in each pane, and which of them each pane is showing.
+   *
+   * Both derived, never stored: a pane's contents are "the documents assigned
+   * to it", and its active tab is either the focused document or the one the
+   * other pane remembered. `otherActive` is validated against the pane it would
+   * be shown in rather than trusted — a document can leave a pane by being
+   * closed, or by being moved across, and a stale uri would render a pane with
+   * a tab strip and no buffer.
+   */
+  const leftDocs = useMemo(
+    () => docs.filter((d) => !splitUris.has(d.uri)),
+    [docs, splitUris]
+  );
+  const rightDocs = useMemo(
+    () => docs.filter((d) => splitUris.has(d.uri)),
+    [docs, splitUris]
+  );
+
+  const { left: leftActive, right: rightActive } = paneActives(
+    { activeUri, otherActive, split: splitUris },
+    leftDocs.map((d) => d.uri),
+    rightDocs.map((d) => d.uri)
+  );
+
+  /**
+   * Move a document to the other pane — the split gesture, both ways.
+   *
+   * The rule is in `panes.ts`; this supplies the tab ORDER, so the pane the
+   * document left lands on a neighbour rather than on whatever a Set happened
+   * to iterate first.
+   */
+  const moveToOtherPane = useCallback((uri: string) => {
+    applyPanes(moveAcross(paneStateRef.current, uri, docsRef.current.map((d) => d.uri)));
+  }, [applyPanes]);
 
   /**
    * Close a tab — asking first when that would throw work away.
@@ -1505,11 +1616,18 @@ export default function Workspace({ session }: WorkspaceProps) {
         event.preventDefault();
         setView('search');
         setRailOpen(true);
+      } else if (key === '\\') {
+        // VS Code's split binding, and it toggles: pressing it again on the
+        // document you just moved brings it back. Nothing in the browser claims
+        // Ctrl+\, so the preventDefault is only for a host that might.
+        event.preventDefault();
+        const focused = paneStateRef.current.activeUri;
+        if (focused) moveToOtherPane(focused);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [moveToOtherPane]);
 
   /**
    * Activity-bar click on a side-bar view.
@@ -1625,7 +1743,7 @@ export default function Workspace({ session }: WorkspaceProps) {
       const scriptKey = SINGLETON_KEYS[typeId] ?? 'code.py';
       const uri = docUri(project, path, scriptKey);
       if (docsRef.current.some((d) => d.uri === uri)) {
-        setActiveUri(uri);
+        selectDoc(uri);
         return;
       }
       const typeLabel = TYPE_LABELS[typeId] ?? typeId;
@@ -1633,10 +1751,97 @@ export default function Workspace({ session }: WorkspaceProps) {
         ...current,
         newUnsavedDoc({ project, path, scriptKey, typeLabel, label: typeLabel }),
       ]);
-      setActiveUri(uri);
+      selectDoc(uri);
       setNotice(null);
     },
     [project]
+  );
+
+  /** The open query in one pane, or null — see the per-pane `hidden` above. */
+  function queryDocIn(uri: string | null) {
+    const doc = uri ? docs.find((d) => d.uri === uri) : null;
+    return doc && doc.kind === 'named-query' ? doc : null;
+  }
+
+  /**
+   * Everything above the buffer that describes the FOCUSED document.
+   *
+   * Built once and rendered into whichever pane holds that document. It is not
+   * a component: it closes over a dozen derivations that would otherwise all
+   * become props, and it is rendered in exactly one place at a time.
+   */
+  const paneChrome = (
+    <>
+              {/* A bar on the document itself, not only a marker in the strip.
+                  The tab's arrow and the toolbar count were both missable
+                  (Nigel, 04/09/2026: "a bit to easy to miss"), and neither is
+                  where you are looking — which is at the code. This sits between
+                  the tab and the buffer it is about, and only for the document
+                  actually on screen. */}
+              {activeDoc && staleUris.has(activeDoc.uri) && (
+                <div className="workspace-stale-bar" role="status">
+                  <IconAlert size={14} />
+                  <span>
+                    <strong>{activeDoc.label}</strong> has changed on the gateway
+                    {isDirty(activeDoc)
+                      ? ' — and you have unsaved edits here.'
+                      : '. You are looking at an older copy.'}
+                  </span>
+                  <button type="button" className="button" onClick={() => void pullDoc(activeDoc.uri)}>
+                    {isDirty(activeDoc) ? 'Compare…' : 'Pull the current copy'}
+                  </button>
+                </div>
+              )}
+              {activeUri && activeQueryDoc && activeQueryDoc.settings && (
+                /* Keyed on the document so each query opens its own editor state
+                   — a parameter table left mid-edit must not follow you to the
+                   next tab. */
+                <NamedQueryEditor
+                  key={activeUri}
+                  project={activeQueryDoc.project}
+                  path={activeQueryDoc.path}
+                  sql={activeQueryDoc.text}
+                  settings={activeQueryDoc.settings}
+                  legacy={activeQueryDoc.legacy}
+                  databases={activeQueryDoc.databases ?? []}
+                  editable={activeQueryDoc.editableSettings ?? []}
+                  tab={queryTab}
+                  onTabChange={setQueryTab}
+                  onChange={(next) => changeQuerySettings(activeUri, next)}
+                  onSave={() => void saveDoc(activeUri)}
+                  dirty={isDirty(activeQueryDoc)}
+                  readOnly={!activeWritable}
+                  saving={saving}
+                  csrfToken={session.csrfToken}
+                  leading={inheritanceNotice}
+                />
+              )}
+              {activeUri && !activeQueryDoc && activeAttrs && (
+                <ConfigStrip
+                  // The inheritance state shares the settings row rather than
+                  // taking one of its own. Two chrome rows above the code cost
+                  // ~70px for two short sentences that are never both true
+                  // (Nigel, 02/09/2026).
+                  leading={inheritanceNotice}
+                  editable={activeAttrs.editable}
+                  attributes={activeAttrs.attributes}
+                  onChange={(name, value) => changeAttribute(activeUri, name, value)}
+                  onSave={() => void saveAttributes(activeUri)}
+                  dirty={attrsDirty}
+                  readOnly={!activeWritable}
+                  saving={savingAttrs}
+                  typeId={activeEntry?.typeId}
+                  unconfigurableReason={
+                    activeEntry?.typeId === 'tag-change'
+                      ? 'Tag Change settings are not editable here yet — the Designer\'s tag-path '
+                        + 'list has not been measured, and writing a guessed key would put a value '
+                        + 'on the gateway that the Designer never reads. Configure it in the '
+                        + 'Designer; the script body is fully editable here.'
+                      : undefined
+                  }
+                />
+              )}
+    </>
   );
 
   return (
@@ -1829,107 +2034,105 @@ export default function Workspace({ session }: WorkspaceProps) {
             to the height the user had chosen. */}
         <div className="workspace-center">
           <section className="workspace-editor" hidden={panelOpen && panelMaximised}>
-            <TabStrip
-              docs={docs}
-              activeUri={activeUri}
-              staleUris={staleUris}
-              onSelect={setActiveUri}
-              onClose={closeDoc}
-              onPull={(uri) => void pullDoc(uri)}
-            />
-            {/* A bar on the document itself, not only a marker in the strip.
-                The tab's arrow and the toolbar count were both missable
-                (Nigel, 04/09/2026: "a bit to easy to miss"), and neither is
-                where you are looking — which is at the code. This sits between
-                the tab and the buffer it is about, and only for the document
-                actually on screen. */}
-            {activeDoc && staleUris.has(activeDoc.uri) && (
-              <div className="workspace-stale-bar" role="status">
-                <IconAlert size={14} />
-                <span>
-                  <strong>{activeDoc.label}</strong> has changed on the gateway
-                  {isDirty(activeDoc)
-                    ? ' — and you have unsaved edits here.'
-                    : '. You are looking at an older copy.'}
-                </span>
-                <button type="button" className="button" onClick={() => void pullDoc(activeDoc.uri)}>
-                  {isDirty(activeDoc) ? 'Compare…' : 'Pull the current copy'}
-                </button>
+            {/* The chrome — stale bar, settings, the named-query editor —
+                belongs to the FOCUSED document and is rendered into whichever
+                pane is holding it, never duplicated. Two settings rows side by
+                side would halve the width of a row nobody edits often, for the
+                same reason the inheritance note shares that row rather than
+                taking one of its own; and what Nigel asked to compare is the
+                CODE. */}
+            <div className={`workspace-panes${splitUris.size > 0 ? ' is-split' : ''}`}>
+              <div
+                className="workspace-pane"
+                style={splitUris.size > 0
+                  ? { flex: `0 0 ${splitWidth}px`, width: splitWidth }
+                  : undefined}
+              >
+                <TabStrip
+                  docs={leftDocs}
+                  activeUri={leftActive}
+                  staleUris={staleUris}
+                  onSelect={selectDoc}
+                  onClose={closeDoc}
+                  onPull={(uri) => void pullDoc(uri)}
+                  onSplit={leftDocs.length > 0 ? moveToOtherPane : undefined}
+                  splitLabel={splitUris.size > 0
+                    ? 'Move this document to the right-hand editor'
+                    : 'Open this document in a second editor beside this one'}
+                />
+                {!focusedPaneIsRight && paneChrome}
+                {docs.length === 0 && (
+                  <p className="code-editor-empty">
+                    Choose a script or a named query on the left to start editing.
+                  </p>
+                )}
+                <CodeEditor
+                  docs={leftDocs}
+                  activeUri={leftActive}
+                  readOnly={readOnly}
+                  onChange={handleChange}
+                  onSave={(uri) => void saveDoc(uri)}
+                  lsp={lsp}
+                  // A ruler mark: put the caret on the problem AND open Problems
+                  // on it, so the message is readable and copyable in one click —
+                  // the Designer stops at the hover (Nigel, 03/09/2026).
+                  onRevealProblem={(line, character) => {
+                    jumpToLine(line, character);
+                    showPanel('problems');
+                  }}
+                  // Hidden, never unmounted, while a query's Settings or Testing
+                  // tab has the area: unmounting would destroy every open
+                  // document's view along with its undo history. Per PANE, so a
+                  // query's Settings tab does not blank the script beside it.
+                  hidden={queryDocIn(leftActive) ? !showsBuffer(queryTab) : false}
+                />
               </div>
-            )}
-            {activeUri && activeQueryDoc && activeQueryDoc.settings && (
-              /* Keyed on the document so each query opens its own editor state
-                 — a parameter table left mid-edit must not follow you to the
-                 next tab. */
-              <NamedQueryEditor
-                key={activeUri}
-                project={activeQueryDoc.project}
-                path={activeQueryDoc.path}
-                sql={activeQueryDoc.text}
-                settings={activeQueryDoc.settings}
-                legacy={activeQueryDoc.legacy}
-                databases={activeQueryDoc.databases ?? []}
-                editable={activeQueryDoc.editableSettings ?? []}
-                tab={queryTab}
-                onTabChange={setQueryTab}
-                onChange={(next) => changeQuerySettings(activeUri, next)}
-                onSave={() => void saveDoc(activeUri)}
-                dirty={isDirty(activeQueryDoc)}
-                readOnly={!activeWritable}
-                saving={saving}
-                csrfToken={session.csrfToken}
-                leading={inheritanceNotice}
-              />
-            )}
-            {activeUri && !activeQueryDoc && activeAttrs && (
-              <ConfigStrip
-                // The inheritance state shares the settings row rather than
-                // taking one of its own. Two chrome rows above the code cost
-                // ~70px for two short sentences that are never both true
-                // (Nigel, 02/09/2026).
-                leading={inheritanceNotice}
-                editable={activeAttrs.editable}
-                attributes={activeAttrs.attributes}
-                onChange={(name, value) => changeAttribute(activeUri, name, value)}
-                onSave={() => void saveAttributes(activeUri)}
-                dirty={attrsDirty}
-                readOnly={!activeWritable}
-                saving={savingAttrs}
-                typeId={activeEntry?.typeId}
-                unconfigurableReason={
-                  activeEntry?.typeId === 'tag-change'
-                    ? 'Tag Change settings are not editable here yet — the Designer\'s tag-path '
-                      + 'list has not been measured, and writing a guessed key would put a value '
-                      + 'on the gateway that the Designer never reads. Configure it in the '
-                      + 'Designer; the script body is fully editable here.'
-                    : undefined
-                }
-              />
-            )}
-            {docs.length === 0 && (
-              <p className="code-editor-empty">
-                Choose a script or a named query on the left to start editing.
-              </p>
-            )}
-            <CodeEditor
-              docs={docs}
-              activeUri={activeUri}
-              readOnly={readOnly}
-              onChange={handleChange}
-              onSave={(uri) => void saveDoc(uri)}
-              lsp={lsp}
-              // A ruler mark: put the caret on the problem AND open Problems on
-              // it, so the message is readable and copyable in one click —
-              // the Designer stops at the hover (Nigel, 03/09/2026).
-              onRevealProblem={(line, character) => {
-                jumpToLine(line, character);
-                showPanel('problems');
-              }}
-              // Hidden, never unmounted, while a query's Settings or Testing tab
-              // has the area: unmounting would destroy every open document's
-              // view along with its undo history. See CodeEditor's `hidden`.
-              hidden={activeQueryDoc ? !showsBuffer(queryTab) : false}
-            />
+
+              {splitUris.size > 0 && (
+                <Resizer
+                  value={splitWidth}
+                  min={240}
+                  max={2000}
+                  // The pane it sizes is on its LEFT, so dragging right grows
+                  // it. `side` names where the panel is, not where the drag is.
+                  side="left"
+                  label="Resize the editors"
+                  onChange={(width) => {
+                    setSplitWidth(width);
+                    rememberWidth('split', width);
+                  }}
+                />
+              )}
+
+              {splitUris.size > 0 && (
+                <div className="workspace-pane">
+                  <TabStrip
+                    docs={rightDocs}
+                    activeUri={rightActive}
+                    staleUris={staleUris}
+                    onSelect={selectDoc}
+                    onClose={closeDoc}
+                    onPull={(uri) => void pullDoc(uri)}
+                    onSplit={moveToOtherPane}
+                    splitLabel="Move this document back to the left-hand editor"
+                  />
+                  {focusedPaneIsRight && paneChrome}
+                  <CodeEditor
+                    docs={rightDocs}
+                    activeUri={rightActive}
+                    readOnly={readOnly}
+                    onChange={handleChange}
+                    onSave={(uri) => void saveDoc(uri)}
+                    lsp={lsp}
+                    onRevealProblem={(line, character) => {
+                      jumpToLine(line, character);
+                      showPanel('problems');
+                    }}
+                    hidden={queryDocIn(rightActive) ? !showsBuffer(queryTab) : false}
+                  />
+                </div>
+              )}
+            </div>
           </section>
 
           {panelOpen && !panelMaximised && (
@@ -1972,7 +2175,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                         // Already-open documents only, so this is a reveal in a
                         // view that exists — no location parsing needed.
                         onOpen={(uri, line, character) => {
-                          setActiveUri(uri);
+                          selectDoc(uri);
                           jumpToLine(line, character, uri);
                         }}
                       />

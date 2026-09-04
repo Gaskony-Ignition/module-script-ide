@@ -2,6 +2,34 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.10.0] — 2026-09-04
+
+feat: split editors — two scripts side by side.
+
+Nigel, 03/09/2026: *"I'm not seeing a way to split the screen between 2 or more
+scripts so that I can do comparisons or copy and paste between etc."*
+
+### Added
+- **A second editor pane.** The button at the end of the tab strip, or Ctrl+\,
+  moves the current document across; the same gesture brings it back, and the
+  split collapses when the second pane empties. A draggable divider between
+  them, remembered across sessions like the other two.
+- A document lives in exactly one pane, and splitting **moves** it rather than
+  duplicating it — so its CodeMirror view goes with it, undo history and scroll
+  position intact.
+
+### Fixed
+- **A 1px divider between two flex children received no pointer events.**
+  `elementFromPoint` on its own centre returned the neighbouring editor's
+  gutter, so dragging it did nothing while every static check said it was
+  there. `.resizer` now sits above its neighbours with a 3px grab area — which
+  fixes the side-bar and panel dividers too.
+
+### Verified
+`validate_v21_split.py` 21/21, including a real copy-paste between the two panes
+and an undo in the pane that was moved. `v13` 23/23, `v16_nav` 25/25,
+`v18_pull` 20/20, `v19_ruler` 16/16, `v20_webdev` 29/29. Vitest 521.
+
 ## [1.9.0] — 2026-09-04
 
 feat: Web Dev's static resources — HTML, JavaScript and CSS, edited properly.
