@@ -52,7 +52,14 @@ MEASURE = """() => {
   const out = [];
   const sel = '.file-tree-item, .file-tree-header, .file-tree-package, .panel-tab, ' +
     '.tab-strip button, .config-label, .workspace-toolbar button, .rail-title, ' +
-    '.outline-item, .console-output, .muted, .badge, .status-footer, .app-version';
+    '.outline-item, .console-output, .muted, .badge, .status-footer, .app-version, ' +
+    // The FILLED primary button. Added 04/09/2026: its label was the literal
+    // `#ffffff` from 1.1.0 to 1.10.0, so on `newsprint-night` (accent #e8e2d6,
+    // paper) and `aurora-teal` (accent #1accbe) the Run button was white on
+    // near-white and white on bright teal. Nothing here measured it, because
+    // this sweep reads a colour off an element and a literal in a stylesheet is
+    // not a token any theme can move.
+    'button.primary, .button.primary';
   for (const el of document.querySelectorAll(sel)) {
     const r = el.getBoundingClientRect();
     if (r.width < 4 || r.height < 4) continue;
@@ -61,6 +68,24 @@ MEASURE = """() => {
     const fg = parse(getComputedStyle(el).color);
     if (!fg) continue;
     out.push({ text: text.slice(0,28), cls: el.className.toString().slice(0,40),
+               ratio: Math.round(ratio(fg, bgOf(el))*100)/100 });
+  }
+  // The activity bar, which has NO TEXT and was therefore invisible to the loop
+  // above — `if (!text) continue` skipped every icon in it. From 1.11.0 that
+  // strip can carry the pack's OWN rail colour (`finance-ledger` brands it navy
+  // on a light page), so it is the one surface whose ink is computed against
+  // something other than the page, and the one most in need of measuring.
+  //
+  // 3:1, not 4.5:1: these are icon strokes and a 3px marker, which is WCAG
+  // 1.4.11's bar for non-text contrast. Measured on `color`, because every icon
+  // here is an SVG drawn in `currentColor`.
+  for (const el of document.querySelectorAll('.activity-item')) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) continue;
+    const fg = parse(getComputedStyle(el).color);
+    if (!fg) continue;
+    out.push({ text: el.getAttribute('aria-label') || 'icon', graphic: true,
+               cls: el.className.toString().slice(0,40),
                ratio: Math.round(ratio(fg, bgOf(el))*100)/100 });
   }
   return out;
@@ -106,9 +131,16 @@ with sync_playwright() as p:
         page.select_option('select[aria-label="Theme"]', tid)
         page.wait_for_timeout(450)
         rows = page.evaluate(MEASURE)
-        bad = [r for r in rows if r["ratio"] < 4.5]
+        # A graphic clears at 3:1 (WCAG 1.4.11), text at 4.5:1.
+        bad = [r for r in rows if r["ratio"] < (3.0 if r.get("graphic") else 4.5)]
         worst = min((r["ratio"] for r in rows), default=99)
-        print(f"{tid:26} elements={len(rows):3}  worst={worst:5.2f}  below-4.5={len(bad)}")
+        graphics = [r for r in rows if r.get("graphic")]
+        # Printed so the pass cannot silently measure nothing. The activity bar
+        # has no text, so it was invisible to the text loop for three releases;
+        # a count of 0 here means the new pass is measuring air.
+        print(f"{tid:26} elements={len(rows):3} (icons {len(graphics):2}, "
+              f"worst icon {min((r['ratio'] for r in graphics), default=0):5.2f})  "
+              f"worst={worst:5.2f}  below-bar={len(bad)}")
         for r in sorted(bad, key=lambda x: x["ratio"])[:4]:
             print(f"      {r['ratio']:5.2f}  {r['cls'][:34]:34} {r['text']!r}")
         if bad:

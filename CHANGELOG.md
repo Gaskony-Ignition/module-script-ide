@@ -2,6 +2,41 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.11.0] — 2026-09-04
+
+feat: the themes pass — colour in the grounds, the packs' own rails, and a syntax palette that distinguishes.
+
+Nigel, 03/09/2026: *"still quite a bit of the styling feels a bit dull… so that
+the different themes really feel beautiful and provide that bit of variety."*
+
+### Fixed
+- **The light themes were four shades of pale grey.** Their grounds carried a
+  chroma of 3, 5, 5 and 8 out of 255 — the hue was stated correctly in every
+  pack and could not be seen, because at 97% lightness the most chroma any
+  colour can hold is 15. Now 19–27, raised along each pack's own hue. A pack
+  already carrying its colour is untouched: Glass Aurora keeps `#1a1233`
+  exactly.
+- **Two packs put a dark rail on a light page and it was thrown away.** Finance
+  Ledger's navy `#0b3d5c` and Leather Parchment's brown `#2f2016` are the
+  loudest thing about either design. The activity bar now takes them, with its
+  own ink measured against itself.
+- **Syntax highlighting did not distinguish on four themes.** Industrial Day
+  shipped keywords and types at the same lightness, the same saturation and 8°
+  apart. The separation is now scored on hue, weight and saturation together,
+  with the bar set from the measured spread of the ten.
+- **The Run button's label was a hardcoded white.** On Newsprint Night, whose
+  accent is paper `#e8e2d6`, it was white on near-white — unreadable since
+  1.1.0; on Glass Aurora Teal, white on bright teal. It follows the theme now.
+
+### Verified
+Theme sweep 10/10 with no illegible element, now measuring the activity bar's
+icons and the filled primary button as well — neither had ever been measured,
+which is how both defects survived. The generator asserts ground chroma, syntax
+separation and accent-ink contrast and exits non-zero rather than writing a
+theme that fails one; each assertion was proved to refuse the previous build
+before being trusted. `v13` 23/23, `v16_nav` 25/25, `v18_pull` 20/20,
+`v19_ruler` 16/16, `v20_webdev` 29/29, `v21_split` 21/21, Vitest 521.
+
 ## [1.10.0] — 2026-09-04
 
 feat: split editors — two scripts side by side.

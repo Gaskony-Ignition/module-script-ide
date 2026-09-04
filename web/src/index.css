@@ -25,6 +25,21 @@
   --bg-chrome: #181818;
   --surface: #252526;         /* panels, dialogs */
 
+  /* The activity bar's OWN ink and accent.
+     Two packs put a DARK rail on a LIGHT page — that inversion is the loudest
+     thing about either design — so the strip cannot read the shared text
+     tokens: they are computed against the page, which is that rail's opposite.
+     These default to the shared answer, so a theme that says nothing looks
+     exactly as it does today, and eight of the ten themes emit them identical
+     to it. --accent-chrome exists because `finance-ledger` brands its rail AND
+     its accent with one navy: the active marker drawn in it was invisible. */
+  --text-chrome: #8b8b8b;
+  --text-chrome-active: #cccccc;
+  --accent-chrome: #0078d4;
+  /* The label on a filled primary button — black or white, whichever the
+     theme's accent can actually be read against. */
+  --accent-ink: #ffffff;
+
   /* Material, not colour. A glass pack paints its chrome as translucent films
      over the ground and catches the light along each edge; the other seven
      paint solid surfaces. These three carry that difference, and default to the
@@ -283,7 +298,12 @@ button:disabled,
 button.primary,
 .button.primary {
   background: var(--accent-primary);
-  color: #ffffff;
+  /* NOT a literal white. Nine of the ten themes want white here and
+     `newsprint-night` — whose brand is paper, accent #e8e2d6 — wants black; it
+     shipped a white label on a near-white button from 1.1.0 to 1.10.0. The
+     theme sweep could not see it, because it reads colours off elements and a
+     literal in this file is not a token a theme can move. */
+  color: var(--accent-ink);
   /* The pack's own button shadow, recoloured to this theme's accent — the two
      aurora packs both name a violet glow, including the teal one. `none` on the
      six packs that name no button shadow. */

@@ -20,6 +20,7 @@ committed copy still matches the packs.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import pathlib
 import sys
@@ -729,6 +730,144 @@ MIN_TEXT_CONTRAST = 4.5
 ACCENT_TINT = 0.30
 
 
+# ---- the ground's own colour ----------------------------------------------
+#
+# Nigel, 03/09/2026: *"still quite a bit of the styling feels a bit dull… the
+# different themes really feel beautiful and provide that bit of variety."*
+#
+# Measured 04/09/2026, and the numbers say it plainly. The four LIGHT packs
+# painted grounds whose chroma — the spread between the strongest and weakest
+# channel — was 3, 5, 5 and 8 out of 255. Three of their six pairings were
+# within 8 RGB of each other on both the page and the rail. They were four
+# shades of pale grey, and no amount of material on top of that separates them.
+#
+# The cause is arithmetic, not taste. A pack states its ground in HSL terms
+# (`leather-parchment-tan` is hue 36 at 33% saturation) but at 97% LIGHTNESS the
+# most chroma any colour can carry is (1 - |2L - 1|) = 0.06, or 15/255 — and at
+# 33% saturation it carries 5. The hue is in the pack, correctly, and is
+# invisible on screen. Solarized Light, for comparison, runs 86% saturation at
+# the same lightness to reach a chroma of 26.
+#
+# So the floor is on CHROMA, not on saturation: raise saturation as far as it
+# goes at the pack's own lightness, and give up lightness only when saturation
+# alone cannot reach the floor. The pack's polarity and its hue both survive.
+GROUND_CHROMA_LIGHT = 18 / 255
+GROUND_CHROMA_DARK = 20 / 255
+
+# The floor is a floor, not a target: a pack that asks for MORE colour than the
+# reference keeps the difference, scaled. `nord-light-frost` states 27%
+# saturation and `industrial-day-cyan` 17%, and flattening both to one chroma
+# made two packs that are genuinely different amounts of blue land 1 RGB apart.
+# Capped, because the point is a ground, not a wash.
+CHROMA_REFERENCE_SAT = 0.20
+CHROMA_MAX_SCALE = 1.5
+
+# Below this, a page's hue is noise rather than intent — `finance-ledger` reads
+# as hue 160 at 10% saturation while every branded thing in the pack (its
+# accent, its rail, its card header) is hue 203. Under the floor the ACCENT's
+# hue is the honest answer to "what colour is this theme".
+PAGE_HUE_MIN_SAT = 0.15
+
+
+def chroma(rgb) -> float:
+    """Distance from the grey axis: what the eye reads as "this has a colour"."""
+    return max(rgb) - min(rgb)
+
+
+def identity_hue(tokens: dict, page, dark: bool) -> float:
+    """The hue the pack is ABOUT — its own ground's, or its accent's."""
+    hue, sat, _ = _to_hsl(page)
+    if sat >= PAGE_HUE_MIN_SAT:
+        return hue
+    for name in ACCENT_SOURCES["--accent-primary"]:
+        rgb = _parse(tokens.get(name) or "")
+        if rgb is None:
+            continue
+        accent_hue, accent_sat, _ = _to_hsl(rgb)
+        if accent_sat >= PAGE_HUE_MIN_SAT:
+            return accent_hue
+    return hue
+
+
+def chroma_target(page, floor: float) -> float:
+    """How much colour this pack's ground should carry.
+
+    Scaled by the saturation the pack ASKED for, so the relative order of the
+    ten survives. A page whose saturation is below the noise threshold has not
+    asked for anything, and takes the floor.
+    """
+    _, sat, _ = _to_hsl(page)
+    if sat < PAGE_HUE_MIN_SAT:
+        return floor
+    scale = min(CHROMA_MAX_SCALE, max(1.0, sat / CHROMA_REFERENCE_SAT))
+    return floor * scale
+
+
+def saturate_ground(page, hue: float, floor: float):
+    """
+    Give the ground enough of its own hue to be seen.
+
+    Lightness is preserved wherever saturation can do the work alone, because
+    the page's lightness IS the theme's polarity and the thing every text
+    target is computed against. Where it cannot — a 97%-light parchment can
+    hold a chroma of 15 at most — lightness gives way half a percent at a time,
+    which is below the threshold of noticing and is the only remaining move.
+    """
+    _, start_sat, lightness = _to_hsl(page)
+    toward_mid = 1 if lightness <= 0.5 else -1
+    for drop in range(0, 13):
+        light = lightness + toward_mid * drop * 0.005
+        for sat in range(int(start_sat * 100), 101):
+            candidate = _from_hsl((hue, sat / 100, light))
+            if chroma(candidate) >= floor:
+                return candidate
+    return page
+
+
+# ---- a branded rail -------------------------------------------------------
+#
+# Two of these packs put a DARK rail on a light page — `finance-ledger`'s
+# `#0b3d5c` navy and `leather-parchment-tan`'s `#2f2016` brown — and that
+# inversion is the loudest thing about either design. The generator flattened
+# both onto its neutral ramp and rendered them as two more pale greys.
+#
+# This is the ONE place a `surface.*` token is allowed onto a neutral, and it is
+# safe for a reason that does not generalise: `--bg-chrome` paints exactly one
+# component, the activity bar, whose only foregrounds are its icons — so the
+# rail carries its OWN ink tokens rather than the shared ones. Widening this to
+# `--bg-secondary` would be the 1.2.0 defect again, because the tree, the tabs
+# and the panels all read `--text-primary` on it.
+RAIL_SOURCES = ("surface.sidebar", "surface.topbar", "surface.nav")
+
+# How far a rail must sit from the page before it counts as branded rather than
+# as one more step off the ramp. Every pack that merely steps its sidebar is
+# inside 6%; the two that invert it are at 74% and 83%. Nothing is near 34%.
+RAIL_INVERT_DELTA = 0.34
+
+
+def branded_rail(tokens: dict, page):
+    """
+    The pack's own rail colour, when it deliberately contradicts the page.
+
+    Returns None for a translucent rail (the aurora pair, whose chrome is a
+    film over the ground) and for a rail that is merely a step off the page —
+    those are the ramp's job and it does them better, because the ramp scales
+    with how flat the pack is.
+    """
+    _, _, page_light = _to_hsl(page)
+    for name in RAIL_SOURCES:
+        raw = (tokens.get(name) or "").strip()
+        if not raw or raw.startswith("rgba"):
+            continue
+        rail = _parse(raw)
+        if rail is None:
+            continue
+        _, _, rail_light = _to_hsl(rail)
+        if abs(rail_light - page_light) >= RAIL_INVERT_DELTA:
+            return rail
+    return None
+
+
 def opaque_page(tokens: dict, dark: bool) -> tuple[float, float, float]:
     """
     The page colour, guaranteed opaque.
@@ -813,17 +952,37 @@ SYNTAX_PRIORITY = (
     "--syntax-keyword", "--syntax-function", "--syntax-type",
 )
 
-# Below this RGB distance two syntax colours are indistinguishable on screen.
+# Below this score two syntax colours are one colour with two names.
 #
-# Deliberately tight. A wider bar starts separating colours that a reader can
-# already tell apart, and the separation is a hue rotation — which takes the
-# colour off the pack's palette. Repainting Nord's function names pink to gain
-# contrast it did not need is a worse outcome than the near-miss it fixed.
-SYNTAX_MIN_DISTANCE = 0.07
+# **Straight RGB distance was the wrong measure and it let real collisions
+# through.** It was 0.07 in a 0–1 cube, which on a LIGHT theme — where every
+# syntax colour has to be dark to be legible, and dark colours are crowded near
+# the origin — passed almost everything. Measured 04/09/2026:
+# `industrial-day-cyan` shipped keyword and type at the same lightness, the same
+# saturation and 8° apart, and `finance-ledger` did the same with string and
+# type. The guard was green throughout.
+#
+# A reader tells two colours apart by HUE, or failing that by WEIGHT, or failing
+# that by how colourful they are. The score adds all three, and weights the hue
+# term by the LOWER of the two saturations — the hue of a grey is noise, so a
+# grey comment beside a blue keyword must earn its separation from the
+# saturation term instead, which it does easily.
+#
+# 28 is chosen from the measured spread, not from taste: the ten themes scored
+# 7.8, 9.4, 9.9, 17.1, 29.1, 29.4, 29.9, 32.2, 57.5, 66.0. It fires on the four
+# genuine collisions and leaves the six that a reader can already tell apart —
+# because the separation is a hue rotation, and repainting Nord's function names
+# to gain a difference nobody needed is worse than the near-miss it fixed.
+SYNTAX_SEPARATION = 28.0
 
 
-def _distance(a, b) -> float:
-    return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+def _separation(a, b) -> float:
+    """How distinguishable two syntax colours are. See SYNTAX_SEPARATION."""
+    hue_a, sat_a, light_a = _to_hsl(a)
+    hue_b, sat_b, light_b = _to_hsl(b)
+    turn = abs(hue_a - hue_b)
+    hue_gap = min(turn, 1.0 - turn) * 360 * min(sat_a, sat_b)
+    return hue_gap + abs(light_a - light_b) * 300 + abs(sat_a - sat_b) * 120
 
 
 def differentiate_syntax(out: dict, surfaces: list, dark: bool, pack_id: str,
@@ -846,21 +1005,59 @@ def differentiate_syntax(out: dict, surfaces: list, dark: bool, pack_id: str,
         if rgb is None:
             continue
         clash = next((name for name, other in kept
-                      if _distance(rgb, other) < SYNTAX_MIN_DISTANCE), None)
+                      if _separation(rgb, other) < SYNTAX_SEPARATION), None)
         if clash is None:
             kept.append((role, rgb))
             continue
         hue, sat, lightness = _to_hsl(rgb)
-        for turn in (1, 2, 3, 4, 5, 6):
-            trial = _from_hsl(((hue + 0.06 * turn) % 1.0, sat, lightness))
+        # Both directions, nearest first: marching one way only walks a warm
+        # palette's third collision all the way round to a colour the pack
+        # never contained. A saturation floor comes with the rotation, because
+        # a hue turn on a near-grey moves nothing a reader can see.
+        # Nearest first, and both ways. Marching one direction only walks a warm
+        # palette's third collision the long way round to a colour the pack
+        # never contained; trying -18° before +50° keeps a rotated role as close
+        # to its own family as the separation allows. The arc reaches ±100°
+        # because a pack whose six roles all sit inside 60° — `leather-*` and
+        # `newsprint-night` do — has nowhere nearer to go, and a number that
+        # cannot be told from a string is the worse outcome.
+        turns = [d * step for step in (0.05, 0.09, 0.14, 0.20, 0.28) for d in (1, -1)]
+        for turn in turns:
+            trial = _from_hsl(((hue + turn) % 1.0, max(sat, 0.30), lightness))
             trial, _ = lift_to_contrast(trial, surfaces, MIN_ACCENT_CONTRAST, dark)
-            if all(_distance(trial, other) >= SYNTAX_MIN_DISTANCE for _, other in kept):
+            if all(_separation(trial, other) >= SYNTAX_SEPARATION for _, other in kept):
                 out[role] = _hex(trial)
                 kept.append((role, trial))
                 report.append(f"  {pack_id}: {role} rotated off {clash} to {out[role]}")
                 break
         else:
-            kept.append((role, rgb))
+            # No hue clears. `nord-light-frost` is the case: six roles inside
+            # 40° on a light page, so every turn that separates one pair
+            # collides with another. LIGHTNESS always has room, and it is what a
+            # reader falls back on when two hues are close — a darker blue and a
+            # lighter blue are two colours, where two blues at one weight are
+            # one. Tried in the direction that cannot cost contrast first:
+            # darker on a light theme, lighter on a dark one.
+            toward = 1 if dark else -1
+            for shift in (0.06, 0.10, 0.15, 0.21):
+                for direction in (toward, -toward):
+                    trial = _from_hsl((hue, sat, min(0.97, max(0.03,
+                                                              lightness + direction * shift))))
+                    trial, _ = lift_to_contrast(trial, surfaces, MIN_ACCENT_CONTRAST, dark)
+                    if all(_separation(trial, other) >= SYNTAX_SEPARATION
+                           for _, other in kept):
+                        out[role] = _hex(trial)
+                        kept.append((role, trial))
+                        report.append(f"  {pack_id}: {role} weighted off {clash} "
+                                      f"to {out[role]}")
+                        break
+                else:
+                    continue
+                break
+            else:
+                kept.append((role, rgb))
+                report.append(f"  {pack_id}: {role} STAYS on {clash} — no hue or "
+                              f"weight separates them")
 
 
 def block(pack: dict, report: list[str]) -> str:
@@ -878,6 +1075,18 @@ def block(pack: dict, report: list[str]) -> str:
     # result was "plain" (03/09/2026). The pack already distinguishes siblings
     # by accent; rotating the ground only destroys the family.
     page = opaque_page(tokens, dark)
+    # …but given enough of its own hue to be SEEN. See saturate_ground: a pack
+    # can state a hue perfectly and still paint a grey, because chroma is capped
+    # by lightness and every light pack here sat near the cap.
+    floor = GROUND_CHROMA_DARK if dark else GROUND_CHROMA_LIGHT
+    # Only a ground that is BELOW the floor is touched. A pack already carrying
+    # its hue — the aurora pair at 33/255 — keeps the exact colour it was
+    # authored with, which is the whole of the 1.7.x lesson: the ground IS the
+    # family, and moving it is how the two best-looking themes were lost.
+    if chroma(page) < floor:
+        page = saturate_ground(
+            page, identity_hue(tokens, page, dark), chroma_target(page, floor)
+        )
     glass = is_glass(tokens)
 
     # The ramp is SCALED by how soft the pack is. A flat, shadowless, square
@@ -900,6 +1109,15 @@ def block(pack: dict, report: list[str]) -> str:
     # order the app stacks them — the hover sits on the rail, not on the page —
     # so the contrast guarantee is made against the colour the eye receives, not
     # against an idealised one-layer version of it.
+    # A pack that deliberately inverts its rail keeps it. Only `--bg-chrome` —
+    # the activity bar — and only with its own ink; see branded_rail.
+    rail = branded_rail(tokens, page)
+    if rail is not None:
+        chrome = rail
+    # Which way the rail's own ink runs. Not the theme's polarity: a branded
+    # rail is by definition the opposite of the page, and that is the point.
+    rail_dark = _luminance(chrome) < 0.18
+
     paint = {"--bg-secondary": _hex(secondary), "--bg-tertiary": _hex(tertiary),
              "--surface": _hex(surface), "--bg-chrome": _hex(chrome)}
     if glass:
@@ -910,7 +1128,7 @@ def block(pack: dict, report: list[str]) -> str:
             secondary = composite(rgb, alpha, page)
             paint["--bg-secondary"] = css_rgba(rgb, alpha)
         for role in ("--bg-tertiary", "--surface", "--bg-chrome"):
-            if not films[role]:
+            if not films[role] or (role == "--bg-chrome" and rail is not None):
                 continue
             rgb, alpha = films[role]
             base = page if role in over_page else secondary
@@ -923,7 +1141,15 @@ def block(pack: dict, report: list[str]) -> str:
             else:
                 chrome = value
 
-    surfaces = [page, secondary, tertiary, chrome, surface]
+    # Every surface the SHARED ink tokens land on. A branded rail is excluded on
+    # purpose: it is the inverse of the page, so demanding one ink clear 4.5:1
+    # on both a #eef1f0 ground and a #0b3d5c navy has no solution — the search
+    # below would walk every text token to pure black and still fail. The rail
+    # gets its own ink instead, computed against itself, which is the only
+    # reason it can be allowed onto a neutral at all.
+    surfaces = [page, secondary, tertiary, surface]
+    if rail is None:
+        surfaces.append(chrome)
 
     # The lit ground, at its brightest point, for every pack that has one — the
     # aurora glow and the softer wash alike. A gradient is a background IMAGE,
@@ -1000,6 +1226,15 @@ def block(pack: dict, report: list[str]) -> str:
         "--text-primary": text_at(page, TEXT_TARGETS["primary"], dark),
         "--text-secondary": text_at(page, TEXT_TARGETS["secondary"], dark),
         "--text-muted": text_at(page, TEXT_TARGETS["muted"], dark),
+
+        # The activity bar's OWN ink, measured against the activity bar.
+        #
+        # Identical to the shared tokens on the eight packs whose rail is a step
+        # off their own page — so this costs those eight nothing — and the whole
+        # reason `finance-ledger` and `leather-parchment-tan` can keep the dark
+        # rail that is the loudest thing about either design.
+        "--text-chrome": text_at(chrome, TEXT_TARGETS["muted"], rail_dark),
+        "--text-chrome-active": text_at(chrome, TEXT_TARGETS["primary"], rail_dark),
     }
 
     # The text tokens are measured against the PAGE, but they also paint on the
@@ -1041,6 +1276,32 @@ def block(pack: dict, report: list[str]) -> str:
 
     accent = out["--accent-primary"]
     out["--accent-primary-bg"] = accent_bg(accent, dark)
+
+    # The accent AS IT PAINTS ON THE ACTIVITY BAR.
+    #
+    # `finance-ledger` resolves its accent to #0b3d5c and its rail is #0b3d5c —
+    # the same navy, because the pack brands both with one colour. The active
+    # marker and the focus ring drawn in it were invisible against it. Lifted to
+    # 3.5:1 rather than 4.5:1 because these are a 3px bar and an icon outline,
+    # not text; on the eight packs whose rail is a step off their own page it
+    # already clears and comes back unchanged.
+    accent_rgb = _parse(accent)
+    on_rail, _ = lift_to_contrast(accent_rgb, [chrome], 3.5, not rail_dark)
+    out["--accent-chrome"] = _hex(on_rail)
+
+    # The ink that goes ON the accent — a filled primary button, and nothing
+    # else in this app fills with the accent.
+    #
+    # It was white, hardcoded, from 1.1.0. Right for nine of the ten and wrong
+    # for `newsprint-night`, whose brand IS paper: its accent resolves to
+    # #e8e2d6 and the Run button shipped as white text on a near-white fill,
+    # unreadable, through every release since. Nothing measured it, because the
+    # theme sweep reads a colour off the element and a literal in a stylesheet
+    # is not a token any theme can move.
+    on_accent = (1.0, 1.0, 1.0)
+    if _ratio((0.0, 0.0, 0.0), accent_rgb) > _ratio(on_accent, accent_rgb):
+        on_accent = (0.0, 0.0, 0.0)
+    out["--accent-ink"] = _hex(on_accent)
 
     # ---- geometry ---------------------------------------------------------
     #
@@ -1144,6 +1405,41 @@ def generate(packs_dir: pathlib.Path) -> str:
                 "for one theme."
             )
         seen[key] = pack["id"]
+
+    # Two properties that were BOTH broken while every check was green, and are
+    # therefore assertions rather than intentions. Measured against 1.10.0's own
+    # output, which fails both: min ground chroma 3 (bar 18) and worst syntax
+    # separation 6.2 (bar 28).
+    for pack, (_, out) in zip(packs, blocks):
+        ground = _parse(out["--bg-primary"])
+        floor = GROUND_CHROMA_DARK if pack["dark"] else GROUND_CHROMA_LIGHT
+        if chroma(ground) < floor - 1e-6:
+            raise SystemExit(
+                f"{pack['id']}: its ground carries a chroma of "
+                f"{chroma(ground) * 255:.0f}/255, under the {floor * 255:.0f} floor. "
+                "A ground that colourless makes the theme one more shade of grey — "
+                "see saturate_ground, which exists to prevent exactly this."
+            )
+        gap = _ratio(_parse(out["--accent-ink"]), _parse(out["--accent-primary"]))
+        if gap < MIN_TEXT_CONTRAST:
+            raise SystemExit(
+                f"{pack['id']}: --accent-ink {out['--accent-ink']} reads at only "
+                f"{gap:.1f}:1 on --accent-primary {out['--accent-primary']}. That is "
+                "the label on a filled primary button; neither black nor white "
+                "clears here, so the accent itself needs moving."
+            )
+        roles = [r for r in SYNTAX_PRIORITY if r in out]
+        for first, second in itertools.combinations(roles, 2):
+            gap = _separation(_parse(out[first]), _parse(out[second]))
+            if gap < SYNTAX_SEPARATION:
+                raise SystemExit(
+                    f"{pack['id']}: {first} ({out[first]}) and {second} "
+                    f"({out[second]}) separate by only {gap:.1f}, under "
+                    f"{SYNTAX_SEPARATION}. They are one colour with two names, and "
+                    "highlighting that does not distinguish is worse than none. "
+                    "differentiate_syntax should have pulled them apart — widen its "
+                    "arc or its weight fallback rather than lowering the bar."
+                )
 
     css = header + "\n\n".join(text for text, _ in blocks) + "\n"
     if report:

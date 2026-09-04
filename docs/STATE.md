@@ -2,10 +2,11 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.10.0 · deployed on `ignition-module-testing` (8.3.8) 04/09/2026 —
+**Version 1.11.0 · deployed on `ignition-module-testing` (8.3.8) 04/09/2026 —
 `deploy_gate.py` PASS (6 checks) and every suite green: `v13` 23/23,
 `v16_nav` 25/25, `v18_pull` 20/20, `v19_ruler` 16/16, `v20_webdev` 29/29,
-`v21_split` 21/21. Java 365 tests, Vitest 521.**
+`v21_split` 21/21, theme sweep 10/10 with no illegible element.
+Java 365 tests, Vitest 521.**
 
 **Running the live suites needs a venv with playwright**, which is not on the
 system python and was absent on 03/09/2026:
@@ -488,24 +489,73 @@ switch; pull-from-gateway with stale markers. The rest followed:
 3. ~~Split view.~~ **DONE in 1.10.0**, `validate_v21_split.py` 21/21. See
    "1.10.0" below.
 
-### Parked — themes, for further review (Nigel, 03/09/2026)
+### Themes — the material pass (1.11.0, 04/09/2026)
 
-"Much improved on the themes. I do want to improve them further but right now I
-have some other items that need more urgent attention." **Do not pick this up
-ahead of the queue below.** Where it got to, and what is known to be left:
+Nigel, 03/09/2026: *"still quite a bit of the styling feels a bit dull… so that
+the different themes really feel beautiful and provide that bit of variety."*
 
-- **The light packs are the weak ones.** `nord-light-frost`,
-  `leather-parchment-tan`, `finance-ledger` and `industrial-day-cyan` sit within
-  single-digit RGB of each other on the big surfaces — four shades of pale grey.
-  The wash helps and does not fix it: the neutral ramp derives near-colourless
-  surfaces from a near-white page. The fix is to let a light pack keep more of
-  its own hue through the ramp, which is a change to `step()`/`LIGHT_RAMP`, not
-  to the material pass.
-- **The accent barely appears in the chrome.** On a theme with nothing selected,
-  one highlighted row carries the entire identity. More accent in the active
-  tab, the focus ring, the gutter's active line and the icons would lift all ten.
-- `finance-ledger` renders square tab corners (`radius.control: 3px`). That is
-  the pack being honest, not a defect, but it makes a "soft" theme read hard.
+Unparked and done. Four things, each of which was MEASURED first and is now
+asserted by `tools/build-themes.py` itself, which exits non-zero rather than
+writing a theme that fails one.
+
+**1. The grounds carried almost no colour.** The four light packs painted
+chroma — the spread between the strongest and weakest channel — of 3, 5, 5 and 8
+out of 255, and three of their six pairings sat within 8 RGB on both the page
+and the rail. The cause is arithmetic, not taste: a pack states its ground in
+HSL (`leather-parchment-tan` is hue 36 at 33% saturation) and at 97% lightness
+the most chroma any colour can hold is 15/255. The hue was in the pack,
+correctly, and invisible on screen. `saturate_ground` now raises saturation at
+the pack's own lightness and gives up lightness only when saturation runs out.
+Light grounds went 3–8 → 19–27, dark 5–33 → 20–33. **A pack already above the
+floor is not touched** — the aurora pair keeps `#1a1233` exactly, because the
+ground IS the family and moving it is how 1.7.x lost the two best themes.
+
+**2. Two packs put a DARK rail on a LIGHT page and the generator flattened it.**
+`finance-ledger` brands its sidebar `#0b3d5c` navy and `leather-parchment-tan`
+`#2f2016` brown; both rendered as one more pale grey. `--bg-chrome` now takes
+the pack's own rail where the pack deliberately inverts it (measured: every
+other pack's sidebar is inside 6% of its page, those two are at 74% and 83%,
+nothing is near the 34% threshold). **This is the one place a `surface.*` token
+is allowed onto a neutral**, and it is safe only because `--bg-chrome` paints
+exactly one component — so the rail carries its OWN ink, `--text-chrome` /
+`--text-chrome-active` / `--accent-chrome`, computed against itself. Widening it
+to `--bg-secondary` would be the 1.2.0 defect again.
+
+**3. Syntax highlighting was one colour with six names on four themes.** The
+old guard measured straight RGB distance at 0.07 in a 0–1 cube, which on a light
+theme — where every syntax colour must be dark, and dark colours crowd near the
+origin — passed almost everything. `industrial-day-cyan` shipped keyword and
+type at the same lightness, the same saturation and 8° apart. `_separation` now
+scores hue (weighted by the LOWER of the two saturations, because the hue of a
+grey is noise), plus weight, plus saturation; the bar is 28, chosen from the
+measured spread of the ten (7.8, 9.4, 9.9, 17.1, 29.1, 29.4, 29.9, 32.2, 57.5,
+66.0) so it fires on the four real collisions and leaves the six a reader can
+already tell apart. Rotation is nearest-first and both ways, with a LIGHTNESS
+fallback for a pack whose six roles all sit inside 40° — `nord-light-frost`
+needed it. Worst is now 28.4.
+
+**4. The filled primary button's label was the literal `#ffffff`, since 1.1.0.**
+On `newsprint-night`, whose brand is paper (accent `#e8e2d6`), the Run button
+was white on near-white; on `aurora-teal` (accent `#1accbe`) white on bright
+teal. `--accent-ink` is black or white, whichever the accent can be read
+against, and is asserted at 4.5:1. **The theme sweep could not see this for ten
+releases because it reads colours off elements and a literal in a stylesheet is
+not a token a theme can move** — it now measures `button.primary` too, and the
+activity bar, whose icons have no text and were therefore skipped by a loop that
+required some.
+
+Each guard was proved to FAIL on the broken version before being trusted:
+disabling the chroma floor refuses the build on `finance-ledger` (3/255 under
+18), disabling `differentiate_syntax` refuses on `aurora-teal` (4.5 under 28).
+
+**What is left, and is the packs rather than the generator:**
+`industrial-day-cyan` and `nord-light-frost` author near-identical pages
+(`#EEF0F3` and `#ecf0f4`, hues 216 and 210) and remain the closest pair — 3 RGB
+apart on the page, separated in practice by chrome (23 RGB), accent lightness
+and geometry. Rotating either off its own hue is the 1.7.x mistake and is not
+on the table; repainting a pack is Nigel's call, not the generator's.
+`industrial-day-cyan` still resolves `--error`/`--success` to greys, for the
+reason recorded at 1.7.0.
 
 
 

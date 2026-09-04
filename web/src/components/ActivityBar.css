@@ -21,7 +21,10 @@
   border: none;
   border-radius: 0;
   background: none;
-  color: var(--text-muted);
+  /* The RAIL's ink, not the page's. Identical to --text-muted on eight of the
+     ten themes; on `finance-ledger` and `leather-parchment-tan` the rail is the
+     inverse of the page and the shared token would be unreadable on it. */
+  color: var(--text-chrome);
   cursor: pointer;
   /* The active marker is a left border drawn in the transparent state too, so
      activating an item does not shift its icon when it lights up. Its WIDTH is
@@ -30,18 +33,18 @@
 }
 
 .activity-item:hover {
-  color: var(--text-primary);
+  color: var(--text-chrome-active);
   background: none;
 }
 
 .activity-item.is-active {
-  color: var(--text-primary);
-  border-left-color: var(--accent-primary);
+  color: var(--text-chrome-active);
+  border-left-color: var(--accent-chrome);
   background: none;
 }
 
 .activity-item:focus-visible {
-  outline: 1px solid var(--accent-primary);
+  outline: 1px solid var(--accent-chrome);
   outline-offset: -2px;
 }
 

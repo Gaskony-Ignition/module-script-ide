@@ -113,7 +113,10 @@
 
 .button:hover {
   background: var(--accent-primary);
-  color: var(--bg-primary);
+  /* --accent-ink, not --bg-primary: the page happens to contrast with the
+     accent on all ten today, and nothing guarantees it. --accent-ink is
+     measured against the accent and asserted at generation time. */
+  color: var(--accent-ink);
 }
 
 .app-user {
