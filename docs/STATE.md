@@ -548,12 +548,40 @@ Each guard was proved to FAIL on the broken version before being trusted:
 disabling the chroma floor refuses the build on `finance-ledger` (3/255 under
 18), disabling `differentiate_syntax` refuses on `aurora-teal` (4.5 under 28).
 
-**What is left, and is the packs rather than the generator:**
-`industrial-day-cyan` and `nord-light-frost` author near-identical pages
-(`#EEF0F3` and `#ecf0f4`, hues 216 and 210) and remain the closest pair — 3 RGB
-apart on the page, separated in practice by chrome (23 RGB), accent lightness
-and geometry. Rotating either off its own hue is the 1.7.x mistake and is not
-on the table; repainting a pack is Nigel's call, not the generator's.
+**SETTLED, 04/09/2026 — `industrial-day-cyan` and `nord-light-frost` stay as
+they are. Do not re-open this.**
+
+They author near-identical pages (`#EEF0F3` and `#ecf0f4`, hues 216 and 210) and
+are the closest pair in the set — 3 RGB apart on the page. Nigel was given the
+options and chose to leave them.
+
+What separates them today, and why that was judged enough: `--bg-chrome` differs
+by 23 RGB, the accents differ in lightness (32% vs 47%), and the GEOMETRY is not
+close at all — 2px corners against 8px (panel 2px against 16px), a 4px marker
+against 3px, 20px rows against 25px. They read as two themes; it is only the
+editor ground that is twinned.
+
+Two things were considered and are NOT happening:
+
+- **Taking the rail's DIRECTION from the pack**, not just its distance.
+  `nord-light-frost` is the only light pack whose sidebar, card and topbar are
+  all `#ffffff` — 6% LIGHTER than its page — while every other light pack steps
+  down; the generator forces them all down, which is the override that makes the
+  two collide. It would have touched exactly two themes, the other being
+  `leather-night-tan`, whose pack asks for a rail 4% DARKER than its page and
+  currently gets a lighter one. **That small inaccuracy therefore stays**, by the
+  same decision. Neither costs contrast.
+- **Repainting a pack.** `ignition-themes` is public Apache-2.0 and is the
+  estate's source of truth for Perspective, so moving `industrial-day-cyan`'s
+  page changes every gateway theme and every Perspective session — the wrong
+  blast radius for a resemblance that only shows in a theme picker. Nigel's call
+  either way, and he has made it.
+
+Rotating either ground off its own hue was never on the table: that is the 1.7.x
+mistake that cost the estate the aurora pair.
+
+`industrial-day-cyan` still resolves `--error`/`--success` to greys, for the
+reason recorded at 1.7.0 — that one is still open and is also Nigel's call.
 `industrial-day-cyan` still resolves `--error`/`--success` to greys, for the
 reason recorded at 1.7.0.
 
