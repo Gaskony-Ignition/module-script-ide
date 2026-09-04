@@ -29,14 +29,15 @@ import { Annotation, EditorState, Compartment, type Extension } from '@codemirro
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
 import type { LspClient } from '../api/lspClient';
-import { isLockedByInheritance, type OpenDoc } from '../workspace/documents';
+import { isLockedByInheritance, isPythonDoc, type OpenDoc } from '../workspace/documents';
 import { lspExtension } from './lspExtension';
 import { attachDiagnostics } from './lspDiagnostics';
 import ProblemRuler, { geometryOffset } from './ProblemRuler';
 import { lspUri } from '../api/lspClient';
 import { lintGutter } from '@codemirror/lint';
 import {
-  byteFidelity, editorTheme, findAndReplace, folding, goToLine, pythonSurface, sqlSurface,
+  byteFidelity, cssSurface, editorTheme, findAndReplace, folding, goToLine, htmlSurface,
+  javascriptSurface, jsonSurface, plainSurface, pythonSurface, sqlSurface,
 } from './editorCore';
 import './CodeEditor.css';
 
@@ -393,6 +394,32 @@ function readOnlyExtension(readOnly: boolean): Extension {
   ];
 }
 
+/**
+ * The editing surface for a document's language.
+ *
+ * The language is the DOCUMENT's, not the component's. Everything else — theme,
+ * find and replace, folding, go-to-line, byte fidelity — is identical whichever
+ * branch this takes, because a query, the script that calls it and the Web Dev
+ * page they serve are one piece of work, and editors that behave differently
+ * would make them three tools.
+ *
+ * A document with no language is Python: that is what every document was before
+ * 1.9.0, and the field is optional so an older caller cannot lose highlighting
+ * by omitting it.
+ */
+function surfaceFor(doc: OpenDoc): Extension[] {
+  if (doc.kind === 'named-query') return sqlSurface;
+  switch (doc.language) {
+    case 'html': return htmlSurface;
+    case 'javascript': return javascriptSurface;
+    case 'css': return cssSurface;
+    case 'json': return jsonSurface;
+    case 'sql': return sqlSurface;
+    case 'text': return plainSurface;
+    default: return pythonSurface;
+  }
+}
+
 function baseExtensions(
   doc: OpenDoc,
   onChangeRef: React.MutableRefObject<CodeEditorProps['onChange']>,
@@ -402,13 +429,8 @@ function baseExtensions(
   lsp: LspClient | null | undefined
 ): Extension[] {
   const uri = doc.uri;
-  // The language is the document's, not the component's. Everything else —
-  // theme, find and replace, folding, go-to-line, byte fidelity — is identical
-  // for both, because a query and the script that calls it are one piece of
-  // work and two editors that behave differently would make them two tools.
-  const isQuery = doc.kind === 'named-query';
   return [
-    ...(isQuery ? sqlSurface : pythonSurface),
+    ...surfaceFor(doc),
     ...findAndReplace,
     // Files only — the console shares pythonSurface and has no use for either.
     ...folding,
@@ -444,12 +466,13 @@ function baseExtensions(
     // The gutter marker matters as much as the inline squiggle: an error several
     // hundred lines away is otherwise invisible until you scroll onto it.
     //
-    // NEVER on a SQL view. The language server is a Jython server: it would
-    // parse the SQL as Python, publish a syntax error for every line of it, and
-    // hold a document nothing will ever close. 1.7.0 ships no SQL intelligence
-    // at all (NAMED-QUERIES.md §4) — the database's own error on a test run is
-    // the diagnostic.
-    ...(lsp && !isQuery
+    // ONLY on a Python view. The language server is a Jython server: point it at
+    // SQL, or at the HTML of a Web Dev text resource, and it parses the file as
+    // Python, publishes a syntax error for every line of it, and holds a
+    // document nothing will ever close. 1.7.0 ships no SQL intelligence at all
+    // (NAMED-QUERIES.md §4) — the database's own error on a test run is the
+    // diagnostic — and 1.9.0 ships none for HTML, CSS or JavaScript either.
+    ...(lsp && isPythonDoc(doc)
       ? [lintGutter(), lspExtension(lsp, { project: doc.project, path: doc.path, scriptKey: doc.scriptKey })]
       : []),
 

@@ -6,6 +6,7 @@
  * is what the editor holds, so `dirty` is a derivation rather than a flag that
  * can drift out of step with the buffer.
  */
+import { languageFor, type DocLanguage } from './docLanguage';
 import type { ScriptEntry, ScriptOrigin } from '../api/scripts';
 import type { NamedQueryEntry, NamedQuerySettings } from '../api/namedQueries';
 
@@ -52,6 +53,16 @@ export interface OpenDoc {
   typeLabel: string;
   /** Short name for the tab strip. */
   label: string;
+  /**
+   * Which grammar the editor should use, and whether the Jython language
+   * server applies at all.
+   *
+   * Absent means Python, which is what every document was before 1.9.0. Only
+   * a `'python'` document gets completions, diagnostics and the problem ruler
+   * — asking a Jython parser to check a 65 KB HTML file produces an error on
+   * every line, which is worse than no checking.
+   */
+  language?: DocLanguage;
   origin: DocOrigin;
   /** Resource signature this edit is based on; the If-Match for the next save. */
   etag: string;
@@ -89,6 +100,22 @@ export interface OpenDoc {
    * `toResource`, which stamps version 2.
    */
   legacy?: boolean;
+}
+
+/**
+ * True when the Jython language server applies to this document.
+ *
+ * The gate for completions, diagnostics, the problem ruler and go-to-definition
+ * — everything the server answers. It is a JYTHON server: pointed at the HTML
+ * of a Web Dev text resource it parses the markup as Python and publishes a
+ * syntax error on every line, which is a worse answer than none.
+ *
+ * Language absent means Python: that is what every document was before 1.9.0,
+ * and a construction site that forgets the field must not silently lose its
+ * language server.
+ */
+export function isPythonDoc(doc: OpenDoc): boolean {
+  return doc.kind === 'script' && (doc.language ?? 'python') === 'python';
 }
 
 /**
@@ -229,15 +256,40 @@ export function settingsEqual(
 }
 
 /**
+ * The synthetic data key a Web Dev text resource's body is addressed by.
+ *
+ * Must match `WebDevResources.TEXT_DATA_KEY` on the gateway. It is not a real
+ * data key — the body is a string inside `config.json` — and the read and write
+ * routes translate it. See that class for why the addressing works this way.
+ */
+export const WEBDEV_TEXT_KEY = 'config.json#text';
+
+/** A file extension to show a MIME type as, for a tab label. */
+function extensionFor(contentType: string | undefined): string {
+  switch (languageFor({ dataKey: '', contentType })) {
+    case 'html': return 'html';
+    case 'javascript': return 'js';
+    case 'css': return 'css';
+    case 'json': return 'json';
+    default: return 'txt';
+  }
+}
+
+/**
  * Tab label. A singleton (startup/shutdown/update) has an empty name, so its
  * type label is the only thing that identifies it.
  */
 export function labelFor(entry: ScriptEntry): string {
-  // A Web Dev endpoint's tabs must say WHICH handler they are, or eight tabs on
-  // one endpoint all read the same.
+  // A Web Dev endpoint's tabs must say WHICH file they are, or eight tabs on
+  // one endpoint all read the same. Three cases now, not one: a verb handler,
+  // a static file the endpoint carries, and a text resource whose body has no
+  // filename at all — that last one is named after its MIME type, because
+  // `cell3d/config.json#text` is the synthetic key and nobody should see it.
   if (entry.typeId === 'resources') {
-    const method = entry.scriptKey.replace(/\.py$/, '');
-    return `${entry.name}/${method}`;
+    if (entry.scriptKey === WEBDEV_TEXT_KEY) {
+      return `${entry.name}.${extensionFor(entry.contentType)}`;
+    }
+    return `${entry.name}/${entry.scriptKey.replace(/\.py$/, '')}`;
   }
   return entry.name && entry.name.length > 0 ? entry.name : entry.typeLabel;
 }
@@ -252,6 +304,7 @@ export function newDoc(entry: ScriptEntry, project: string, text: string, etag: 
     scriptKey: entry.scriptKey,
     typeLabel: entry.typeLabel,
     label: labelFor(entry),
+    language: languageFor({ dataKey: entry.scriptKey, contentType: entry.contentType }),
     origin: entry.origin,
     // The listing's signature is a usable fallback, but the read's ETag is the
     // authority: the listing may have been fetched minutes ago.

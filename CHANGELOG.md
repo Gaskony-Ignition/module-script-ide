@@ -2,6 +2,52 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.9.0] — 2026-09-04
+
+feat: Web Dev's static resources — HTML, JavaScript and CSS, edited properly.
+
+Nigel, 03/09/2026: *"the Machine_HMI-Demo is a good example as it has cell3D
+which appears to be javascript or html code which I should be able to view/edit
+like a script but instead all I am seeing is doGet, doPost etc."*
+
+A Web Dev resource comes in two shapes and this module knew one. `cell3d` is a
+`text-resource`: 65 KB of HTML living in `config.json`'s `text` field, with its
+MIME type beside it. `lib` is a `python-resource` that also carries
+`three.min.js` as a data key.
+
+### Added
+- **Static resources open and save.** A text resource shows one row for the file
+  it serves, named and highlighted by its content type. Writes are a
+  read-modify-write of `config.json`, so the `content-type` and any field a
+  newer Ignition adds survive the save.
+- **The files an endpoint carries are visible.** `three.min.js` and anything
+  beside it now appear in the tree with their size. Ones this IDE cannot
+  round-trip as text — a PNG, a font, anything over 512 KB — are listed greyed
+  rather than hidden, so a file cannot appear not to exist.
+- **HTML, JavaScript, CSS and JSON editing surfaces**, alongside Python and SQL.
+  The language comes from the resource's declared MIME type, falling back to the
+  file extension, and a `.py` key is Python whatever else claims otherwise.
+
+### Fixed
+- **A text resource offered to add Python handlers to itself.** Every
+  unimplemented verb rendered an "add doGet" button, and on a static HTML
+  resource pressing one would have written `doGet.py` onto it. Both the button
+  and the settings dialog are gone for that shape, and the gateway refuses a
+  per-method settings write on one.
+- **The Jython language server ran over non-Python documents.** One predicate,
+  `isPythonDoc`, now gates completions, diagnostics, the problem ruler and
+  "Run file" together.
+- **Only one tab per resource could go stale.** `staleUris` was keyed by
+  document rather than by resource, so on an endpoint with several files open
+  every tab but one was exempt from the 1.8.5 pull feature.
+
+### Verified
+`validate_v20_webdev.py` 29/29 against the real `Machine_HMI_Demo` endpoints,
+including a full edit-save-restore round trip on `cell3d` proving the body comes
+back byte for byte and the HTML is stored readable rather than escaped tag by
+tag. `v13` 23/23, `v16_nav` 25/25, `v18_pull` 20/20, `v19_ruler` 16/16.
+Java 365 tests, Vitest 505.
+
 ## [1.8.10] — 2026-09-04
 
 fix: the ruler marks the wrong line, closing a tab throws work away, and pull is missable.

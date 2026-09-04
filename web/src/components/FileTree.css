@@ -269,3 +269,21 @@
 .file-tree-discard:focus-visible {
   opacity: 1;
 }
+
+/*
+ * A trailing note on a tree row — a file's size, or a text resource's MIME
+ * type.
+ *
+ * Right-aligned and quiet: it is context for the name beside it, not a second
+ * label. `margin-left: auto` rather than a fixed column, because the names it
+ * follows range from `doGet` to `three.min.js` and a column wide enough for the
+ * longest wastes the width on every other row.
+ */
+.file-tree-note {
+  margin-left: auto;
+  padding-left: 8px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}

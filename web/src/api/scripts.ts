@@ -34,6 +34,20 @@ export interface ProjectSummary {
   mutable: boolean;
 }
 
+/** One static file on a Web Dev endpoint. */
+export interface WebDevFile {
+  /** The resource's data key — a plain filename. */
+  key: string;
+  /** Size in bytes, so a row can say why a big bundle is not offered. */
+  size: number;
+  /**
+   * Whether this IDE will open it. False for a type it cannot round-trip as
+   * text (a PNG would come back as replacement characters and save corrupted),
+   * and false for anything over half a megabyte.
+   */
+  editable: boolean;
+}
+
 export interface ScriptEntry {
   /** `<moduleId>/<typeId>[/<name>]`, e.g. `ignition/script-python/util/helpers`. */
   path: string;
@@ -72,6 +86,29 @@ export interface ScriptEntry {
    * endpoint's verbs without a request per endpoint.
    */
   methods?: string[];
+  /**
+   * For a Web Dev endpoint: WHICH of the two shapes the platform wrote.
+   *
+   * `'python'` is a set of `do<Verb>.py` handlers — what this module assumed
+   * every Web Dev resource was until 1.9.0. `'text'` is a static file whose
+   * whole body is a string inside `config.json`, with a `contentType` beside
+   * it; `cell3d` on the demo gateway is 65 KB of HTML held that way, and under
+   * the old model it rendered as eight empty verb slots with an "add doGet"
+   * button that would have put Python onto a static HTML resource.
+   *
+   * Absent for every other resource type, and absent from an older gateway
+   * response — treat that as `'python'`, which is what it always was.
+   */
+  webdevKind?: 'python' | 'text';
+  /** A text resource's declared MIME type, e.g. `text/html`. */
+  contentType?: string;
+  /**
+   * Static files the endpoint carries beside its handlers.
+   *
+   * `lib` ships `three.min.js` this way. These were readable through the
+   * content route the whole time and appeared nowhere in the UI.
+   */
+  files?: WebDevFile[];
   /**
    * The event script's `enabled` attribute, when it has one.
    *

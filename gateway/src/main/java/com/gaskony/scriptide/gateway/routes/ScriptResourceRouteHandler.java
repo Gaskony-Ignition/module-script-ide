@@ -237,23 +237,7 @@ public final class ScriptResourceRouteHandler {
             }
             String actual;
             if (webdev) {
-                // A Web Dev endpoint has up to EIGHT .py files, so "the first
-                // one" is whatever order the platform happened to return —
-                // alphabetically that is doDelete.py, which is nobody's idea of
-                // the main handler. Prefer doGet, then the declared order.
-                java.util.Set<String> present = new java.util.LinkedHashSet<>(resource.getDataKeys());
-                actual = ScriptResourceTypes.WEBDEV_METHODS.stream()
-                    .map(ScriptResourceTypes::webDevKeyFor)
-                    .filter(present::contains)
-                    .findFirst()
-                    .orElse(st.createKey());
-                // Which verbs this endpoint actually implements, so the tree can
-                // list them without a round trip per endpoint.
-                JsonArray methods = new JsonArray();
-                ScriptResourceTypes.WEBDEV_METHODS.stream()
-                    .filter(m -> present.contains(ScriptResourceTypes.webDevKeyFor(m)))
-                    .forEach(methods::add);
-                out.add("methods", methods);
+                actual = describeWebDev(resource, out, st.createKey());
             } else {
                 actual = resource.getDataKeys().stream()
                     .filter(k -> k.endsWith(".py"))
@@ -305,6 +289,71 @@ public final class ScriptResourceRouteHandler {
         return out;
     }
 
+    /**
+     * The Web Dev half of {@link #describe}: which SHAPE this endpoint is, and
+     * what it holds.
+     *
+     * <p>Until 1.9.0 this was five lines that intersected the data keys against
+     * the eight verb handlers and published the result as {@code methods}. That
+     * describes exactly one of the two shapes the platform writes; see {@link
+     * WebDevResources} for the measurements. Concretely it meant a static
+     * resource — 65 KB of HTML inside {@code config.json} — was reported as an
+     * endpoint implementing no verbs, which the tree drew as eight "add
+     * {@code doGet}" buttons and no way to reach the file.</p>
+     *
+     * @return the data key the client should open by default
+     */
+    private static String describeWebDev(Resource resource, JsonObject out, String createKey) {
+        java.util.Set<String> present = new java.util.LinkedHashSet<>(resource.getDataKeys());
+        JsonObject config = WebDevResources.parseConfig(resource);
+
+        // Files that are neither the config nor a verb handler: `lib` ships
+        // three.min.js this way. They were readable through the content route
+        // the whole time and appeared nowhere in the UI.
+        JsonArray files = new JsonArray();
+        for (String key : present) {
+            if (!WebDevResources.isAsset(key)) {
+                continue;
+            }
+            int length = resource.getData(key).map(ImmutableBytes::length).orElse(0);
+            JsonObject file = new JsonObject();
+            file.addProperty("key", key);
+            file.addProperty("size", length);
+            file.addProperty("editable", WebDevResources.isEditableAsset(key, length));
+            files.add(file);
+        }
+        out.add("files", files);
+
+        if (WebDevResources.isTextResource(config)) {
+            out.addProperty("webdevKind", "text");
+            out.addProperty("contentType", WebDevResources.contentType(config));
+            // No verbs at all — an EMPTY array rather than an absent one, so the
+            // client renders "this endpoint has no handlers" instead of falling
+            // back to a default list of eight.
+            out.add("methods", new JsonArray());
+            return WebDevResources.TEXT_DATA_KEY;
+        }
+
+        out.addProperty("webdevKind", "python");
+        // Which verbs this endpoint actually implements, so the tree can list
+        // them without a round trip per endpoint.
+        JsonArray methods = new JsonArray();
+        ScriptResourceTypes.WEBDEV_METHODS.stream()
+            .filter(m -> present.contains(ScriptResourceTypes.webDevKeyFor(m)))
+            .forEach(methods::add);
+        out.add("methods", methods);
+
+        // A Web Dev endpoint has up to EIGHT .py files, so "the first one" is
+        // whatever order the platform happened to return — alphabetically that
+        // is doDelete.py, which is nobody's idea of the main handler. Prefer
+        // doGet, then the declared order.
+        return ScriptResourceTypes.WEBDEV_METHODS.stream()
+            .map(ScriptResourceTypes::webDevKeyFor)
+            .filter(present::contains)
+            .findFirst()
+            .orElse(createKey);
+    }
+
     // ==================== GET /api/scripts/content/:path ====================
 
     /**
@@ -346,18 +395,39 @@ public final class ScriptResourceRouteHandler {
         if (key == null || key.isBlank()) {
             key = defaultKeyFor(resource, resourcePath);
         }
-        Optional<ImmutableBytes> dataOpt = resource.getData(key);
-        if (dataOpt.isEmpty()) {
-            return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
-                "No such data key '" + key + "' on " + resourcePath);
+
+        byte[] body;
+        if (WebDevResources.TEXT_DATA_KEY.equals(key)) {
+            // A Web Dev text resource keeps its whole body as a STRING inside
+            // config.json rather than as a data key, so there is nothing here
+            // for getData to return. See WebDevResources for why the synthetic
+            // key exists at all.
+            Optional<String> text = isWebDevPath(resourcePath)
+                ? WebDevResources.body(WebDevResources.parseConfig(resource))
+                : Optional.empty();
+            if (text.isEmpty()) {
+                return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+                    "No text content on " + resourcePath);
+            }
+            body = text.get().getBytes(StandardCharsets.UTF_8);
+        } else {
+            Optional<ImmutableBytes> dataOpt = resource.getData(key);
+            if (dataOpt.isEmpty()) {
+                return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+                    "No such data key '" + key + "' on " + resourcePath);
+            }
+            body = dataOpt.get().getBytes();
         }
 
         resp.setHeader("ETag",
             HandlerSupport.quoteEtag(resource.getResourceSignature().toString()));
-        // text/plain, not application/json: this is a Python source file, and a
-        // JSON content type makes browsers and proxies try to parse it.
+        // text/plain, not application/json: this is source, and a JSON content
+        // type makes browsers and proxies try to parse it. It stays text/plain
+        // for an HTML or JavaScript file too — the client is a code editor, and
+        // serving text/html here would let a static resource be rendered as a
+        // page from this module's own origin.
         resp.setContentType("text/plain; charset=UTF-8");
-        byte[] bytes = dataOpt.get().getBytes();
+        byte[] bytes = body;
         resp.setContentLength(bytes.length);
         resp.getOutputStream().write(bytes);
         return null;
@@ -450,7 +520,11 @@ public final class ScriptResourceRouteHandler {
                 ? defaultKeyFor(existing, resourcePath)
                 : body.key;
             try {
-                applyScriptBody(builder, resourcePath, key, body.source, newBytes);
+                if (WebDevResources.TEXT_DATA_KEY.equals(key) && isWebDevPath(resourcePath)) {
+                    applyWebDevText(builder, existing, body.source);
+                } else {
+                    applyScriptBody(builder, resourcePath, key, body.source, newBytes);
+                }
             } catch (IllegalArgumentException e) {
                 return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
                     e.getMessage());
@@ -662,6 +736,13 @@ public final class ScriptResourceRouteHandler {
 
     /** The .py key a resource actually carries, falling back to its type's default. */
     private static String defaultKeyFor(Resource resource, ResourcePath path) {
+        // A Web Dev text resource has no .py at all, and its type's create key is
+        // doGet.py — so without this the default read on one 404s with "No such
+        // data key 'doGet.py'" rather than opening the file that is plainly there.
+        if (isWebDevPath(path)
+            && WebDevResources.isTextResource(WebDevResources.parseConfig(resource))) {
+            return WebDevResources.TEXT_DATA_KEY;
+        }
         return resource.getDataKeys().stream()
             .filter(k -> k.endsWith(".py"))
             .findFirst()
@@ -715,9 +796,11 @@ public final class ScriptResourceRouteHandler {
         // than a privilege boundary — but a client-supplied data key has no business
         // containing a path separator, and whether the platform sanitises one is not
         // something this module should be relying on.
-        if (!isSafeDataKey(key)) {
-            throw new IllegalArgumentException(
-                "Invalid data key '" + key + "': expected a plain .py filename");
+        boolean webdev = ScriptResourceTypes.isWebDev(
+            path.getResourceType().moduleId(), path.getResourceType().typeId());
+        if (!(webdev ? isSafeWebDevDataKey(key) : isSafeDataKey(key))) {
+            throw new IllegalArgumentException("Invalid data key '" + key + "': expected "
+                + (webdev ? "a plain filename this IDE can edit" : "a plain .py filename"));
         }
         builder.setApplicationScope(ALL_SCOPE).putData(key, bytes);
     }
@@ -730,12 +813,71 @@ public final class ScriptResourceRouteHandler {
      * a mistake or an attempt at something.</p>
      */
     static boolean isSafeDataKey(String key) {
+        return isPlainFilename(key) && key.endsWith(".py");
+    }
+
+    /**
+     * The same rules, widened to the file types a Web Dev endpoint may carry.
+     *
+     * <p>A Web Dev resource is the one place a data key is legitimately not a
+     * {@code .py} file: {@code lib} ships {@code three.min.js} beside its
+     * handler. The allowlist is {@link WebDevResources}', so what may be WRITTEN
+     * and what the tree offers to OPEN cannot drift apart — a key this module
+     * would refuse to show is a key it must refuse to save.</p>
+     *
+     * <p>Kept as a separate predicate rather than a parameter on the one above,
+     * so that no ordinary script write can reach the wider set by accident.</p>
+     */
+    static boolean isSafeWebDevDataKey(String key) {
+        return isPlainFilename(key)
+            && (key.endsWith(".py") || WebDevResources.hasEditableExtension(key));
+    }
+
+    /**
+     * No separators, no traversal, no NUL, no {@code #}.
+     *
+     * <p>The {@code #} matters as much as the separators do: {@code
+     * config.json#text} is the synthetic key a Web Dev text resource's body is
+     * addressed by, and it must never be creatable as a REAL data key — a
+     * resource carrying both would have two different bodies answering to one
+     * name, and which one won would depend on the order of two branches.</p>
+     */
+    private static boolean isPlainFilename(String key) {
         return key != null
-            && key.endsWith(".py")
+            && !key.isBlank()
             && key.indexOf('/') < 0
             && key.indexOf('\\') < 0
             && key.indexOf('\0') < 0
+            && key.indexOf('#') < 0
             && !key.contains("..");
+    }
+
+    /** True when this path addresses a Web Dev resource. */
+    private static boolean isWebDevPath(ResourcePath path) {
+        var type = path.getResourceType();
+        return ScriptResourceTypes.isWebDev(type.moduleId(), type.typeId());
+    }
+
+    /**
+     * Write a Web Dev text resource's body back into its {@code config.json}.
+     *
+     * <p>Read-modify-write, never a wholesale replacement: the client sends a
+     * body, and the {@code content-type} beside it — plus anything a newer
+     * Ignition has added — is carried across untouched. Overwriting the document
+     * with {@code {"text": …}} would strip the MIME type and leave the platform
+     * serving 65 KB of HTML as {@code text/plain}.</p>
+     */
+    private static void applyWebDevText(ResourceBuilder builder, Resource existing, String source) {
+        JsonObject config = WebDevResources.parseConfig(existing);
+        if (!WebDevResources.isTextResource(config)) {
+            // Refuse rather than convert. Turning a Python endpoint into a static
+            // resource silently unpublishes every verb it implements, and the
+            // handlers stay on disk looking like they still serve traffic.
+            throw new IllegalArgumentException(
+                "That endpoint serves Python handlers, not static text");
+        }
+        builder.putData(ScriptResourceTypes.WEBDEV_CONFIG_KEY,
+            WebDevResources.serialise(WebDevResources.withBody(config, source)));
     }
 
     /**

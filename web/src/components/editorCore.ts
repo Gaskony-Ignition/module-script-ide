@@ -21,6 +21,10 @@ import {
 } from '@codemirror/language';
 import { python } from '@codemirror/lang-python';
 import { sql } from '@codemirror/lang-sql';
+import { html } from '@codemirror/lang-html';
+import { javascript } from '@codemirror/lang-javascript';
+import { css } from '@codemirror/lang-css';
+import { json } from '@codemirror/lang-json';
 import { EditorState, type Extension } from '@codemirror/state';
 import {
   EditorView,
@@ -153,8 +157,16 @@ export const goToLine: Extension = keymap.of([
   { key: 'Mod-g', run: gotoLine, preventDefault: true },
 ]);
 
-/** Editing surface, syntax and history — everything but keymaps and fidelity. */
-export const pythonSurface: Extension[] = [
+/**
+ * Everything a surface is except the language.
+ *
+ * Extracted when Web Dev's real shapes went in (1.9.0) and the two surfaces
+ * above became six. They were already identical line for line — a query and the
+ * script that calls it are one piece of work, and two editors that look
+ * different make them read as two tools — so leaving them as six copies would
+ * have meant six places to forget when a gutter changes.
+ */
+const commonSurface: Extension[] = [
   lineNumbers(),
   highlightActiveLineGutter(),
   highlightSpecialChars(),
@@ -164,8 +176,10 @@ export const pythonSurface: Extension[] = [
   highlightActiveLine(),
   bracketMatching(),
   syntaxHighlighting(highlightStyle, { fallback: true }),
-  python(),
 ];
+
+/** Editing surface, syntax and history — everything but keymaps and fidelity. */
+export const pythonSurface: Extension[] = [...commonSurface, python()];
 
 /**
  * Editing surface for a named query's SQL — the same one, with a different
@@ -186,18 +200,26 @@ export const pythonSurface: Extension[] = [
  * `pythonSurface`: every composer applies them LAST, so a language extension
  * can never win a precedence tie against them.
  */
-export const sqlSurface: Extension[] = [
-  lineNumbers(),
-  highlightActiveLineGutter(),
-  highlightSpecialChars(),
-  history(),
-  drawSelection(),
-  rectangularSelection(),
-  highlightActiveLine(),
-  bracketMatching(),
-  syntaxHighlighting(highlightStyle, { fallback: true }),
-  sql(),
-];
+export const sqlSurface: Extension[] = [...commonSurface, sql()];
+
+/**
+ * The surface for one of Web Dev's non-Python files.
+ *
+ * `html()` brings its own nested JavaScript and CSS parsers, so a
+ * `<script>` block inside a Web Dev text resource highlights as script rather
+ * than as markup — which matters, because that is exactly what `cell3d`
+ * is: 65 KB of HTML whose bulk is an inline WebGL program.
+ *
+ * The byte-fidelity facets are NOT included here, exactly as they are not in
+ * the two surfaces above: every composer applies them LAST, so a language
+ * extension can never win a precedence tie against them.
+ */
+export const htmlSurface: Extension[] = [...commonSurface, html()];
+export const javascriptSurface: Extension[] = [...commonSurface, javascript()];
+export const cssSurface: Extension[] = [...commonSurface, css()];
+export const jsonSurface: Extension[] = [...commonSurface, json()];
+/** No grammar at all — for a file type this build does not recognise. */
+export const plainSurface: Extension[] = [...commonSurface];
 
 /**
  * The default keymap, with Tab bound to a literal tab.

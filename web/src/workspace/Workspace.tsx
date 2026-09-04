@@ -78,6 +78,7 @@ import {
   docUri,
   isDirty,
   isLockedByInheritance,
+  isPythonDoc,
   isStale,
   newDoc,
   newQueryDoc,
@@ -291,16 +292,21 @@ export default function Workspace({ session }: WorkspaceProps) {
    * this set claims to report.
    */
   const staleUris = useMemo(() => {
+    // Keyed by RESOURCE, not by document. A signature covers the whole resource,
+    // and one resource can be open in several tabs: a Web Dev endpoint has up to
+    // eight handlers plus its static files, all sharing one signature. Keying by
+    // the document uri only ever matched the tab opened at the listing's own
+    // default key, so every other tab on that endpoint could never go stale.
     const signatures = new Map<string, string>();
     for (const entry of tree?.scripts ?? []) {
-      signatures.set(docUri(project, entry.path, entry.scriptKey), entry.signature);
+      signatures.set(docUri(project, entry.path), entry.signature);
     }
     for (const entry of queries?.queries ?? []) {
-      signatures.set(docUri(project, entry.path, QUERY_DATA_KEY), entry.signature);
+      signatures.set(docUri(project, entry.path), entry.signature);
     }
     const out = new Set<string>();
     for (const doc of docs) {
-      if (isStale(doc, signatures.get(doc.uri))) out.add(doc.uri);
+      if (isStale(doc, signatures.get(docUri(doc.project, doc.path)))) out.add(doc.uri);
     }
     return out;
   }, [docs, project, queries, tree]);
@@ -353,9 +359,11 @@ export default function Workspace({ session }: WorkspaceProps) {
    * wrong library.
    */
   const activeSource = useMemo<ActiveSource | undefined>(() => {
-    // A named query is not a script and "Run file" would hand SQL to the Jython
-    // interpreter. Testing a query is its own tab, against the database.
-    if (!activeDoc || activeDoc.kind !== 'script' || activeDoc.project !== project) {
+    // Python only. "Run file" hands the buffer to the Jython interpreter, so a
+    // named query would arrive as SQL and a Web Dev text resource as HTML.
+    // Testing a query is its own tab, against the database; a static file is
+    // tested by requesting the endpoint.
+    if (!activeDoc || !isPythonDoc(activeDoc) || activeDoc.project !== project) {
       return undefined;
     }
     const uri = activeDoc.uri;
@@ -1753,11 +1761,15 @@ export default function Workspace({ session }: WorkspaceProps) {
                 <WebDevTree
                   endpoints={webDevEndpoints}
                   selectedPath={activeDoc?.path ?? null}
-                  selectedMethod={activeDoc?.scriptKey?.replace(/\.py$/, '') ?? null}
-                  // A Web Dev row opens ONE method's script, so the data key is
-                  // chosen by the row rather than by the resource's default.
+                  selectedKey={activeDoc?.scriptKey ?? null}
+                  // A Web Dev row opens ONE file, so the data key is chosen by
+                  // the row rather than by the resource's default — a verb
+                  // handler here, and any other file below.
                   onOpen={(entry, method) =>
                     void openScript({ ...entry, scriptKey: `${method}.py` })
+                  }
+                  onOpenFile={(entry, dataKey) =>
+                    void openScript({ ...entry, scriptKey: dataKey })
                   }
                   onCreate={readOnly ? undefined : () => {
                     setCreateError(null);

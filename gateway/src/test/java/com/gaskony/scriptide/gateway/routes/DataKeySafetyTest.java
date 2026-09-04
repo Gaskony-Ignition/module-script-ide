@@ -58,6 +58,37 @@ class DataKeySafetyTest {
         assertThat(ScriptResourceRouteHandler.isSafeDataKey(withNul)).isFalse();
     }
 
+    @ParameterizedTest(name = "a Web Dev endpoint may carry: {0}")
+    @ValueSource(strings = { "doGet.py", "three.min.js", "site.css", "index.html", "data.json" })
+    @DisplayName("the Web Dev predicate widens the extension set, and nothing else")
+    void acceptsWebDevAssets(String key) {
+        // A Web Dev resource is the one place a data key is legitimately not a
+        // .py file — `lib` ships three.min.js beside its handler.
+        assertThat(ScriptResourceRouteHandler.isSafeWebDevDataKey(key)).isTrue();
+    }
+
+    @ParameterizedTest(name = "and still refuses: {0}")
+    @ValueSource(strings = {
+        "../../etc/passwd", "sub/three.min.js", "..\\x.js", "logo.png", "", "config.json#text",
+    })
+    @DisplayName("the wider set is still a plain filename this IDE can edit")
+    void refusesUnsafeWebDevKeys(String key) {
+        // config.json#text in particular: that is the SYNTHETIC key a text
+        // resource's body is addressed by. A resource carrying it as a real
+        // data key too would have two different bodies answering to one name,
+        // and which one won would depend on the order of two branches.
+        assertThat(ScriptResourceRouteHandler.isSafeWebDevDataKey(key)).isFalse();
+    }
+
+    @Test
+    @DisplayName("an ordinary script key cannot reach the wider set")
+    void scriptKeysStayPythonOnly() {
+        // The two predicates are separate so that a non-Web-Dev write can never
+        // put a .js file onto a Project Library resource.
+        assertThat(ScriptResourceRouteHandler.isSafeDataKey("three.min.js")).isFalse();
+        assertThat(ScriptResourceRouteHandler.isSafeDataKey("index.html")).isFalse();
+    }
+
     @Test
     @DisplayName("the guard is not vacuous — a plainly valid key still passes")
     void guardIsNotVacuous() {

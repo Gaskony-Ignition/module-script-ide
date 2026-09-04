@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { lspUri, type LspClient, type LspDiagnostic } from '../api/lspClient';
-import type { OpenDoc } from '../workspace/documents';
+import { isPythonDoc, type OpenDoc } from '../workspace/documents';
 import { copyText } from './clipboard';
 import './ProblemRuler.css';
 
@@ -115,7 +115,9 @@ export default function ProblemRuler({
   const [diagnostics, setDiagnostics] = useState<LspDiagnostic[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
 
-  const serverUri = doc && doc.kind === 'script'
+  // Python only. A ruler beside a Web Dev HTML file would carry one mark per
+  // line, every one of them the Jython parser objecting to markup.
+  const serverUri = doc && isPythonDoc(doc)
     ? lspUri(doc.project, doc.path, doc.scriptKey)
     : null;
 
@@ -172,7 +174,7 @@ export default function ProblemRuler({
     });
   }, []);
 
-  if (!doc || doc.kind !== 'script') return null;
+  if (!doc || !isPythonDoc(doc)) return null;
 
   return (
     <div

@@ -16,7 +16,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 /**
@@ -91,6 +90,12 @@ public final class WebDevConfigRouteHandler {
         JsonObject config = parseConfig(resource);
         JsonObject out = new JsonObject();
         out.addProperty("path", HandlerSupport.encodePath(path));
+        // Which of the two shapes this is. The per-method settings below are
+        // meaningless on a text resource, and a client that cannot tell would
+        // offer eight verb forms for a static HTML file.
+        out.addProperty("kind",
+            WebDevResources.isTextResource(config) ? "text" : "python");
+        out.addProperty("contentType", WebDevResources.contentType(config));
         out.addProperty("signature", resource.getResourceSignature().toString());
         out.add("config", config);
         var methods = new com.google.gson.JsonArray();
@@ -166,6 +171,16 @@ public final class WebDevConfigRouteHandler {
         }
         Resource existing = existingOpt.get();
 
+        // A text resource has no handlers, so it has no per-method settings.
+        // Writing them would leave a doGet block on a resource the platform
+        // serves as a static file: inert, misleading, and impossible to tell
+        // apart later from an endpoint someone half-converted by hand.
+        if (WebDevResources.isTextResource(WebDevResources.parseConfig(existing))) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "That endpoint is a static resource, not Python handlers — it has "
+                    + "no per-method settings");
+        }
+
         String expected = HandlerSupport.expectedSignature(req, body.baseSignature);
         String current = existing.getResourceSignature().toString();
         if (expected == null || expected.isBlank()) {
@@ -201,8 +216,7 @@ public final class WebDevConfigRouteHandler {
         // Pretty-printed with a trailing newline, matching what the platform
         // writes — a compact rewrite would show every endpoint as fully changed
         // in the next diff.
-        byte[] bytes = (HandlerSupport.PRETTY_GSON.toJson(config) + "\n")
-            .getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = WebDevResources.serialise(config);
         ResourceBuilder builder = existing.toBuilder()
             .putData(ScriptResourceTypes.WEBDEV_CONFIG_KEY, bytes);
         ChangeOperation op =
@@ -263,32 +277,9 @@ public final class WebDevConfigRouteHandler {
         }
     }
 
-    /**
-     * The endpoint's config, or an empty object.
-     *
-     * <p>A resource with no {@code config.json}, or with one that does not parse,
-     * yields {@code {}} rather than an error: the handler SCRIPTS are still
-     * editable, and refusing to open an endpoint because its config file is
-     * malformed would lock a user out of the very file they need to fix.</p>
-     */
+    /** The endpoint's config, or an empty object. See WebDevResources#parseConfig. */
     private static JsonObject parseConfig(Resource resource) {
-        try {
-            return resource.getData(ScriptResourceTypes.WEBDEV_CONFIG_KEY)
-                .map(data -> new String(data.getBytes(), StandardCharsets.UTF_8))
-                .map(text -> {
-                    try {
-                        JsonElement parsed = JsonParser.parseString(text);
-                        return parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject();
-                    } catch (RuntimeException e) {
-                        logger.debug("Unparseable Web Dev config.json: {}", e.getMessage());
-                        return new JsonObject();
-                    }
-                })
-                .orElseGet(JsonObject::new);
-        } catch (RuntimeException e) {
-            logger.debug("Could not read Web Dev config.json: {}", e.getMessage());
-            return new JsonObject();
-        }
+        return WebDevResources.parseConfig(resource);
     }
 
     private Object rejectNonWebDev(ResourcePath path, HttpServletResponse resp) {
