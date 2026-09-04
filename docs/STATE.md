@@ -2,11 +2,88 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.11.0 · deployed on `ignition-module-testing` (8.3.8) 04/09/2026 —
+**Version 1.13.0 · deployed on `ignition-module-testing` (8.3.8) 04/09/2026 —
 `deploy_gate.py` PASS (6 checks) and every suite green: `v13` 23/23,
-`v16_nav` 25/25, `v18_pull` 20/20, `v19_ruler` 16/16, `v20_webdev` 29/29,
-`v21_split` 21/21, theme sweep 10/10 with no illegible element.
-Java 365 tests, Vitest 521.**
+`v15_tree` 16/16, `v16_nav` 25/25, `v17_nq` 45/45, `v18_pull` 20/20,
+`v19_ruler` 16/16, `v20_webdev` 31/31, `v21_split` 21/21, `v22_editing` 15/15,
+theme sweep 10/10 with no illegible element. Java 379 tests, Vitest 528.**
+
+### 1.13.0 — six things Nigel found in one sitting (04/09/2026)
+
+All six were reported while using the module, and every one is a case where it
+looked like it was working. `validate_v22_editing.py` gates five of them; the
+sixth is in `v20_webdev`.
+
+- **"I can put absolute garbage in here and it doesn't show up as an error"** —
+  `j;sdfj;asdfjk;dksfj`. The parser was right: that is four semicolon-separated
+  expression statements and is valid Python 2. There simply was no check for a
+  name that is never defined, because the server published exactly one
+  diagnostic and it was the syntax error. `UnknownNames` reports a name that is
+  bound NOWHERE in the module, is not a builtin, and is not one of the ~20
+  names the platform injects. Deliberately loose — every scope rule is given up
+  — because a mark on working code teaches a reader to ignore the marks.
+  **`UnknownNamesRealScriptsTest` is the load-bearing test**: run over the 38
+  real scripts on this rig, the first version produced 21 complaints and every
+  one was a project script-library ROOT (`MachineDemo`, `MiningDemo`, `Access`).
+  It would have marked a line in nearly every script in the estate. The server
+  now supplies the roots from `ProjectIndex`.
+- **"the error mark showed up high instead of in line with the actual line"** —
+  the overview ruler maps the WHOLE document, so a fault on line 22 of 190 sits
+  a tenth of the way down it. Correct, and unreadable as anything but a mark in
+  the wrong place. `lintLineGutter` colours the LINE NUMBER instead — the thing
+  a reader is already using to find a line. The ruler stays: this adds a
+  signal, it does not move one.
+- **"the hover over information display needs to be more solid"** — the tooltip
+  used `--surface`, which on a glass pack is the pack's own `rgba(255,255,255,
+  0.10)` film, so code read straight through the documentation. It uses
+  `--glass-panel` now — the same composited fill the palette and dialogs
+  already had. The tooltip was the one floating layer that never got it.
+- **"tried to save but it came up with an authentication error... I could
+  potentially lose work"** — a 401 fell through to the generic save-failed
+  notice, which printed the servlet container's JSON body verbatim
+  (`{"message":"Unauthorized","url":...}`) in a one-line strip. Nothing said
+  the work was safe. Now: `ApiError.isUnauthenticated`, a dedicated bar that
+  says the buffer is untouched, a "Sign in again" and a "Retry the save"; the
+  20 s watch raises it too, so it surfaces before the next Ctrl+S rather than
+  at it. `toApiError` also reads the container's `message` FIELD instead of the
+  envelope, and refuses to put a proxy's HTML on screen as a message.
+- **"no changes were made via the designer... when i click on the compare I
+  couldn't see any differences"**, and then **"when I just refreshed the page
+  it stopped showing me any need to pull"** — both say the resource SIGNATURE
+  had moved and the bytes had not, which a gateway restart does. The watch
+  announced it anyway, because the listing carries only signatures. Every
+  newly-stale document is VERIFIED once now, by reading it: identical, adopt
+  the signature and say nothing; different, leave the bar up. The compare
+  dialog also names the count of differing lines, marks each change with a
+  fill, a solid edge AND a ±glyph, scrolls the first one into view, and says
+  plainly when there are none.
+- **"I want by default the WebDev to start shrunk but remember what i've
+  expanded between tabs"** — that tree tracked the COLLAPSED keys while the
+  other two track the EXPANDED ones, so "nothing remembered yet" meant
+  "everything open", and a python endpoint opens eight rows. Flipped, key
+  renamed with it. Gated in `v20_webdev`.
+
+Two suite bugs the new check exposed, both real: `v19_ruler` deleted its broken
+line by COUNTING characters and was off by one (the editor auto-closes `(`), so
+a stray `t` survived every run — invisible while a syntax error was the only
+diagnostic there was. And `v20_webdev` clicked the Web Dev view a second time,
+which is a TOGGLE, and measured an empty column.
+
+**Every batch is now live-gated.** `validate_v17_nq.py` closed the last gap on
+04/09/2026 and found two defects on its first run against the gateway, both in
+code that 261 unit tests had passed:
+
+- **A named query changed on the gateway was never reported stale.** The 1.8.5
+  watch refetched the SCRIPT listing only, while `staleUris` reads both
+  listings — so the tab kept an old copy until a save 409'd. That is exactly
+  the defect the watch was added to fix ("The change did not show up", Nigel
+  03/09), left in place for the other half of the tree.
+- **Pulling a stale query replaced its SQL and kept its old SETTINGS.**
+  `readCurrent` read one half of a two-half resource, so the tab ended up
+  holding one revision's buffer beside another's parameters — and the next
+  save wrote the stale half back. A lost update, not a display bug. The
+  conflict dialog's "take theirs" had the same hole and carries the settings
+  now too.
 
 **Running the live suites needs a venv with playwright**, which is not on the
 system python and was absent on 03/09/2026:
@@ -17,13 +94,17 @@ browser on Ubuntu 26.04). Then
 `gateway_session` refuses to guess a gateway without either that flag or
 `SI_GATEWAY_CONFIG`.
 
-**`v15_tree` does not pass on this gateway and did not at 1.7.0 either** — it
-wants `Site_Redgum_Sewer`, a water-suite project not installed here. A fixture
-gap, not a regression; it needs the `skip()` treatment `validate_v14.py` got.
+**`v15_tree` passes now, 16/16 (04/09/2026).** It had been pinned to
+`Site_Redgum_Sewer`, a water-suite project that is not on the module rig and
+never was, so `select_option` threw and eleven checks went unreported rather
+than failing. Both its fixtures are DISCOVERED now, preferring a project with a
+parent, and `SI_INHERIT_PROJECT` still pins one — a name the gateway does not
+offer is a FAIL, not a silent fallback. The run also caught that the suite
+predated the 1.8.10 unsaved-close guard: closing the dirty draft now asks
+first, and that ASK is asserted rather than dismissed.
 
 **If this is a fresh chat: the work queue is in "What is next", below the
-status table.** Batches A–F are done and deployed. The one real gap is that
-**batch E has no live suite** — see the top of "What is next".
+status table.** Batches A–F are done, deployed and live-gated.
 
 **1.7.2 fixed the themes pass, which shipped in 1.7.0 doing nothing visible.**
 Every layer worked except the numbers: the clamps in `build-themes.py` were set
@@ -618,28 +699,77 @@ that differentiates without risk, plus the pack's own border colour and a
 `--bg-chrome` stepped by a geometry-derived softness score. **No `surface.*`
 token is mapped onto a neutral**: that is the 1.2.0 defect and nothing has made
 it safe. Sweep: no illegible themes, worst element 5.07, four themes better than
-their 1.6.1 figures. One thing left for Nigel: `industrial-day-cyan` resolves
-`--error` and `--success` to greys, because that pack's red cannot clear 4.5:1 on
-its light surfaces without losing its hue — accepting less contrast or repainting
-the pack are both his call, not the generator's.
+their 1.6.1 figures. One thing was left open at 1.7.0 —
+`industrial-day-cyan` resolving `--error` and `--success` to greys — and it was
+RESOLVED at 1.12.0. The recorded cause was wrong: that pack's red clears 4.5:1
+easily. What the generator picked was never a red. See "Status colours" below.
 
-**FIRST, before anything else — batch E has NO LIVE SUITE.** Every other batch
-is gated by one (`validate_v11`, `v13`, `v14`, `v15_*`, `v16_nav`); named
-queries shipped in 1.7.0 with 127 Java tests and 134 Vitest tests and **nothing
-that drives the real browser against the real gateway**. Unit tests did not catch
-the batch-D caret bug, the batch-D `finished.stdout` staleness or the 1.6.1
-namespace defect either. `validate_v17_nq.py` should create a fixture query, edit
-its SQL, set typed parameters, run the test tab against `Postgres_Test` and
-assert the returned rows, prove the draft (not the saved copy) is what runs,
-round-trip every settings field, rename a query AND a folder, and — the one only
-a live gate can do — open one of the 37 dead version-1 queries in `Whiteboard`,
-confirm the legacy badge, save it, and confirm `system.db.runNamedQuery` then
-succeeds where it previously threw. Until that exists, batch E is built and
-deployed but not PROVED.
+### Status colours — three themes, not one (1.12.0)
 
-**Then — the review against purpose.** Once D and E are live-gated: review the
-module as a product against Nigel's brief and deliver recommendations for going
-beyond the Designer (offer the write-up as an artifact page).
+`industrial-day-cyan`'s grey error/success was recorded at 1.7.0 as a contrast
+problem and left as Nigel's call. Measured on 04/09/2026, that was the wrong
+diagnosis and the wrong SIZE. What shipped:
+
+    industrial-day-cyan     error #545454   success #4f545e   — two greys, 13 apart
+    leather-night-tan       error = warning = success = #c9996e
+    leather-parchment-tan   error = warning = success = #7a550b
+
+Two themes painted all three status colours as ONE hex. Nothing caught it
+because nothing had ever compared one status token against another, or asked
+whether either was a colour at all.
+
+The cause is the 1.2.0 lesson one level down. `text.status-alarm` is not the
+pack's alarm colour — it is the INK that goes on an alarm chip, and in a light
+industrial pack that ink is `#FFFFFF`. `pick_legible` takes the first token
+PRESENT (correctly: that is what stops a brand teal being swapped for an info
+blue), so a present-but-achromatic ink token beat the real signal colour every
+time, and `lift_to_contrast` could not rescue it because lightness is the only
+axis it moves.
+
+Three changes in `tools/build-themes.py`, and the third is the one that matters:
+
+- a signal role SKIPS a candidate below `SIGNAL_CHROMA_MIN` (28/255, read off
+  the measured spread of all 110 candidates — the rejects score 0…26 and the
+  keeps start at 31, and the bar goes in the one gap there is);
+- `border.danger` moved ahead of `accent.alarm-high` in the `--error` list,
+  because both industrial packs paint "alarm-high" AMBER — high PRIORITY, not
+  danger — and taking it would have made `--error` and `--warning` one colour;
+- `differentiate_signals` pulls apart status colours that resolved to one
+  another, by WEIGHT only. `nord-light-frost` needed it: Nord's red and its
+  orange, both darkened for a light page, arrived as `#8a464c` and `#7b4f42`,
+  scoring 19.9 against a bar of 28. A status colour is never ROTATED — an amber
+  turned 50° to clear a red is a green, and a green warning is worse than a
+  near-red one.
+
+Both new assertions were proved to REFUSE the 1.11.0 build before being
+trusted, and `themes.test.ts` pins the property on the COMMITTED css so it
+holds without running Python. The shipped values now: `industrial-day-cyan`
+error `#a71b1b`, warning `#8c3d0d`, success `#0d632d`. Eighteen lines of the
+generated stylesheet changed and nothing else moved.
+
+**Batch E is live-gated as of 1.12.1 — `validate_v17_nq.py`, 45/45.** It
+creates a fixture query and checks it lands on the defaults the contract pins;
+saves SQL and settings against one signature and reads every field back;
+proves the five refusals (an unknown settings key, `Date`, `dataType`, an
+unknown `cacheUnit`, an unknown type) are 400s that NAME what they refused and
+change nothing; drives the Testing tab and asserts the draft on screen is what
+ran, beside an API run with no `sql` that returns the SAVED query's columns;
+checks the typed coercions both ways; and repairs a real version-1 query in
+`Whiteboard` — refused with a 409 before, run by the platform after, SQL
+byte-identical across the repair. That last one leaves the gateway changed, in
+one direction only and deliberately: there is no way to write a version-1
+resource back, and no way to test the repair without doing it. `Whiteboard` had
+29 dead queries; the suite takes one per run and skips with a reason when none
+is left.
+
+Two suite bugs it exposed about itself, both worth remembering: a legacy badge
+only exists on a RENDERED row and the tree ships collapsed, and quick open ranks
+the listing the CLIENT holds — searching for a name changed through the API is
+testing the 20 s watch interval, not the palette.
+
+**Next — the review against purpose.** Every batch is live-gated now: review
+the module as a product against Nigel's brief and deliver recommendations for
+going beyond the Designer (offer the write-up as an artifact page).
 
 **Open decisions for Nigel**, parked, none blocking:
 - `terminal.docker` default (currently true — the larger grant, on by default).

@@ -678,7 +678,11 @@ def border_from_pack(tokens: dict, page, dark: bool, low: float = 1.5,
 # pick_legible.
 ACCENT_SOURCES: dict[str, tuple[str, ...]] = {
     "--accent-primary": ("accent.primary", "text.status-info", "accent.alarm-low"),
-    "--error": ("text.status-alarm", "accent.alarm-high", "border.danger",
+    # `border.danger` sits ahead of `accent.alarm-high` because the two
+    # industrial packs paint "alarm-high" AMBER — high PRIORITY, not danger —
+    # and taking it would have made --error and --warning one colour. Where a
+    # pack sets both, `text.status-alarm` is still first and this never fires.
+    "--error": ("text.status-alarm", "border.danger", "accent.alarm-high",
                 "accent.delta-down", "accent.danger"),
     "--warning": ("text.status-warn", "text.readout-value-warn", "accent.alarm-med"),
     "--success": ("text.status-ok", "accent.delta-up", "surface.pill-dot"),
@@ -713,6 +717,63 @@ SURFACE_KEYS = ("--bg-primary", "--bg-secondary", "--bg-tertiary", "--bg-chrome"
 
 MIN_ACCENT_CONTRAST = 4.5
 MIN_TEXT_CONTRAST = 4.5
+
+# ---- a signal colour has to BE a colour ------------------------------------
+#
+# The roles below exist to be told apart by HUE at a glance: an error, a
+# warning, a success. A grey one is not a dimmer version of the right answer,
+# it is the wrong answer — and until 1.11.0 three of the ten packs shipped one.
+#
+# The cause is the 1.2.0 lesson again, one level down. `text.status-alarm` is
+# not the pack's alarm colour: it is the INK that goes ON an alarm chip, and in
+# a light industrial pack that ink is #FFFFFF. `pick_legible` takes the first
+# token PRESENT — correctly, so a brand teal is never swapped for an info blue
+# — so a present-but-achromatic ink token beat the real signal colour every
+# time. Measured 04/09/2026 across the ten packs:
+#
+#     industrial-day-cyan     alarm #FFFFFF   ok #6B7280   -> #545454 / #4f545e
+#     leather-night-tan       alarm #1b120a   ok #1b120a   -> ONE colour, twice
+#     leather-parchment-tan   alarm #fdf6e8   ok #fdf6e8   -> ONE colour, twice
+#
+# Two themes painted their error and their success identically. That is not the
+# cosmetic near-miss it was recorded as at 1.7.0; it is a signal that cannot
+# signal, and no amount of contrast lifting fixes it because lightness is the
+# only axis lifting moves.
+#
+# So a signal role SKIPS a candidate that carries no colour, and falls through
+# to the next — which in all three packs is the colour a reader would have
+# named if asked. Every other role, `--syntax-comment` above all, is exempt: a
+# comment is SUPPOSED to be grey, and `text.muted` is the right token for it.
+#
+# The floor is 28/255, read off the measured spread of every signal candidate
+# in all ten packs, not chosen. Sorted, the 110 candidates run:
+#
+#     0, 0, 0, 17, 17, 17, 21, 21, 21, 21, 26, 26 | 31, 31, 31, 32, 47, 49, ...
+#
+# and the bar goes in the one gap there is. Everything below it is a white, a
+# near-black or a Tailwind slate — ink for a chip, every one. Everything above
+# it is a red, an amber or a green. Nothing lands within 2/255 of the bar in
+# either direction, and no theme that was already right moves: `nord-light-frost`
+# keeps #657657 at 31 and `nord-dark-frost` keeps #c5d6b6 at 32.
+#
+# It is a narrow gap, and that is the finding rather than a weakness of the
+# method: a pack either states a signal colour or states the ink that goes on
+# one, and the two do not overlap.
+SIGNAL_ROLES = frozenset({"--error", "--warning", "--success"})
+SIGNAL_CHROMA_MIN = 28 / 255
+
+# The bar the SHIPPED colour is held to, and it is a different measure on
+# purpose. Chroma is the right test on a pack's stated token, where a white ink
+# scores 0 and a red scores 182. It is the wrong test afterwards, because
+# `lift_to_contrast` moves LIGHTNESS to reach 4.5:1 and chroma is capped by
+# lightness — `nord-light-frost`'s green #657657 is a legitimate 31 before the
+# lift and 25 after it, having lost nothing but brightness.
+#
+# HSL saturation is lightness-invariant, so it survives the lift and still reads
+# zero on a grey. The shipped spread across the ten themes is 0.15 (that same
+# Nord green) to 1.00; 0.12 clears the lowest with margin and still refuses
+# 1.11.0's own output, where `industrial-day-cyan` shipped 0.00 and 0.09.
+SIGNAL_SATURATION_MIN = 0.12
 
 # How much of the theme's brand accent is stirred into the neutral ground.
 #
@@ -916,7 +977,7 @@ def _ratio(a: tuple[float, float, float], b: tuple[float, float, float]) -> floa
 
 
 def pick_legible(tokens: dict, names: tuple[str, ...], surfaces: list, dark: bool,
-                 minimum: float) -> tuple[str, bool]:
+                 minimum: float, chroma_floor: float = 0.0) -> tuple[str, bool]:
     """
     The first token the pack actually defines, lifted until it is legible.
 
@@ -936,6 +997,11 @@ def pick_legible(tokens: dict, names: tuple[str, ...], surfaces: list, dark: boo
             continue
         rgb = _parse(raw)
         if rgb is None:
+            continue
+        # A signal role skips a colourless candidate — see SIGNAL_CHROMA_MIN.
+        # Lifting cannot rescue one: it moves lightness only, so a white
+        # alarm ink comes back a grey alarm ink.
+        if chroma(rgb) < chroma_floor:
             continue
         lifted, adjusted = lift_to_contrast(rgb, surfaces, minimum, dark)
         return _hex(lifted), adjusted
@@ -983,6 +1049,74 @@ def _separation(a, b) -> float:
     turn = abs(hue_a - hue_b)
     hue_gap = min(turn, 1.0 - turn) * 360 * min(sat_a, sat_b)
     return hue_gap + abs(light_a - light_b) * 300 + abs(sat_a - sat_b) * 120
+
+
+def weigh_apart(rgb, kept, surfaces: list, dark: bool):
+    """
+    Separate a colour from the ones already placed by MOVING ITS WEIGHT.
+
+    Hue intact, which is why this is the whole of the treatment for a status
+    colour and only the fallback for a syntax one: a darker amber is still an
+    amber, but an amber rotated 50 degrees to clear a red is a green, and a
+    warning that is green is worse than a warning that is nearly a red.
+
+    Tried in the direction that cannot cost contrast first — darker on a light
+    theme, lighter on a dark one. Returns None when nothing separates.
+    """
+    hue, sat, lightness = _to_hsl(rgb)
+    toward = 1 if dark else -1
+    for shift in (0.06, 0.10, 0.15, 0.21):
+        for direction in (toward, -toward):
+            moved = min(0.97, max(0.03, lightness + direction * shift))
+            trial = _from_hsl((hue, sat, moved))
+            trial, _ = lift_to_contrast(trial, surfaces, MIN_ACCENT_CONTRAST, dark)
+            if all(_separation(trial, other) >= SYNTAX_SEPARATION
+                   for _, other in kept):
+                return trial
+    return None
+
+
+# The status colours, in the order they keep their own hue when two collide.
+#
+# Error first and it never moves: red is the one colour in an IDE whose meaning
+# is not negotiable. Success next. Warning is the one that gives way, and it is
+# the only one that can afford to — amber has yellow on one side and orange on
+# the other, and a reader calls all three "warning".
+SIGNAL_PRIORITY = ("--error", "--success", "--warning")
+
+
+def differentiate_signals(out: dict, surfaces: list, dark: bool, pack_id: str,
+                          report: list[str]) -> None:
+    """
+    Pull apart status colours that resolved to one another.
+
+    `nord-light-frost` is why this exists: Nord's red and its orange, both
+    darkened for a light page, arrived as #8a464c and #7b4f42 — a maroon and a
+    brown, 22 degrees and 4% of lightness apart, scoring 19.9 against a bar of
+    28. Neither is grey and neither is illegible, so nothing before this caught
+    them; they are simply the same colour to anyone not holding a swatch.
+
+    Weight only — see weigh_apart for why a status colour is never rotated.
+    """
+    kept: list[tuple[str, tuple[float, float, float]]] = []
+    for role in SIGNAL_PRIORITY:
+        rgb = _parse(out[role])
+        if rgb is None:
+            continue
+        clash = next((name for name, other in kept
+                      if _separation(rgb, other) < SYNTAX_SEPARATION), None)
+        if clash is None:
+            kept.append((role, rgb))
+            continue
+        trial = weigh_apart(rgb, kept, surfaces, dark)
+        if trial is None:
+            kept.append((role, rgb))
+            report.append(f"  {pack_id}: {role} STAYS on {clash} — no weight "
+                          f"separates them without rotating its hue")
+            continue
+        out[role] = _hex(trial)
+        kept.append((role, trial))
+        report.append(f"  {pack_id}: {role} weighted off {clash} to {out[role]}")
 
 
 def differentiate_syntax(out: dict, surfaces: list, dark: bool, pack_id: str,
@@ -1038,22 +1172,12 @@ def differentiate_syntax(out: dict, surfaces: list, dark: bool, pack_id: str,
             # lighter blue are two colours, where two blues at one weight are
             # one. Tried in the direction that cannot cost contrast first:
             # darker on a light theme, lighter on a dark one.
-            toward = 1 if dark else -1
-            for shift in (0.06, 0.10, 0.15, 0.21):
-                for direction in (toward, -toward):
-                    trial = _from_hsl((hue, sat, min(0.97, max(0.03,
-                                                              lightness + direction * shift))))
-                    trial, _ = lift_to_contrast(trial, surfaces, MIN_ACCENT_CONTRAST, dark)
-                    if all(_separation(trial, other) >= SYNTAX_SEPARATION
-                           for _, other in kept):
-                        out[role] = _hex(trial)
-                        kept.append((role, trial))
-                        report.append(f"  {pack_id}: {role} weighted off {clash} "
-                                      f"to {out[role]}")
-                        break
-                else:
-                    continue
-                break
+            trial = weigh_apart(rgb, kept, surfaces, dark)
+            if trial is not None:
+                out[role] = _hex(trial)
+                kept.append((role, trial))
+                report.append(f"  {pack_id}: {role} weighted off {clash} "
+                              f"to {out[role]}")
             else:
                 kept.append((role, rgb))
                 report.append(f"  {pack_id}: {role} STAYS on {clash} — no hue or "
@@ -1262,12 +1386,15 @@ def block(pack: dict, report: list[str]) -> str:
 
     for role, names in ACCENT_SOURCES.items():
         minimum = 3.0 if role == "--syntax-comment" else MIN_ACCENT_CONTRAST
-        colour, adjusted = pick_legible(tokens, names, surfaces, dark, minimum)
+        floor = SIGNAL_CHROMA_MIN if role in SIGNAL_ROLES else 0.0
+        colour, adjusted = pick_legible(tokens, names, surfaces, dark, minimum,
+                                        floor)
         out[role] = colour
         if adjusted:
             report.append(f'  {pack["id"]}: {role} nudged to {colour} '
                           f'(no pack token cleared {minimum}:1 on all surfaces)')
 
+    differentiate_signals(out, surfaces, dark, pack["id"], report)
     differentiate_syntax(out, surfaces, dark, pack["id"], report)
 
     # Emitted after the accents, because the glow is painted in the theme's own
@@ -1428,6 +1555,31 @@ def generate(packs_dir: pathlib.Path) -> str:
                 "the label on a filled primary button; neither black nor white "
                 "clears here, so the accent itself needs moving."
             )
+        # A signal that cannot signal. `leather-night-tan` and
+        # `leather-parchment-tan` painted --error and --success the SAME hex,
+        # and `industrial-day-cyan` painted both grey; all three were green
+        # under every check this file had, because nothing ever compared the
+        # two roles or asked whether either was a colour at all.
+        for role in sorted(SIGNAL_ROLES):
+            saturation = _to_hsl(_parse(out[role]))[1]
+            if saturation < SIGNAL_SATURATION_MIN:
+                raise SystemExit(
+                    f"{pack['id']}: {role} resolves to {out[role]}, a saturation of "
+                    f"{saturation:.2f} under the {SIGNAL_SATURATION_MIN:.2f} floor. "
+                    "A grey error is not a quieter error, it is no error — the pack "
+                    "token it came from is ink for a chip, not the chip's colour. "
+                    "See SIGNAL_ROLES."
+                )
+        for first, second in itertools.combinations(sorted(SIGNAL_ROLES), 2):
+            gap = _separation(_parse(out[first]), _parse(out[second]))
+            if gap < SYNTAX_SEPARATION:
+                raise SystemExit(
+                    f"{pack['id']}: {first} ({out[first]}) and {second} "
+                    f"({out[second]}) separate by only {gap:.1f}, under "
+                    f"{SYNTAX_SEPARATION}. An error and a success a reader cannot "
+                    "tell apart is the one failure a status colour must not have."
+                )
+
         roles = [r for r in SYNTAX_PRIORITY if r in out]
         for first, second in itertools.combinations(roles, 2):
             gap = _separation(_parse(out[first]), _parse(out[second]))

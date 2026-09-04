@@ -184,6 +184,22 @@ export class ApiError extends Error {
   get isMissingBaseSignature(): boolean {
     return this.status === 428;
   }
+
+  /**
+   * The session is gone — the gateway restarted, or the session timed out.
+   *
+   * Its own predicate because it is the one failure where the message is the
+   * least useful part of the answer. Nigel, 04/09/2026, on losing a session
+   * mid-edit: *"it came up with an authentication error... now I could
+   * potentially lose work. how are we managing this?"* — what the user needs
+   * is a way back in and their buffer left alone, not the status.
+   *
+   * 403 counts as well as 401: the gateway answers 403 when the session is
+   * valid but no longer carries the role, which happens on the same restart.
+   */
+  get isUnauthenticated(): boolean {
+    return this.status === 401 || this.status === 403;
+  }
 }
 
 /**
@@ -225,10 +241,20 @@ export async function toApiError(response: Response): Promise<ApiError> {
       // Error bodies are {error: "..."} — but a proxy or the servlet container
       // can answer with plain HTML, so parsing must not itself throw.
       try {
-        const parsed = JSON.parse(text) as { error?: string };
-        message = parsed.error ?? text;
+        // `error` is this module's own shape. `message` is what the servlet
+        // container answers with — its 401 body is
+        // `{"message":"Unauthorized","url":"...","status":"401"}`, and taking
+        // the whole object put that JSON on screen verbatim under "Could not
+        // save api:" (Nigel, 04/09/2026). Read the field, never the envelope.
+        const parsed = JSON.parse(text) as { error?: string; message?: string };
+        message = parsed.error ?? parsed.message ?? `HTTP ${response.status}`;
       } catch {
-        message = text;
+        // Not JSON at all: a proxy's HTML error page, most often. Its markup is
+        // not a message either, so only short plain text is used.
+        const plain = text.trim();
+        message = plain.length <= 200 && !plain.startsWith('<')
+          ? plain
+          : `HTTP ${response.status}`;
       }
     }
   } catch {

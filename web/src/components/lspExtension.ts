@@ -423,10 +423,26 @@ function maybeSignature(client: LspClient, uri: string, update: ViewUpdate): voi
  */
 const lspTheme = EditorView.theme({
   '.cm-tooltip': {
-    backgroundColor: 'var(--surface)',
+    // `--glass-panel`, NOT `--surface`. A tooltip floats OVER CODE, and on the
+    // two glass packs `--surface` is the pack's own film,
+    // `rgba(255,255,255,0.10)` — so the hover card was 10% opaque and the
+    // lines underneath read straight through the documentation on top of them
+    // (Nigel, 04/09/2026: "the hover over information display here needs to be
+    // more solid as its not readable right now").
+    //
+    // `--glass-panel` is that same film ALREADY COMPOSITED over the page and
+    // re-emitted at 94%: dense enough to hide what is behind it, and on a
+    // solid pack it is simply the surface colour. It is what the command
+    // palette and the dialogs already use, for exactly this reason — the
+    // tooltip was the one floating layer that never got it.
+    backgroundColor: 'var(--glass-panel)',
+    backdropFilter: 'var(--blur-panel)',
     color: 'var(--text-primary)',
     border: '1px solid var(--border-light)',
     borderRadius: 'var(--radius)',
+    // A shadow as well as a fill: over code, an edge alone does not separate
+    // the card from the text it covers.
+    boxShadow: 'var(--shadow-popup)',
   },
   '.cm-tooltip.cm-tooltip-autocomplete > ul': {
     fontFamily: 'var(--font-mono)',

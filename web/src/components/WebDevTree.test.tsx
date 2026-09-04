@@ -55,7 +55,20 @@ function show(entries: ScriptEntry[], props: Partial<React.ComponentProps<typeof
       {...props}
     />
   );
+  // This tree SHIPS COLLAPSED from 1.12.2, like the other two, so every check
+  // below about what an endpoint contains has to open it first. Opening is
+  // one click on the row, and going through the real control is the point:
+  // reaching into the state would stop the tests noticing if the chevron ever
+  // stopped working.
+  openAll();
   return result;
+}
+
+/** Click every closed endpoint row open. */
+function openAll() {
+  for (const header of screen.queryAllByRole('button', { expanded: false })) {
+    fireEvent.click(header);
+  }
 }
 
 describe('a python endpoint', () => {
@@ -179,7 +192,53 @@ describe('formatSize', () => {
 });
 
 describe('expansion', () => {
-  it('collapses an endpoint and leaves it collapsed', () => {
+  it('ships collapsed — nothing remembered means nothing open', () => {
+    // Nigel, 04/09/2026: "I want by default the WebDev to start shrunk".
+    // It tracked the COLLAPSED keys until 1.12.2, so an empty set meant every
+    // endpoint open — and a python endpoint opens EIGHT rows, one per verb.
+    render(
+      <WebDevTree endpoints={[ADMIN, LIB, CELL3D]} selectedPath={null}
+        onOpen={vi.fn()} onOpenFile={vi.fn()} onAddMethod={vi.fn()} onEditConfig={vi.fn()} />
+    );
+    expect(screen.queryAllByRole('button', { expanded: true })).toHaveLength(0);
+    expect(screen.queryByText('doGet')).toBeNull();
+    expect(screen.queryByText('three.min.js')).toBeNull();
+    // The endpoints themselves are still listed — collapsed, not hidden.
+    expect(screen.getByText('admin')).toBeTruthy();
+    expect(screen.queryAllByRole('button', { expanded: false })).toHaveLength(3);
+  });
+
+  it('opens one endpoint and leaves the others shut', () => {
+    render(
+      <WebDevTree endpoints={[ADMIN, LIB]} selectedPath={null}
+        onOpen={vi.fn()} onOpenFile={vi.fn()} onAddMethod={vi.fn()} onEditConfig={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'admin', expanded: false }));
+    expect(screen.getByText('doGet')).toBeTruthy();
+    expect(screen.queryByText('three.min.js')).toBeNull();
+    expect(screen.queryAllByRole('button', { expanded: true })).toHaveLength(1);
+  });
+
+  it('remembers what was opened across an unmount, and only that', () => {
+    // The whole point of the sticky set: switching views REMOVES this tree
+    // (the activity bar is a `? :` chain), so without it every branch would
+    // shut again on the way back.
+    const first = render(
+      <WebDevTree endpoints={[ADMIN, LIB]} selectedPath={null}
+        onOpen={vi.fn()} onOpenFile={vi.fn()} onAddMethod={vi.fn()} onEditConfig={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'admin', expanded: false }));
+    first.unmount();
+
+    render(
+      <WebDevTree endpoints={[ADMIN, LIB]} selectedPath={null}
+        onOpen={vi.fn()} onOpenFile={vi.fn()} onAddMethod={vi.fn()} onEditConfig={vi.fn()} />
+    );
+    expect(screen.getByText('doGet')).toBeTruthy();
+    expect(screen.queryByText('three.min.js')).toBeNull();
+  });
+
+  it('closes an endpoint again, and forgets it', () => {
     show([ADMIN]);
     const header = screen.getByRole('button', { expanded: true });
     fireEvent.click(header);

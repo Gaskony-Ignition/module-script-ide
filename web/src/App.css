@@ -159,3 +159,37 @@
   white-space: nowrap;
   border: 0;
 }
+
+/*
+ * The session-has-ended bar.
+ *
+ * Deliberately louder than the stale bar and deliberately not a notice: it is
+ * the one failure where the user has unsaved work and no way to write it
+ * (Nigel, 04/09/2026). It sits above the editor, uses the theme's error colour
+ * for its edge rather than its fill — a solid red band over code is hard to
+ * read past — and stays until it is dismissed or the save succeeds.
+ */
+.workspace-signedout {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-bottom: 2px solid var(--error);
+  color: var(--text-primary);
+}
+
+.workspace-signedout > svg {
+  color: var(--error);
+  flex: 0 0 auto;
+}
+
+/* The one grower: the message takes the slack, the buttons keep their size. */
+.workspace-signedout-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workspace-signedout .button {
+  flex: 0 0 auto;
+}

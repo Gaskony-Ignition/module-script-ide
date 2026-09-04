@@ -177,11 +177,47 @@ describe('saveScriptContent', () => {
     expect(failure.isConflict).toBe(false);
   });
 
-  it('falls back to the raw body when the error is not JSON', async () => {
+  it('does NOT put a proxy\'s HTML error page on screen as the message', async () => {
+    // It used to. Markup is not a message, and the notice strip is one line —
+    // so an HTML error page arrived as a wall of angle brackets under "Could
+    // not save". The status is the honest answer when the body is not one.
     fetchMock.mockResolvedValue(new Response('<html>403</html>', { status: 403 }));
     await expect(
       saveScriptContent({ project: 'P', path: LIBRARY_PATH, source: 'x', baseSignature: 's' })
-    ).rejects.toMatchObject({ status: 403, message: '<html>403</html>' });
+    ).rejects.toMatchObject({ status: 403, message: 'HTTP 403' });
+  });
+
+  it('keeps a short plain-text body, which IS a message', async () => {
+    fetchMock.mockResolvedValue(new Response('Gateway is starting', { status: 503 }));
+    await expect(
+      saveScriptContent({ project: 'P', path: LIBRARY_PATH, source: 'x', baseSignature: 's' })
+    ).rejects.toMatchObject({ status: 503, message: 'Gateway is starting' });
+  });
+
+  it('reads the container\'s 401 body by its FIELD, not as an envelope', async () => {
+    // Measured on the rig, 04/09/2026. The servlet container answers a 401
+    // with {message, url, status}, and taking the whole object printed that
+    // JSON verbatim on screen: `Could not save api: { "message":"Unauthorized",
+    // "url":"/data/scriptide/api/...", "status":"401" }` (Nigel).
+    fetchMock.mockResolvedValue(new Response(
+      JSON.stringify({ message: 'Unauthorized', url: '/data/scriptide/api/x', status: '401' }),
+      { status: 401 }
+    ));
+    await expect(
+      saveScriptContent({ project: 'P', path: LIBRARY_PATH, source: 'x', baseSignature: 's' })
+    ).rejects.toMatchObject({ status: 401, message: 'Unauthorized' });
+  });
+
+  it('flags 401 and 403 as the session being gone, and nothing else', async () => {
+    // The predicate the save path branches on: it is what puts up the
+    // "your session has ended" bar instead of a one-line notice.
+    for (const [status, expected] of [[401, true], [403, true], [409, false], [500, false]] as const) {
+      fetchMock.mockResolvedValue(new Response('{"error":"x"}', { status }));
+      const failure = await saveScriptContent({
+        project: 'P', path: LIBRARY_PATH, source: 'x', baseSignature: 's',
+      }).catch((e: unknown) => e);
+      expect((failure as ApiError).isUnauthenticated, `status ${status}`).toBe(expected);
+    }
   });
 
   it('omits the CSRF header when the session had no token', async () => {

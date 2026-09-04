@@ -12,7 +12,7 @@
  * and saves against that, which is exactly the overwrite the 409 prevented. It is
  * safe only because the other version is on screen beside it.
  */
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { diffLines } from '../workspace/lineDiff';
 import './ConflictDialog.css';
 
@@ -41,6 +41,31 @@ export default function ConflictDialog({
   onCancel,
 }: ConflictDialogProps) {
   const rows = useMemo(() => diffLines(mine, theirs), [mine, theirs]);
+  // A diff with nothing changed in it. It happens when the resource SIGNATURE
+  // moved and the bytes did not — a gateway restart re-stamps resources — and
+  // showing two identical columns with no comment is what Nigel hit on
+  // 04/09/2026: "when i click on the compare I couldn't see any differences".
+  // There were none. Saying so is the whole fix; guessing is not.
+  const identical = mine === theirs;
+  const changed = useMemo(
+    () => rows.filter((row) => row.kind !== 'same').length,
+    [rows]
+  );
+
+  /*
+   * Put the FIRST difference on screen.
+   *
+   * A conflict on line 400 of a 600-line script opens at line 1, and the
+   * reader's first act is to scroll looking for the colour. Scrolling to it is
+   * the difference between a diff that answers the question and one that sets
+   * a search task.
+   */
+  const firstChange = useRef<HTMLLIElement | null>(null);
+  useEffect(() => {
+    firstChange.current?.scrollIntoView({ block: 'center' });
+  }, [rows]);
+
+  let seenChange = false;
 
   // Escape cancels, as it does for every other modal here. Bound on the
   // document rather than the dialog: focus may be inside the diff panes, which
@@ -56,24 +81,53 @@ export default function ConflictDialog({
   return (
     <div className="conflict-backdrop" role="presentation">
       <div className="conflict-dialog" role="dialog" aria-modal="true" aria-labelledby="conflict-title">
-        <h2 id="conflict-title">{label} changed on the gateway</h2>
-        <p className="muted">
-          Somebody else saved this script after you opened it
-          {theirsOwner ? ` (${theirsOwner})` : ''}. Your changes were not written.
-        </p>
+        <h2 id="conflict-title">
+          {identical
+            ? `${label} — the gateway's copy is identical`
+            : `${label} changed on the gateway`}
+        </h2>
+        {identical ? (
+          <p className="muted">
+            The stored copy was re-saved{theirsOwner ? ` by ${theirsOwner}` : ''},
+            but its text is byte for byte what you have. Nothing of yours is at
+            risk. Reloading and keeping yours do the same thing here; either one
+            clears this.
+          </p>
+        ) : (
+          <p className="muted">
+            This script was written on the gateway after you opened it
+            {theirsOwner ? ` (${theirsOwner})` : ''}. Your changes were not saved.
+            {' '}
+            <strong>{changed}</strong> {changed === 1 ? 'line differs' : 'lines differ'} —
+            marked below.
+          </p>
+        )}
 
         <div className="conflict-diff" aria-label="Differences">
           <div className="conflict-column-heads">
             <span>Yours (in this tab)</span>
             <span>On the gateway</span>
           </div>
+          {identical && (
+            <p className="conflict-identical muted" role="status">
+              No differences. Every line below is the same on both sides.
+            </p>
+          )}
           <ol className="conflict-rows">
-            {rows.map((row, index) => (
-              <li key={index} className={`conflict-row conflict-${row.kind}`}>
+            {rows.map((row, index) => {
+              const isFirstChange = row.kind !== 'same' && !seenChange;
+              if (isFirstChange) seenChange = true;
+              return (
+              <li
+                key={index}
+                ref={isFirstChange ? firstChange : undefined}
+                className={`conflict-row conflict-${row.kind}`}
+              >
                 <code className="conflict-side">{row.left ?? ''}</code>
                 <code className="conflict-side">{row.right ?? ''}</code>
               </li>
-            ))}
+              );
+            })}
           </ol>
         </div>
 

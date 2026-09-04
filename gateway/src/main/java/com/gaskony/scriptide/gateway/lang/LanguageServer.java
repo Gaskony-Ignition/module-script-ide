@@ -539,13 +539,52 @@ public final class LanguageServer {
     }
 
     /**
+     * The top-level names this PROJECT puts into a script's namespace.
+     *
+     * <p>Its script-library roots: `MachineDemo.api` makes `MachineDemo` a name
+     * every script in that project can use without importing it. They appear
+     * nowhere in a file's source, so the unknown-name check must be told about
+     * them or it reports one per script — measured, 21 of them across the 38
+     * scripts on the module rig. See {@link UnknownNames#withoutProjectNames}.</p>
+     *
+     * <p>Empty when there is no index yet, which turns the check into "report
+     * only what is certain minus what we cannot see" — the safe direction.</p>
+     */
+    private java.util.Set<String> providedNames() {
+        if (projectIndex == null || project == null) {
+            return java.util.Set.of();
+        }
+        java.util.Set<String> roots = new java.util.HashSet<>();
+        for (String moduleName : projectIndex.modules(project).keySet()) {
+            int dot = moduleName.indexOf('.');
+            roots.add(dot < 0 ? moduleName : moduleName.substring(0, dot));
+        }
+        return roots;
+    }
+
+    /**
      * Publish diagnostics for one document.
      *
-     * <p>P5 ships ONE check: the syntax error from the real Jython 2.7 parser.
-     * That is deliberate. A false positive costs more trust than ten missed
-     * problems, and the client-side grammar is Python 3 — so nothing but the real
-     * parser is allowed to say a line is wrong. Jython reports only the first error
-     * per parse, which matches the Designer's single squiggle.</p>
+     * <p>TWO checks, and the reasoning behind each is opposite.</p>
+     *
+     * <p>The SYNTAX ERROR comes from the real Jython 2.7 parser and nothing
+     * else — the client-side grammar is Python 3, so nothing but the
+     * interpreter's own parser is allowed to say a line is wrong. Jython
+     * reports only the first error per parse, which matches the Designer's
+     * single squiggle.</p>
+     *
+     * <p>The UNKNOWN NAME is a warning, added in 1.13.0 (Nigel, 04/09/2026:
+     * "I can put absolute garbage in here and it doesn't show up as an error
+     * which it really should" — {@code j;sdfj;asdfjk;dksfj}, which is four
+     * valid expression statements and fails only at run time). It is
+     * deliberately loose: a name is reported only when it is bound NOWHERE in
+     * the module, is not a builtin, and is not one of the names the platform
+     * injects. Every scope rule is given up to keep it from ever marking
+     * working code — see {@link UnknownNames}.</p>
+     *
+     * <p>Severity 2, not 1. A name this module never binds can still exist at
+     * run time through a mechanism the parser cannot see, and an ERROR that
+     * turns out to be fine is how a reader learns to stop reading the marks.</p>
      */
     private void publishDiagnostics(String uri) {
         TextDocument document = documents.get(uri);
@@ -574,6 +613,32 @@ public final class LanguageServer {
             diagnostic.addProperty("message", message);
             diagnostics.add(diagnostic);
         });
+
+        for (UnknownNames.Unknown unknown
+                : UnknownNames.withoutProjectNames(symbols.unknownNames(), providedNames())) {
+            // The AST reports 1-based lines and 0-based columns; LSP wants both
+            // 0-based. Getting this wrong shifts every mark by one line, which
+            // reads as an editor bug rather than an indexer one.
+            int line = Math.max(0, unknown.line() - 1);
+            JsonObject start = new JsonObject();
+            start.addProperty("line", line);
+            start.addProperty("character", unknown.column());
+            JsonObject end = new JsonObject();
+            end.addProperty("line", line);
+            end.addProperty("character", unknown.column() + unknown.name().length());
+            JsonObject range = new JsonObject();
+            range.add("start", start);
+            range.add("end", end);
+            JsonObject diagnostic = new JsonObject();
+            diagnostic.add("range", range);
+            diagnostic.addProperty("severity", 2);   // Warning — see above
+            diagnostic.addProperty("source", "scriptide");
+            diagnostic.addProperty("message",
+                "'" + unknown.name() + "' is not defined anywhere in this script, "
+                    + "is not a builtin, and is not a name Ignition provides. "
+                    + "It will raise NameError if this line runs.");
+            diagnostics.add(diagnostic);
+        }
 
         JsonObject params = new JsonObject();
         params.addProperty("uri", uri);

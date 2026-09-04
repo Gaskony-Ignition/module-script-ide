@@ -73,7 +73,16 @@ export default function WebDevTree({
   // Sticky across an unmount — see useStickySet. This tree in particular was
   // called out for it: "everytime I go to that tab they return to being fully
   // expanded regardless of what I set it to" (Nigel, 03/09/2026).
-  const [collapsed, setCollapsed] = useStickySet('webdev.collapsed');
+  //
+  // Tracked as EXPANDED, like the script and named-query trees, so the default
+  // falls out of the empty set: this tree shipped tracking the COLLAPSED keys
+  // instead, which made "nothing remembered yet" mean "everything open" — and
+  // an eight-verb endpoint opens eight rows, so a project with six endpoints
+  // landed on fifty rows to scroll past (Nigel, 04/09/2026: "I want by default
+  // the WebDev to start shrunk but remember what i've expanded between tabs").
+  // The key is renamed with it, so a set stored by the old build is not read
+  // back with its meaning inverted.
+  const [expanded, setExpanded] = useStickySet('webdev.expanded');
 
   const sorted = useMemo(
     () => [...endpoints].sort((a, b) => a.name.localeCompare(b.name)),
@@ -81,7 +90,7 @@ export default function WebDevTree({
   );
 
   function toggle(key: string) {
-    setCollapsed((previous) => {
+    setExpanded((previous) => {
       const next = new Set(previous);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -115,7 +124,7 @@ export default function WebDevTree({
         <ul className="file-tree-list">
           {sorted.map((entry) => {
             const key = `wd:${entry.path}`;
-            const isCollapsed = collapsed.has(key);
+            const isCollapsed = !expanded.has(key);
             const implemented = new Set(entry.methods ?? []);
             // Absent means python: that is what every endpoint was assumed to
             // be before 1.9.0, and an older gateway sends no discriminant.

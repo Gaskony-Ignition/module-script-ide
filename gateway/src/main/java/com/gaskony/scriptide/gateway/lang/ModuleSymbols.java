@@ -68,15 +68,18 @@ public final class ModuleSymbols {
     private final String syntaxError;
     private final int errorLine;
     private final int errorColumn;
+    private final List<UnknownNames.Unknown> unknownNames;
 
     private ModuleSymbols(String moduleName, List<Symbol> symbols, List<ImportBinding> imports,
-                          String syntaxError, int errorLine, int errorColumn) {
+                          String syntaxError, int errorLine, int errorColumn,
+                          List<UnknownNames.Unknown> unknownNames) {
         this.moduleName = moduleName;
         this.symbols = List.copyOf(symbols);
         this.imports = List.copyOf(imports);
         this.syntaxError = syntaxError;
         this.errorLine = errorLine;
         this.errorColumn = errorColumn;
+        this.unknownNames = List.copyOf(unknownNames);
     }
 
     public String moduleName() {
@@ -106,6 +109,16 @@ public final class ModuleSymbols {
         return errorColumn;
     }
 
+    /**
+     * Names this module reads and never binds — see {@link UnknownNames}.
+     *
+     * <p>Always empty for a module that does not parse: half an AST binds half
+     * its names, and the rest would be reported as unknown.</p>
+     */
+    public List<UnknownNames.Unknown> unknownNames() {
+        return unknownNames;
+    }
+
     /** Find a top-level symbol by name. */
     public Optional<Symbol> find(String name) {
         return symbols.stream()
@@ -130,11 +143,13 @@ public final class ModuleSymbols {
             if (parsed instanceof Module module) {
                 collect(module.getInternalBody(), null, symbols, imports);
             }
-            return new ModuleSymbols(moduleName, symbols, imports, null, 0, 0);
+            return new ModuleSymbols(moduleName, symbols, imports, null, 0, 0,
+                UnknownNames.find(parsed));
         } catch (ParseException e) {
             // ANTLR-level failure. Positions live on the exception itself.
             return new ModuleSymbols(moduleName, symbols, imports,
-                message(e), Math.max(0, e.line - 1), Math.max(0, e.charPositionInLine));
+                message(e), Math.max(0, e.line - 1), Math.max(0, e.charPositionInLine),
+                List.of());
         } catch (PyException e) {
             // Jython surfaces most syntax errors as a Python SyntaxError whose value
             // carries (msg, (file, lineno, offset, text)). Measured in S1: lineno and
@@ -144,7 +159,7 @@ public final class ModuleSymbols {
         } catch (RuntimeException e) {
             logger.debug("Unexpected parse failure for {}: {}", moduleName, e.toString());
             return new ModuleSymbols(moduleName, symbols, imports,
-                "Could not parse: " + e.getMessage(), 0, 0);
+                "Could not parse: " + e.getMessage(), 0, 0, List.of());
         }
     }
 
@@ -176,7 +191,7 @@ public final class ModuleSymbols {
                     line = Math.max(0, ((org.python.core.PyObject) where.pyget(1)).asInt() - 1);
                     column = Math.max(0, ((org.python.core.PyObject) where.pyget(2)).asInt());
                 }
-                return new ModuleSymbols(moduleName, symbols, imports, text, line, column);
+                return new ModuleSymbols(moduleName, symbols, imports, text, line, column, List.of());
             }
         } catch (RuntimeException ignored) {
             // Fall through to the attribute form below.
@@ -198,7 +213,7 @@ public final class ModuleSymbols {
         } catch (RuntimeException ignored) {
             // Position unavailable — still report the error, just at the top.
         }
-        return new ModuleSymbols(moduleName, symbols, imports, text, line, column);
+        return new ModuleSymbols(moduleName, symbols, imports, text, line, column, List.of());
     }
 
     private static String message(ParseException e) {

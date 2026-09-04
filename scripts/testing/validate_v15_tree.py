@@ -24,17 +24,20 @@ these four defects lives at the browser/gateway boundary:
             on the TAB itself (`(Read-Only)`), not only in the settings-strip
             notice below it.
 
-DRAFT and READONLY both need a project with a PARENT: `Site_Redgum_Sewer`
-inherits `Template` on this gateway, and as of 02/09/2026 it has no
-`ignition/update` resource of its own — SI_INHERIT_PROJECT overrides both.
+READONLY needs a project with a PARENT and DRAFT needs one with no
+`ignition/update` resource of its own. Both were pinned to `Site_Redgum_Sewer`
+until 04/09/2026, which this gateway does not have and never did — the
+water-suite projects live on another rig — so `select_option` threw and the
+run ended there with eleven checks unreported. Both fixtures are DISCOVERED
+now, preferring a project that has a parent; SI_INHERIT_PROJECT still pins one,
+and a name this gateway does not offer is a FAIL rather than a silent fallback.
 FOLDER needs a project with an empty script-python package; `Mining_Demo` is
 the known fixture, but this script also scans every mutable project for one,
 so a gateway where that project has since gained content still finds a
 fixture rather than skipping the check.
 
-Run against the real gateway after deploy_gate.py passes — this module is
-still 1.4.3 live as of writing, so this script cannot be run yet; it is
-written for the lead to run once 1.5.0 is deployed.
+Run:
+    WD_ALLOW_LOCAL_CONFIG=1 .venv-test/bin/python3 scripts/testing/validate_v15_tree.py
 """
 import os
 import sys
@@ -117,7 +120,12 @@ def expand_tree(page, passes=6):
             return
         for index in range(count):
             try:
-                shut.nth(index).click()
+                # A short timeout on purpose: opening a branch re-renders the
+                # list, so a locator taken a moment ago can name a node that is
+                # gone. That is expected and is swallowed below — but at the
+                # default 30 s each stale one cost half a minute, and three of
+                # them per pass put 90 s of nothing into every run.
+                shut.nth(index).click(timeout=1500)
             except Exception:
                 pass          # a click that re-renders the list is not a failure
         page.wait_for_timeout(120)
@@ -152,109 +160,178 @@ with sync_playwright() as p:
     rec("FOOTER: no 'offline' in the rail within 3s of landing",
         not saw_offline, repr(last_text))
 
-    # ---------- DRAFT: clicking an absent singleton does not write ----------
-    page.select_option(".workspace-project select", INHERIT_PROJECT)
-    page.wait_for_timeout(1500)
-    # Reopen: the tree is re-fetched on a project switch and ships collapsed.
-    expand_tree(page)
-    page.wait_for_timeout(2000)
+    # ---------- pick the fixture project instead of assuming one ----------
+    #
+    # `Site_Redgum_Sewer` was the named fixture and this gateway does not have
+    # it — the water-suite projects were never on the module rig. A hardcoded
+    # name meant `select_option` THREW, so the run died here and the eleven
+    # checks below it were neither passed nor recorded: a suite that reports
+    # nothing is worse than one that reports a skip.
+    #
+    # The FOLDER check has scanned for its own fixture since 1.5.0. This does
+    # the same. SI_INHERIT_PROJECT still wins, but only when the gateway
+    # actually offers it — silently ignoring a name the user set would hide a
+    # typo, so an absent one is a FAIL, not a fallback.
+    projects = json_of(api(page, "GET", "api/projects", "")).get("projects", [])
+    by_name = {q["name"]: q for q in projects}
+    offered = set(page.locator(".workspace-project select option")
+                  .evaluate_all("nodes => nodes.map(n => n.value)"))
+    wanted = os.environ.get("SI_INHERIT_PROJECT")
+    if wanted and wanted not in offered:
+        rec("FIXTURE: SI_INHERIT_PROJECT names a project this gateway has",
+            False, f"{wanted} is not in the project picker — {sorted(offered)}")
+        wanted = None
 
-    before = has_update(page, INHERIT_PROJECT)
-    rec("FIXTURE: the inherit project has no Update script yet",
-        not before, f"project={INHERIT_PROJECT}")
+    def draftable(name):
+        # DRAFT needs somewhere to CREATE ignition/update and delete it again;
+        # FOLDER_PROJECT_HINT is left out so the two checks cannot disturb each
+        # other's fixture.
+        return (name in offered and name != FOLDER_PROJECT_HINT
+                and by_name.get(name, {}).get("mutable")
+                and not has_update(page, name))
 
-    if before:
-        rec("DRAFT", False, "cannot test the draft path — Update already exists; "
-            "set SI_INHERIT_PROJECT to a project with none")
+    # A project with a PARENT first, because READONLY needs one and DRAFT does
+    # not care; then the rest, so DRAFT still runs on a gateway with no
+    # inheritance at all.
+    parented = sorted(q["name"] for q in projects if q.get("parent"))
+    orphans = sorted(q["name"] for q in projects if not q.get("parent"))
+    INHERIT_PROJECT = wanted or next(
+        (n for n in parented + orphans if draftable(n)), None)
+    if INHERIT_PROJECT:
+        print(f"  [FIXTURE] inherit project = {INHERIT_PROJECT} "
+              f"(parent={by_name.get(INHERIT_PROJECT, {}).get('parent')})")
+
+    if INHERIT_PROJECT is None:
+        for name in ("FIXTURE: the inherit project has no Update script yet",
+                     "DRAFT: clicking the absent row opens a tab, and writes NOTHING",
+                     "DRAFT: the new tab is marked dirty (unsaved) immediately",
+                     "DRAFT: closing the tab without saving still creates nothing",
+                     "DRAFT: closing the tab removed it",
+                     "DRAFT: Ctrl+S on the draft creates the resource for real",
+                     "DRAFT: the tab no longer shows dirty after a successful save",
+                     "CLEANUP: the fixture Update script was deleted",
+                     "FIXTURE: the inherit project has an inherited script to open"):
+            skip(name, "every mutable project on this gateway already has an "
+                       "Update script — DRAFT needs one without. Set "
+                       "SI_INHERIT_PROJECT, or delete the fixture script")
     else:
-        update_row = page.get_by_role("button", name="Update", exact=True)
-        update_row.click()
-        page.wait_for_timeout(800)
 
-        rec("DRAFT: clicking the absent row opens a tab, and writes NOTHING",
-            page.locator(".tab.is-active").count() == 1 and not has_update(page, INHERIT_PROJECT),
-            "")
-        rec("DRAFT: the new tab is marked dirty (unsaved) immediately",
-            page.locator(".tab.is-active .tab-dirty").count() == 1, "")
-
-        # Close without saving — must discard, not create.
-        page.locator(".tab.is-active .tab-close").click()
-        page.wait_for_timeout(500)
-        rec("DRAFT: closing the tab without saving still creates nothing",
-            not has_update(page, INHERIT_PROJECT), "")
-        rec("DRAFT: closing the tab removed it",
-            page.locator(".tab").count() == 0, "")
-
-        # Click it again, actually write something, and save for real.
-        update_row.click()
-        page.wait_for_timeout(800)
-        page.locator(".code-editor-host:not([style*=none]) .cm-content").click()
-        page.keyboard.type("print 1")
-        page.wait_for_timeout(400)
-        page.keyboard.press("Control+s")
+        # ---------- DRAFT: clicking an absent singleton does not write ----------
+        page.select_option(".workspace-project select", INHERIT_PROJECT)
         page.wait_for_timeout(1500)
+        # Reopen: the tree is re-fetched on a project switch and ships collapsed.
+        expand_tree(page)
+        page.wait_for_timeout(2000)
 
-        after_tree = tree_of(page, INHERIT_PROJECT)
-        created = next((e for e in after_tree if e.get("path") == "ignition/update"), None)
-        rec("DRAFT: Ctrl+S on the draft creates the resource for real",
-            created is not None, f"{created}")
-        rec("DRAFT: the tab no longer shows dirty after a successful save",
-            page.locator(".tab.is-active .tab-dirty").count() == 0, "")
+        before = has_update(page, INHERIT_PROJECT)
+        rec("FIXTURE: the inherit project has no Update script yet",
+            not before, f"project={INHERIT_PROJECT}")
 
-        # Leave the rig as found: delete the fixture this check just created.
-        if created:
-            d = api(page, "DELETE",
-                    f"api/scripts/content/{urllib.parse.quote('ignition/update', safe='')}"
-                    f"?project={urllib.parse.quote(INHERIT_PROJECT)}",
-                    csrf, if_match=created["signature"])
-            rec("CLEANUP: the fixture Update script was deleted",
-                d["status"] == 200 and not has_update(page, INHERIT_PROJECT),
-                f"HTTP {d['status']}")
-            # Close the now-stale tab too, or the next check's screenshot/DOM
-            # state carries a tab pointing at a resource that no longer exists.
-            if page.locator(".tab").count():
-                page.locator(".tab.is-active .tab-close").click()
-                page.wait_for_timeout(300)
+        if before:
+            rec("DRAFT", False, "cannot test the draft path — Update already exists; "
+                "set SI_INHERIT_PROJECT to a project with none")
+        else:
+            update_row = page.get_by_role("button", name="Update", exact=True)
+            update_row.click()
+            page.wait_for_timeout(800)
 
-    # ---------- READONLY: an inherited tab's label says so ----------
-    inherited = next((e for e in tree_of(page, INHERIT_PROJECT) if e.get("origin") == "inherited"), None)
-    # An empty inherited set has two opposite meanings: the listing is broken,
-    # or the parent on this rig is not marked Inheritable — in which case the
-    # platform's merged view carries nothing to list, and no module could show
-    # it. `/api/projects` reports the parent and its flag so the two can be told
-    # apart here. `_wd_scratch_` on the module rig is not inheritable, and
-    # flipping that is a change to another project, not to this suite.
-    listing = {p["name"]: p for p in json_of(api(page, "GET", "api/projects", "")).get("projects", [])}
-    me = listing.get(INHERIT_PROJECT, {})
-    parent = listing.get(me.get("parent") or "", {})
-    if inherited is None and me.get("parent") and parent and not parent.get("inheritable", True):
-        skip("FIXTURE: the inherit project has an inherited script to open",
-             f"{INHERIT_PROJECT} inherits {me['parent']}, which is not marked Inheritable on "
-             f"this gateway — the READONLY checks need a parent that is")
-    else:
-        rec("FIXTURE: the inherit project has an inherited script to open",
-            inherited is not None, f"project={INHERIT_PROJECT} parent={me.get('parent')}")
-    if inherited:
-        row = page.locator(".file-tree-row:has(.badge-inherited) .file-tree-item").first
-        row.click()
-        page.wait_for_timeout(1500)
-        tab_text = page.locator(".tab.is-active .tab-name").inner_text() if page.locator(
-            ".tab.is-active .tab-name").count() else ""
-        rec("READONLY: the tab label carries \"(Read-Only)\"",
-            "Read-Only" in tab_text, repr(tab_text))
-        # The editor itself must already refuse typing — this is the OTHER
-        # half of the same claim, measured the same way validate_v14 measures
-        # it (EditorState.readOnly is advisory, so typing-and-looking is the
-        # only honest test).
-        cm = page.locator(".code-editor-host:not([style*=none]) .cm-content")
-        before_text = cm.inner_text()
-        cm.click()
-        page.keyboard.type("ZZZZ")
-        page.wait_for_timeout(400)
-        after_text = cm.inner_text()
-        rec("READONLY: the buffer still discards typing (unchanged from 1.4.0)",
-            before_text == after_text, "")
-        page.screenshot(path=f"{OUT}/v15-readonly-tab.png")
+            rec("DRAFT: clicking the absent row opens a tab, and writes NOTHING",
+                page.locator(".tab.is-active").count() == 1 and not has_update(page, INHERIT_PROJECT),
+                "")
+            rec("DRAFT: the new tab is marked dirty (unsaved) immediately",
+                page.locator(".tab.is-active .tab-dirty").count() == 1, "")
+
+            # Close without saving — must discard, not create.
+            #
+            # Since 1.8.10 this asks first (Nigel, 04/09/2026: "I can close a
+            # tab that has unsaved changes without any notice"). The guard is
+            # the behaviour under test here, so it is ASSERTED rather than
+            # dismissed: a close that silently discarded would leave no dialog
+            # and pass a check that only looked at the tab count.
+            page.locator(".tab.is-active .tab-close").click()
+            page.wait_for_timeout(500)
+            rec("DRAFT: closing an unsaved tab asks before discarding it",
+                page.locator('[role=alertdialog]').count() == 1
+                and page.locator(".tab").count() == 1,
+                page.locator("#close-title").inner_text()
+                if page.locator("#close-title").count() else "no dialog")
+            page.get_by_role("button", name="Discard changes").click()
+            page.wait_for_timeout(500)
+            rec("DRAFT: closing the tab without saving still creates nothing",
+                not has_update(page, INHERIT_PROJECT), "")
+            rec("DRAFT: discarding removed the tab",
+                page.locator(".tab").count() == 0, "")
+
+            # Click it again, actually write something, and save for real.
+            update_row.click()
+            page.wait_for_timeout(800)
+            page.locator(".code-editor-host:not([style*=none]) .cm-content").click()
+            page.keyboard.type("print 1")
+            page.wait_for_timeout(400)
+            page.keyboard.press("Control+s")
+            page.wait_for_timeout(1500)
+
+            after_tree = tree_of(page, INHERIT_PROJECT)
+            created = next((e for e in after_tree if e.get("path") == "ignition/update"), None)
+            rec("DRAFT: Ctrl+S on the draft creates the resource for real",
+                created is not None, f"{created}")
+            rec("DRAFT: the tab no longer shows dirty after a successful save",
+                page.locator(".tab.is-active .tab-dirty").count() == 0, "")
+
+            # Leave the rig as found: delete the fixture this check just created.
+            if created:
+                d = api(page, "DELETE",
+                        f"api/scripts/content/{urllib.parse.quote('ignition/update', safe='')}"
+                        f"?project={urllib.parse.quote(INHERIT_PROJECT)}",
+                        csrf, if_match=created["signature"])
+                rec("CLEANUP: the fixture Update script was deleted",
+                    d["status"] == 200 and not has_update(page, INHERIT_PROJECT),
+                    f"HTTP {d['status']}")
+                # Close the now-stale tab too, or the next check's screenshot/DOM
+                # state carries a tab pointing at a resource that no longer exists.
+                if page.locator(".tab").count():
+                    page.locator(".tab.is-active .tab-close").click()
+                    page.wait_for_timeout(300)
+
+        # ---------- READONLY: an inherited tab's label says so ----------
+        inherited = next((e for e in tree_of(page, INHERIT_PROJECT) if e.get("origin") == "inherited"), None)
+        # An empty inherited set has two opposite meanings: the listing is broken,
+        # or the parent on this rig is not marked Inheritable — in which case the
+        # platform's merged view carries nothing to list, and no module could show
+        # it. `/api/projects` reports the parent and its flag so the two can be told
+        # apart here. `_wd_scratch_` on the module rig is not inheritable, and
+        # flipping that is a change to another project, not to this suite.
+        listing = {p["name"]: p for p in json_of(api(page, "GET", "api/projects", "")).get("projects", [])}
+        me = listing.get(INHERIT_PROJECT, {})
+        parent = listing.get(me.get("parent") or "", {})
+        if inherited is None and me.get("parent") and parent and not parent.get("inheritable", True):
+            skip("FIXTURE: the inherit project has an inherited script to open",
+                 f"{INHERIT_PROJECT} inherits {me['parent']}, which is not marked Inheritable on "
+                 f"this gateway — the READONLY checks need a parent that is")
+        else:
+            rec("FIXTURE: the inherit project has an inherited script to open",
+                inherited is not None, f"project={INHERIT_PROJECT} parent={me.get('parent')}")
+        if inherited:
+            row = page.locator(".file-tree-row:has(.badge-inherited) .file-tree-item").first
+            row.click()
+            page.wait_for_timeout(1500)
+            tab_text = page.locator(".tab.is-active .tab-name").inner_text() if page.locator(
+                ".tab.is-active .tab-name").count() else ""
+            rec("READONLY: the tab label carries \"(Read-Only)\"",
+                "Read-Only" in tab_text, repr(tab_text))
+            # The editor itself must already refuse typing — this is the OTHER
+            # half of the same claim, measured the same way validate_v14 measures
+            # it (EditorState.readOnly is advisory, so typing-and-looking is the
+            # only honest test).
+            cm = page.locator(".code-editor-host:not([style*=none]) .cm-content")
+            before_text = cm.inner_text()
+            cm.click()
+            page.keyboard.type("ZZZZ")
+            page.wait_for_timeout(400)
+            after_text = cm.inner_text()
+            rec("READONLY: the buffer still discards typing (unchanged from 1.4.0)",
+                before_text == after_text, "")
+            page.screenshot(path=f"{OUT}/v15-readonly-tab.png")
 
     # ---------- FOLDER: an empty package renders as a folder, not a file ----------
     projects = page.evaluate(

@@ -47,6 +47,38 @@ function blocks(): Map<string, Map<string, string>> {
   return out;
 }
 
+/** HSL of a #rrggbb, in 0-1. */
+function hsl(hex: string): [number, number, number] {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const light = (max + min) / 2;
+  if (max === min) return [0, 0, light];
+  const span = max - min;
+  const sat = light > 0.5 ? span / (2 - max - min) : span / (max + min);
+  const hue = max === r ? ((g - b) / span + (g < b ? 6 : 0))
+    : max === g ? (b - r) / span + 2
+      : (r - g) / span + 4;
+  return [hue / 6, sat, light];
+}
+
+function saturation(hex: string): number {
+  return hsl(hex)[1];
+}
+
+/**
+ * How distinguishable two colours are — the generator's own `_separation`,
+ * reimplemented here so the committed CSS is checked without running Python.
+ * Hue, weighted by the LOWER saturation, plus weight, plus colourfulness.
+ */
+function separation(a: string, b: string): number {
+  const [hueA, satA, lightA] = hsl(a);
+  const [hueB, satB, lightB] = hsl(b);
+  const turn = Math.abs(hueA - hueB);
+  const hueGap = Math.min(turn, 1 - turn) * 360 * Math.min(satA, satB);
+  return hueGap + Math.abs(lightA - lightB) * 300 + Math.abs(satA - satB) * 120;
+}
+
 describe('themes.generated.css', () => {
   it('has a block for every theme the picker offers', () => {
     // A picker option with no stylesheet block is an option that does nothing.
@@ -67,6 +99,36 @@ describe('themes.generated.css', () => {
       else seen.set(key, id);
     }
     expect(clashes).toEqual([]);
+  });
+
+  it('gives every theme three status colours a reader can tell apart', () => {
+    // Until 1.12.0 this was untested and three of the ten themes were wrong.
+    // `leather-night-tan` and `leather-parchment-tan` shipped --error,
+    // --warning and --success as ONE hex each (#c9996e and #7a550b), and
+    // `industrial-day-cyan` shipped error #545454 beside success #4f545e —
+    // two greys 13 apart. Every check in this file passed throughout, because
+    // none of them ever compared one status token against another.
+    //
+    // The cause was upstream: a pack's `text.status-alarm` is the INK that
+    // goes on an alarm chip, not the alarm's colour, and in a light industrial
+    // pack that ink is #FFFFFF.
+    const roles = ['--error', '--warning', '--success'];
+    for (const [id, tokens] of blocks()) {
+      const seen = roles.map((r) => tokens.get(r));
+      for (const [i, value] of seen.entries()) {
+        expect(value, `${id} ${roles[i]}`).toMatch(/^#[0-9a-f]{6}$/);
+        // A grey status colour is not a quiet one, it is an absent one.
+        expect(saturation(value!), `${id} ${roles[i]} saturation`)
+          .toBeGreaterThanOrEqual(0.12);
+      }
+      expect(new Set(seen).size, `${id} status colours`).toBe(3);
+      for (let i = 0; i < roles.length; i += 1) {
+        for (let j = i + 1; j < roles.length; j += 1) {
+          expect(separation(seen[i]!, seen[j]!),
+                 `${id} ${roles[i]} vs ${roles[j]}`).toBeGreaterThanOrEqual(28);
+        }
+      }
+    }
   });
 
   it('never sets the UI font from a pack', () => {

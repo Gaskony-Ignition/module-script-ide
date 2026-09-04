@@ -205,12 +205,24 @@ with sync_playwright() as p:
     # was what was wrong.
     page.locator(".code-editor .cm-content").click()
     page.keyboard.press("Control+End")
-    for _ in range(len("this is = = not python(") + 2):
+    # Delete by LINE, not by counting characters. Counting was off by one — the
+    # editor auto-closes `(`, so the buffer held one more character than was
+    # typed — and it left a stray `t` behind. The syntax error went, so this
+    # check passed for as long as a syntax error was the only diagnostic there
+    # was; the unknown-name check added in 1.13.0 reported the `t` and showed
+    # the deletion had never been right.
+    for _ in range(4):
+        page.keyboard.press("Shift+Home")
         page.keyboard.press("Backspace")
+        page.keyboard.press("Backspace")
+        if "not python" not in page.locator(".code-editor .cm-content").first.inner_text():
+            break
     page.wait_for_timeout(3500)
+    left = page.locator(".problem-ruler-mark")
     rec("FIX: the mark goes when the line does",
-        page.locator(".problem-ruler-mark").count() == 0,
-        f"{page.locator('.problem-ruler-mark').count()} mark(s) left")
+        left.count() == 0,
+        f"{left.count()} mark(s) left: "
+        f"{[left.nth(i).get_attribute('aria-label') for i in range(min(3, left.count()))]}")
 
     # Nothing was saved. The buffer was edited and the tab must still say so —
     # a suite that typed into a real project's script and left it clean would

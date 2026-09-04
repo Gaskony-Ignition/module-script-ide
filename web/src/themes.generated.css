@@ -211,9 +211,9 @@
   --text-chrome: #53565a;
   --text-chrome-active: #1c1d1e;
   --accent-primary: #33556e;
-  --error: #545454;
+  --error: #a71b1b;
   --warning: #8c3d0d;
-  --success: #4f545e;
+  --success: #0d632d;
   --syntax-keyword: #33556e;
   --syntax-string: #4f545e;
   --syntax-number: #8c3d0d;
@@ -255,9 +255,9 @@
   --text-chrome: #a19995;
   --text-chrome-active: #eae8e7;
   --accent-primary: #c89860;
-  --error: #c9996e;
-  --warning: #c9996e;
-  --success: #c9996e;
+  --error: #e08b7b;
+  --warning: #ddb35c;
+  --success: #8cc08e;
   --syntax-keyword: #c0c860;
   --syntax-string: #c9996e;
   --syntax-number: #d59094;
@@ -299,9 +299,9 @@
   --text-chrome: #918984;
   --text-chrome-active: #d5d2d0;
   --accent-primary: #805428;
-  --error: #7a550b;
-  --warning: #7a550b;
-  --success: #7a550b;
+  --error: #a3352c;
+  --warning: #79540c;
+  --success: #3a6738;
   --syntax-keyword: #805428;
   --syntax-string: #7a550b;
   --syntax-number: #625f09;
@@ -432,7 +432,7 @@
   --text-chrome-active: #2e3033;
   --accent-primary: #455e7d;
   --error: #8a464c;
-  --warning: #7b4f42;
+  --warning: #674237;
   --success: #505e45;
   --syntax-keyword: #3b616d;
   --syntax-string: #505e45;

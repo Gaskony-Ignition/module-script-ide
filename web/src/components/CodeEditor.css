@@ -51,3 +51,55 @@
   padding: var(--space-6);
   color: var(--text-muted);
 }
+
+/*
+ * A line with a problem, marked ON ITS NUMBER.
+ *
+ * See lintLineGutter.ts. The overview ruler represents the whole document, so
+ * its mark is nowhere near the line when the file is long — the number is the
+ * thing a reader is already using to find a line, so that is what changes
+ * (Nigel, 04/09/2026: "sync the error display with the line number").
+ *
+ * Colour AND weight, not colour alone: `--error` and `--warning` are far apart
+ * in hue but a line number is four small digits, and weight is what makes the
+ * difference visible at that size. Nothing is added to the box, so no column
+ * appears and the code does not shift when a diagnostic arrives.
+ */
+.cm-lineNumbers .cm-lint-line {
+  font-weight: 700;
+}
+
+.cm-lineNumbers .cm-lint-line-error {
+  color: var(--error);
+}
+
+.cm-lineNumbers .cm-lint-line-warning {
+  color: var(--warning);
+}
+
+/*
+ * And the lint gutter's own dot, which shipped at the theme's default: a 3px
+ * speck at the far left of the editor, in CodeMirror's own red rather than the
+ * theme's. Sized to be findable and coloured from the same tokens as the number
+ * beside it, so a theme change moves both.
+ */
+.cm-gutter-lint {
+  width: 0.7em;
+}
+
+.cm-gutter-lint .cm-lint-marker {
+  width: 0.6em;
+  height: 0.6em;
+}
+
+.cm-gutter-lint .cm-lint-marker-error {
+  content: none;
+  background: var(--error);
+  border-radius: 50%;
+}
+
+.cm-gutter-lint .cm-lint-marker-warning {
+  content: none;
+  background: var(--warning);
+  border-radius: 50%;
+}

@@ -35,6 +35,7 @@ import { attachDiagnostics } from './lspDiagnostics';
 import ProblemRuler, { geometryOffset } from './ProblemRuler';
 import { lspUri } from '../api/lspClient';
 import { lintGutter } from '@codemirror/lint';
+import { lintLineGutter } from './lintLineGutter';
 import {
   byteFidelity, cssSurface, editorTheme, findAndReplace, folding, goToLine, htmlSurface,
   javascriptSurface, jsonSurface, plainSurface, pythonSurface, sqlSurface,
@@ -464,7 +465,11 @@ function baseExtensions(
     // later extensions lose precedence ties in CodeMirror, and `indentUnit` and
     // the line separator are not negotiable.
     // The gutter marker matters as much as the inline squiggle: an error several
-    // hundred lines away is otherwise invisible until you scroll onto it.
+    // hundred lines away is otherwise invisible until you scroll onto it. And
+    // `lintLineGutter` colours the LINE NUMBER beside it — the overview ruler
+    // maps the whole document, so a fault on line 22 of 190 sits near the top
+    // of it whatever is on screen, which reads as a mark in the wrong place
+    // until the line itself carries one too (Nigel, 04/09/2026).
     //
     // ONLY on a Python view. The language server is a Jython server: point it at
     // SQL, or at the HTML of a Web Dev text resource, and it parses the file as
@@ -473,7 +478,8 @@ function baseExtensions(
     // (NAMED-QUERIES.md §4) — the database's own error on a test run is the
     // diagnostic — and 1.9.0 ships none for HTML, CSS or JavaScript either.
     ...(lsp && isPythonDoc(doc)
-      ? [lintGutter(), lspExtension(lsp, { project: doc.project, path: doc.path, scriptKey: doc.scriptKey })]
+      ? [lintGutter(), lintLineGutter,
+         lspExtension(lsp, { project: doc.project, path: doc.path, scriptKey: doc.scriptKey })]
       : []),
 
     EditorView.updateListener.of((update) => {

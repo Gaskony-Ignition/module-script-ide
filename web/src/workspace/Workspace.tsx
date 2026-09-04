@@ -124,6 +124,15 @@ interface Conflict {
   theirs: string;
   /** The signature the gateway's current copy carries — the base for a force. */
   theirsEtag: string;
+  /**
+   * The settings half of the gateway's copy, for a named query.
+   *
+   * Carried on the conflict rather than re-read when "take theirs" is chosen,
+   * so what lands in the tab is the same revision the diff was shown against.
+   * Without it, taking theirs replaced the SQL and kept the settings the tab
+   * opened with — see readCurrent.
+   */
+  theirsQuery?: Partial<OpenDoc>;
 }
 
 type Notice = { kind: 'error' | 'info'; text: string } | null;
@@ -276,6 +285,22 @@ export default function Workspace({ session }: WorkspaceProps) {
   const [savingAttrs, setSavingAttrs] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  /**
+   * The session has ended — a gateway restart, or a timeout.
+   *
+   * Nigel, 04/09/2026: *"I was working on some code and tried to save but it
+   * came up with an authentication error. This is tricky because i was logged
+   * in but something happened in the backend... now I could potentially lose
+   * work. how are we managing this?"* Until 1.13.0 the answer was: badly. The
+   * 401 fell through to the generic save-failed notice, which printed the
+   * servlet container's JSON body verbatim in a one-line strip, and nothing
+   * said the work was safe or how to get back.
+   *
+   * Nothing is ever discarded on a 401 — the buffer is in memory and stays
+   * there — so what this state exists to do is SAY so, and give the two things
+   * that actually help: a way to sign in again, and the save button back.
+   */
+  const [signedOut, setSignedOut] = useState<string | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [view, setView] = useState<ViewId>('scripts');
   /**
@@ -491,10 +516,27 @@ export default function Workspace({ session }: WorkspaceProps) {
           // whether the listing works at all.
           if (!cancelled) setTree((current) => (current ? next : current));
         })
-        .catch(() => {
+        .catch((e: unknown) => {
           /* A background poll that fails is not worth a notice: the next one
-             may well succeed, and the save path still has If-Match behind it. */
+             may well succeed, and the save path still has If-Match behind it.
+             A 401 is the exception — it is not a blip, it is the session gone,
+             and finding out at save time is what cost Nigel a scare on
+             04/09/2026. The poll runs every 20 s, so this surfaces within one
+             interval instead of at the next Ctrl+S. */
+          if (e instanceof ApiError && e.isUnauthenticated) setSignedOut('');
         });
+      // BOTH listings, because `staleUris` reads both. This watch shipped in
+      // 1.8.5 refetching only the scripts, so a named query changed on the
+      // gateway — in the Designer, or in another tab of this IDE — was never
+      // reported stale and the open tab kept an old copy until a save 409'd.
+      // That is precisely the defect the watch was added to fix, left in place
+      // for the other half of the tree; `validate_v17_nq` found it on the
+      // first live run, with 261 unit tests green either side of it.
+      fetchNamedQueries(project)
+        .then((next) => {
+          if (!cancelled) setQueries((current) => (current ? next : current));
+        })
+        .catch(() => { /* as above */ });
     };
     const timer = window.setInterval(look, WATCH_INTERVAL_MS);
     window.addEventListener('focus', look);
@@ -793,10 +835,34 @@ export default function Workspace({ session }: WorkspaceProps) {
    * the branch right independently is three chances to read a query through the
    * script route and report a 404 as "somebody deleted your file".
    */
-  const readCurrent = useCallback(async (doc: OpenDoc): Promise<{ text: string; etag: string }> => {
+  const readCurrent = useCallback(async (doc: OpenDoc): Promise<{
+    text: string;
+    etag: string;
+    /** The settings half, for a named query. Absent for a script. */
+    query?: Partial<OpenDoc>;
+  }> => {
     if (doc.kind === 'named-query') {
-      const current = await readNamedQuerySql(doc.project, doc.path);
-      return { text: current.sql, etag: current.etag };
+      // BOTH halves, as `openQuery` does. Until 1.12.0 this read only the SQL,
+      // so pulling a query that had changed on the gateway replaced its buffer
+      // and left its settings at the version the tab was opened with — a tab
+      // holding half of one revision and half of another, whose next save
+      // wrote the stale half back over whatever had changed. A display bug
+      // would have been the good outcome; this was a lost update.
+      const [sql, settings] = await Promise.all([
+        readNamedQuerySql(doc.project, doc.path),
+        readNamedQuerySettings(doc.project, doc.path),
+      ]);
+      return {
+        text: sql.sql,
+        etag: sql.etag || settings.signature,
+        query: {
+          settings: settings.settings,
+          baseSettings: settings.settings,
+          databases: settings.databases,
+          editableSettings: settings.editable,
+          legacy: settings.legacy,
+        },
+      };
     }
     const current = await readScriptContent(doc.project, doc.path, doc.scriptKey);
     return { text: current.text, etag: current.etag };
@@ -812,6 +878,7 @@ export default function Workspace({ session }: WorkspaceProps) {
         mine: doc.text,
         theirs: current.text,
         theirsEtag: current.etag,
+        theirsQuery: current.query,
       });
     } catch (e: unknown) {
       setNotice({
@@ -840,7 +907,8 @@ export default function Workspace({ session }: WorkspaceProps) {
       const current = await readCurrent(doc);
       setDocs((all) => all.map((d) => (
         d.uri === uri
-          ? { ...d, text: current.text, baseText: current.text, etag: current.etag }
+          ? { ...d, text: current.text, baseText: current.text, etag: current.etag,
+              ...(current.query ?? {}) }
           : d
       )));
       setNotice({ kind: 'info', text: `Pulled the gateway copy of ${doc.label}.` });
@@ -848,6 +916,60 @@ export default function Workspace({ session }: WorkspaceProps) {
       setNotice({ kind: 'error', text: `Could not pull ${doc.label}: ${describe(e)}` });
     }
   }, [raiseConflict, readCurrent]);
+
+  /**
+   * A signature that moved without the CONTENT moving is not a change.
+   *
+   * Nigel, 04/09/2026: *"I know for a fact that no changes were made via the
+   * designer because I am the only one with access and I don't even have the
+   * designer open. when i click on the compare I couldn't see any
+   * differences"* — and then, after reloading the page, *"it stopped showing
+   * me any need to pull"*. Both observations say the same thing: the resource
+   * signature had moved and the bytes had not.
+   *
+   * It happens for real reasons — a gateway restart re-stamps resources, and
+   * this session had just lost its login to one. The listing carries only the
+   * signature, so the watch cannot tell that case from a genuine edit, and
+   * until 1.13.0 it announced both. A bar that says a file changed, over a
+   * diff with nothing in it, is worse than no bar: it trains the reader to
+   * dismiss the one that matters.
+   *
+   * So every newly-stale document is VERIFIED once, by reading it. Identical
+   * to what this tab is based on: adopt the new signature and say nothing —
+   * there is nothing to tell anyone, and adopting it is also what stops the
+   * next save 409'ing on a signature that describes the same bytes. Different:
+   * leave the bar up, it has something to show.
+   *
+   * One read per document per signature change, not per poll — `verified`
+   * remembers, and forgets a document as soon as it is no longer stale so a
+   * later, real change is checked again.
+   */
+  const verifiedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const uri of [...verifiedRef.current]) {
+      if (!staleUris.has(uri)) verifiedRef.current.delete(uri);
+    }
+    for (const uri of staleUris) {
+      if (verifiedRef.current.has(uri)) continue;
+      verifiedRef.current.add(uri);
+      const doc = docsRef.current.find((d) => d.uri === uri);
+      if (!doc || doc.origin === 'new') continue;
+      void readCurrent(doc)
+        .then((current) => {
+          if (current.text !== doc.baseText) return;   // a real change
+          setDocs((all) => all.map((d) => (
+            d.uri === uri
+              ? { ...d, etag: current.etag, ...(current.query ?? {}) }
+              : d
+          )));
+        })
+        .catch(() => {
+          /* Unreadable: leave the bar up. A read that fails is not evidence
+             that the file is unchanged, and the save path still has If-Match
+             behind it. */
+        });
+    }
+  }, [staleUris, readCurrent]);
 
   /**
    * Pull every open document that has moved on.
@@ -871,7 +993,8 @@ export default function Workspace({ session }: WorkspaceProps) {
         const current = await readCurrent(doc);
         setDocs((all) => all.map((d) => (
           d.uri === doc.uri
-            ? { ...d, text: current.text, baseText: current.text, etag: current.etag }
+            ? { ...d, text: current.text, baseText: current.text, etag: current.etag,
+                ...(current.query ?? {}) }
             : d
         )));
       } catch {
@@ -999,7 +1122,12 @@ export default function Workspace({ session }: WorkspaceProps) {
         // write route reads it as a MODIFY with no If-Match, which is 428. It
         // means the same thing here: read the gateway's copy and let the user
         // choose, exactly like an ordinary conflict.
-        if (e instanceof ApiError && (e.isConflict || (wasNew && e.isMissingBaseSignature))) {
+        if (e instanceof ApiError && e.isUnauthenticated) {
+          // NOT a notice. A notice is a line of text in a strip that the next
+          // one replaces, and this is the one failure where the user has
+          // unsaved work and no way to write it.
+          setSignedOut(doc.label);
+        } else if (e instanceof ApiError && (e.isConflict || (wasNew && e.isMissingBaseSignature))) {
           await raiseConflict(doc);
         } else {
           setNotice({ kind: 'error', text: `Could not save ${doc.label}: ${describe(e)}` });
@@ -1013,7 +1141,7 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   const resolveReloadTheirs = useCallback(() => {
     if (!conflict) return;
-    const { uri, theirs, theirsEtag } = conflict;
+    const { uri, theirs, theirsEtag, theirsQuery } = conflict;
     setDocs((current) =>
       current.map((d) =>
         d.uri === uri
@@ -1022,6 +1150,7 @@ export default function Workspace({ session }: WorkspaceProps) {
               text: theirs,
               baseText: theirs,
               etag: theirsEtag,
+              ...(theirsQuery ?? {}),
               // A 'new' draft that raised this dialog lost the race to create
               // the resource — someone else's copy is what is on the gateway
               // now, so this document is exactly as 'local' as any other
@@ -1051,7 +1180,8 @@ export default function Workspace({ session }: WorkspaceProps) {
     try {
       const current = await readCurrent(doc);
       if (current.text !== conflict.theirs) {
-        setConflict({ ...conflict, theirs: current.text, theirsEtag: current.etag });
+        setConflict({ ...conflict, theirs: current.text, theirsEtag: current.etag,
+                      theirsQuery: current.query });
         setNotice({
           kind: 'error',
           text: 'The gateway copy changed again while this dialog was open. Review the new diff.',
@@ -1778,6 +1908,51 @@ export default function Workspace({ session }: WorkspaceProps) {
                   where you are looking — which is at the code. This sits between
                   the tab and the buffer it is about, and only for the document
                   actually on screen. */}
+              {signedOut !== null && (
+                /* Above the stale bar and above the editor, and it does not go
+                   away on its own. Everything the user needs is here: that the
+                   work is safe, a way back in, and the retry. */
+                <div className="workspace-signedout" role="alert">
+                  <IconAlert size={16} />
+                  <div className="workspace-signedout-text">
+                    <strong>Your gateway session has ended.</strong>{' '}
+                    {signedOut
+                      ? `${signedOut} was not saved — nothing has been lost, the text is still in this tab.`
+                      : 'Anything unsaved is still here. Nothing has been lost.'}{' '}
+                    The gateway most likely restarted. Sign in again in the new
+                    tab, come back, and save.
+                  </div>
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={() => window.open(window.location.href, '_blank', 'noopener')}
+                  >
+                    Sign in again
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      // Dismiss and let them try. If the session is still gone
+                      // the save puts this straight back, which is the honest
+                      // outcome — nothing here pretends to know the answer.
+                      setSignedOut(null);
+                      if (activeUri) void saveDoc(activeUri);
+                    }}
+                    disabled={!activeUri}
+                  >
+                    Retry the save
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-quiet"
+                    onClick={() => setSignedOut(null)}
+                    aria-label="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               {activeDoc && staleUris.has(activeDoc.uri) && (
                 <div className="workspace-stale-bar" role="status">
                   <IconAlert size={14} />

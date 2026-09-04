@@ -115,6 +115,30 @@ with sync_playwright() as p:
     page.select_option(".workspace-project select", PROJECT)
     page.wait_for_timeout(1500)
 
+    # The tree SHIPS COLLAPSED from 1.12.2, like the other two (Nigel,
+    # 04/09/2026: "I want by default the WebDev to start shrunk but remember
+    # what i've expanded between tabs"). Asserted before anything opens a row,
+    # because every check after this one clicks branches open and would then
+    # pass whichever way the default went.
+    page.locator('.activity-item[aria-label="Web Dev"]').first.click()
+    page.wait_for_timeout(800)
+    shut = page.locator('.file-tree[aria-label="Web Dev"] [aria-expanded="false"]').count()
+    open_now = page.locator('.file-tree[aria-label="Web Dev"] [aria-expanded="true"]').count()
+    rec("COLLAPSED: the Web Dev tree lands with every endpoint shut",
+        shut > 0 and open_now == 0, f"{shut} shut, {open_now} open")
+    # And the endpoints are COLLAPSED, not missing — a tree that listed nothing
+    # would pass the check above.
+    rec("COLLAPSED: the endpoints are still listed, just not opened",
+        page.locator('.file-tree[aria-label="Web Dev"] .file-tree-package').count() >= 3,
+        f"{page.locator('.file-tree[aria-label=\'Web Dev\'] .file-tree-package').count()} rows")
+    # Put the view back where this suite found it. The activity bar is a
+    # TOGGLE — clicking the active view collapses the side bar — so leaving it
+    # on Web Dev made the suite's own "open the Web Dev view" click below shut
+    # it instead, and the next eight checks then measured an empty column.
+    page.locator('.activity-item[aria-label="Scripting"], '
+                 '.activity-item[aria-label="Scripts"]').first.click()
+    page.wait_for_timeout(500)
+
     listed = endpoints(page)
     by_name = {e["name"]: e for e in listed}
     rec("FIXTURE: the demo project's three endpoints are listed",
