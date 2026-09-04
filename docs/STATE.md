@@ -661,10 +661,9 @@ Two things were considered and are NOT happening:
 Rotating either ground off its own hue was never on the table: that is the 1.7.x
 mistake that cost the estate the aurora pair.
 
-`industrial-day-cyan` still resolves `--error`/`--success` to greys, for the
-reason recorded at 1.7.0 — that one is still open and is also Nigel's call.
-`industrial-day-cyan` still resolves `--error`/`--success` to greys, for the
-reason recorded at 1.7.0.
+`industrial-day-cyan`'s grey `--error`/`--success` were fixed at 1.12.0, along
+with two more themes nobody had noticed. The reason recorded at 1.7.0 was wrong
+— see "Status colours" above.
 
 
 
