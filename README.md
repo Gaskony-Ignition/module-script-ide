@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.15.3 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.16.1 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -54,17 +54,23 @@ actually has installed. No static stub file can know that.*
   still running, and Reset drops the console's variables the way the Designer's
   does. Concurrent users never see each other's output.
 - **Autocomplete and signature help** from the running gateway's script registry.
-- **Live error checking** against the real Jython 2.7 parser.
+- **Live error checking** against the real Jython 2.7 parser — plus a name that
+  is defined nowhere, a deprecated platform call, and `system.gui` in a script
+  that runs on the Gateway. CSS, JavaScript, JSON, SQL and HTML documents are
+  checked by their own parsers, so every file the IDE opens has error signalling
+  rather than only the Python ones.
 - **Outline** the open script — every class and function, click to jump — parsed
   by the gateway rather than by a client-side grammar, so Python 2 code outlines
   correctly. Find and replace are in the editor on Ctrl+F.
 - **Navigate the project.** Go to definition on F12 or Ctrl-click, across files.
   Quick open on Ctrl+P, with `#` to jump to a function or class anywhere in the
-  project. A Search view that reads every Project Library script on the gateway,
-  not just the open ones. Shift+F12 lists every place a name is written — matched
-  by name rather than by type, which the results say plainly. A Problems panel
-  collecting the errors in every open script, because a squiggle only helps in
-  the file you are looking at. Folding, and go-to-line on Ctrl+G.
+  project. A Search view that reads every script on the gateway — Project
+  Library, Gateway Events, Web Dev handlers and pages, and named-query SQL — not
+  just the open ones, and can **replace** across all of it with a preview and a
+  per-file report. Shift+F12 lists every place a name is written — matched by
+  name rather than by type, which the results say plainly. A Problems panel
+  collecting the errors in every open script, alongside what the gateway has
+  actually logged while running them. Folding, and go-to-line on Ctrl+G.
 - **Web Dev** endpoints as a first-class view: all eight HTTP methods, per-method
   settings, create and delete.
 - **A terminal on the gateway** — a real shell on a real pseudo-terminal, with a
@@ -75,6 +81,14 @@ actually has installed. No static stub file can know that.*
   `sudo -n` where the host already grants it, otherwise the Gateway's own
   operating-system user. Closing the tab ends the shell and the jobs it
   started.
+- **A way back.** Every save is kept per user, including the version that was
+  there before your first one, and restoring loads the buffer rather than
+  writing it. The console keeps what you have run — source and output — across
+  gateway restarts. An override can be compared against the project it inherits
+  from before you discard it.
+- **Guards on the way out.** A save that does not parse asks once first. A save
+  that removes or re-declares a function names its call sites before the write.
+  Neither refuses — both make it deliberate.
 - **A VS Code-shaped shell**: activity bar, resizable side bar and outline, a
   bottom panel holding the console, the problems list and the terminal, and the
   four layout glyphs in the title bar.

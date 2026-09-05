@@ -1,5 +1,6 @@
 package com.gaskony.scriptide.gateway.security;
 
+import com.gaskony.scriptide.gateway.term.PolicySource;
 import com.inductiveautomation.ignition.common.auth.web.WebAuthUser;
 import com.inductiveautomation.ignition.gateway.dataroutes.AccessControlStrategy;
 import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
@@ -45,8 +46,36 @@ public final class SessionSecurity {
 
     private static final Logger logger = LoggerFactory.getLogger(SessionSecurity.class);
 
-    /** Holding this role is what permits script execution and resource writes. */
-    public static final String ADMIN_ROLE = "Administrator";
+    /**
+     * The role name the fallback check matches, when the platform's own answer
+     * is unavailable.
+     *
+     * <p>A DEFAULT, not a rule. The 05/09/2026 decision made
+     * {@code WebUiSession.SESSION_WRITE} the primary gate and left this as the
+     * union's other half — but the literal string stayed in the code, so a
+     * gateway whose admin role is called anything else (an IdP that issues
+     * {@code GatewayAdmin}, a site that renamed it) fell back to a check that
+     * could only ever say no. It is now a policy key, resolved live, so an
+     * estate can name its own role without a rebuild:</p>
+     *
+     * <pre>com.gaskony.scriptide.admin.role = GatewayAdmin</pre>
+     *
+     * <p>Widening the gate is a security decision, which is why it is a gateway
+     * FILE and a system property rather than anything the module's own UI can
+     * set. See {@code PolicySource}: file &gt; {@code -D} &gt; this default.</p>
+     */
+    public static final String ADMIN_ROLE_KEY = "com.gaskony.scriptide.admin.role";
+
+    /** The role name assumed when nothing overrides it. */
+    public static final String DEFAULT_ADMIN_ROLE = "Administrator";
+
+    /** The role name in force right now. */
+    public static String adminRole() {
+        String configured = PolicySource.value(ADMIN_ROLE_KEY);
+        return configured == null || configured.isBlank()
+            ? DEFAULT_ADMIN_ROLE
+            : configured.trim();
+    }
 
     private SessionSecurity() { /* utility class */ }
 
@@ -79,7 +108,8 @@ public final class SessionSecurity {
      * {@link RequestContext} to ask it about.</p>
      */
     public static boolean isAdministrator(WebAuthUser user) {
-        return user.getRoles().stream().anyMatch(ADMIN_ROLE::equalsIgnoreCase);
+        String role = adminRole();
+        return user.getRoles().stream().anyMatch(role::equalsIgnoreCase);
     }
 
     /**
@@ -125,7 +155,7 @@ public final class SessionSecurity {
         } catch (Exception e) {
             // Never lets an SDK change lock anyone out silently.
             logger.warn("SESSION_WRITE check failed; the {} role is the only route left: {}",
-                ADMIN_ROLE, e.toString());
+                adminRole(), e.toString());
             return false;
         }
     }

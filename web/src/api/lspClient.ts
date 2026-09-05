@@ -562,6 +562,25 @@ export class LspClient {
   }
 
   /**
+   * Library functions and classes nothing in the project appears to call.
+   *
+   * NAME-based, exactly like {@link references}, and the caller must label it as
+   * such: a function reached through `getattr`, from a Perspective binding, a
+   * Vision window or an alarm pipeline will appear here and is not unused. It is
+   * a list to read, never a list to delete from unexamined.
+   */
+  async unusedSymbols(project: string): Promise<TextSearchHit[]> {
+    this.ensureSynced(project);
+    const result = await this.transport.request<TextSearchHit[] | null>(
+      'lsp',
+      'scriptide/unusedSymbols',
+      {},
+      project
+    );
+    return result ?? [];
+  }
+
+  /**
    * Every place a NAME is written in the project's library scripts.
    *
    * **Name-based, and callers must say so on screen.** It is `scriptide/references`

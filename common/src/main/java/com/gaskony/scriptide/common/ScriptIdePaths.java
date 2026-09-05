@@ -98,6 +98,23 @@ public final class ScriptIdePaths {
     public static final String ROUTE_SCRIPT_ATTRIBUTES = "/api/scripts/attributes/:path";
 
     /**
+     * The parent project's copy of a resource, for comparing an override.
+     *
+     * <p>Its own route rather than a flag on the content read: the content route
+     * is keyed on THIS project's resource and answering it with another project's
+     * body would make one URL mean two things.</p>
+     */
+    public static final String ROUTE_SCRIPT_INHERITED = "/api/scripts/inherited/:path";
+
+    /**
+     * Move one script to a new path.
+     *
+     * <p>Paths are in the BODY, not the URL: a rename names two of them, and a
+     * route template carries one.</p>
+     */
+    public static final String ROUTE_SCRIPT_RENAME = "/api/scripts/rename";
+
+    /**
      * {@code GET|POST /api/webdev/config/:path?project=X} — a Web Dev endpoint's
      * per-method settings.
      *
@@ -171,6 +188,13 @@ public final class ScriptIdePaths {
 
     /** One saved version's source. */
     public static final String ROUTE_HISTORY_CONTENT = "/api/history/content";
+
+    /**
+     * This user's finished script-console runs, kept across restarts.
+     *
+     * <p>No {@code :path} — a run belongs to a person, not to a resource.</p>
+     */
+    public static final String ROUTE_RUNS = "/api/runs";
 
     /** What this project's scripts are actually throwing, from the gateway log. */
     public static final String ROUTE_RUNTIME_ERRORS = "/api/runtime/errors";

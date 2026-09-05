@@ -187,3 +187,13 @@
   padding: 0 var(--space-3) var(--space-3);
   font-size: var(--font-size-base);
 }
+
+/* Which gateway event scripts are failing (R2, 1.16.0). Above the individual
+   messages because the script is what you act on; the message is detail. */
+.problems-runtime-scripts {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  color: var(--error);
+}

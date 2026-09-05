@@ -67,6 +67,14 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
      */
     private volatile String currentExecutionId;
 
+    /** The run in flight, kept so it can be recorded when it finishes. */
+    private volatile String runningSource;
+    private volatile String runningProject;
+    private volatile StringBuilder runningOutput;
+
+    /** Stop accumulating output for the history past this — see RunHistory. */
+    private static final int RUN_OUTPUT_CAP = 32 * 1024;
+
     /** Whether this connection has presented its CSRF token on the exec channel. */
     private volatile boolean execUnlocked;
 
@@ -359,6 +367,13 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         // the pool queue has not begun, and a reset in that gap would still swap
         // the locals out from under it.
         currentExecutionId = executionId;
+        // Kept so the run can be recorded when it finishes. The outcome carries
+        // an EMPTY stdout by contract — every chunk went out as an `output`
+        // frame as it was produced — so the only place the whole output exists
+        // is here, accumulated as it passes through.
+        runningSource = source;
+        runningProject = project;
+        runningOutput = new StringBuilder();
         try {
             service.submit(executionId, project, source, fileName, locals, username, sessionId,
                 () -> sendStarted(executionId),
@@ -404,6 +419,11 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
 
     /** One chunk of output, as it is produced. Ordered within a stream. */
     private void sendOutput(String executionId, String stream, String text) {
+        StringBuilder buffer = runningOutput;
+        if (buffer != null && text != null
+            && buffer.length() < RUN_OUTPUT_CAP) {
+            buffer.append(text);
+        }
         JsonObject out = new JsonObject();
         out.addProperty("event", "output");
         out.addProperty("executionId", executionId);
@@ -436,6 +456,35 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
                 outcome.failure(), fileName, lineOffset));
         }
         sendOn("exec", result);
+        recordRun(outcome);
+    }
+
+    /**
+     * Keep this run for the user who ran it.
+     *
+     * <p>After the frame, never before: the client has its answer either way,
+     * and a history write that failed must not delay or alter what the console
+     * shows.</p>
+     */
+    private void recordRun(PrivateStateRunner.Outcome outcome) {
+        var history = ScriptIdeSocketRegistry.getRunHistory();
+        String source = runningSource;
+        StringBuilder output = runningOutput;
+        runningSource = null;
+        runningOutput = null;
+        if (history == null || source == null) {
+            return;
+        }
+        String error = outcome.cancelled()
+            ? "Stopped"
+            : outcome.failure() == null ? null : String.valueOf(outcome.failure());
+        try {
+            history.record(username, runningProject, source,
+                output == null ? "" : output.toString(),
+                outcome.succeeded(), error);
+        } catch (RuntimeException e) {
+            logger.debug("Could not record run history: {}", e.toString());
+        }
     }
 
     /**

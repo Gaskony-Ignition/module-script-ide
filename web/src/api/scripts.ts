@@ -145,7 +145,15 @@ export interface SaveResult {
 }
 
 /** Attribute values the API accepts. Types are exact — see ScriptResourceTypes. */
-export type AttributeValue = string | number | boolean;
+/**
+ * A script resource attribute.
+ *
+ * `string[]` since 1.16.0: Tag Change's `paths` and `changeTypes` are JSON
+ * ARRAYS on a real resource, and every other attribute on every other type is a
+ * scalar. Storing them joined would round-trip through this module and be
+ * unreadable to the Designer.
+ */
+export type AttributeValue = string | number | boolean | string[];
 
 export interface ScriptAttributes {
   path: string;
@@ -221,7 +229,7 @@ export const CSRF_HEADER = 'X-CSRF-Token';
  * a multi-segment URL that matches no route and 404s, which reads exactly like
  * a missing script.
  */
-export function scriptRouteUrl(base: '/api/scripts/content' | '/api/scripts/attributes', path: string, project: string): string {
+export function scriptRouteUrl(base: '/api/scripts/content' | '/api/scripts/attributes' | '/api/scripts/inherited', path: string, project: string): string {
   const query = new URLSearchParams({ project });
   return `${apiUrl(`${base}/${encodeURIComponent(path)}`)}?${query.toString()}`;
 }
@@ -640,8 +648,23 @@ export interface RuntimeError {
   exception?: string;
 }
 
+/** How badly one gateway event script is doing, over the window. */
+export interface ScriptHealth {
+  script: string;
+  count: number;
+  lastSeen: number;
+}
+
 export interface RuntimeErrors {
   errors: RuntimeError[];
+  /**
+   * Per-script attribution, for badging a tree row.
+   *
+   * Only FAILURES: the SDK exposes no timer-task registry, so there is no last
+   * fire or next fire to report. Inventing one from a log line that appears only
+   * on failure would make a healthy script look like one that never runs.
+   */
+  byScript: ScriptHealth[];
   windowMinutes: number;
   /**
    * How an event was tied to this project, in the server's own words.
@@ -661,4 +684,112 @@ export async function fetchRuntimeErrors(
   const params = new URLSearchParams({ project });
   if (minutes) params.set('minutes', String(minutes));
   return getJson<RuntimeErrors>(`${apiUrl('/api/runtime/errors')}?${params.toString()}`);
+}
+
+// ==================== Rename, parent compare (1.16.0) ====================
+
+export interface RenameResult {
+  ok: true;
+  /** The new resource path, as the listing spells it. */
+  path: string;
+  /** Dotted module names, present only for a library script. */
+  oldModule?: string;
+  newModule?: string;
+  signature?: string;
+}
+
+/**
+ * Move one script to a new path.
+ *
+ * One resource only — never a folder. See the handler's Javadoc: a folder move
+ * is a multi-resource push with subtree collision checking, and a half-version
+ * that moved direct children only would be worse than none.
+ */
+export async function renameScript(request: {
+  project: string;
+  path: string;
+  newPath: string;
+  baseSignature: string;
+  csrfToken?: string;
+}): Promise<RenameResult> {
+  const query = new URLSearchParams({ project: request.project });
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'If-Match': request.baseSignature,
+  };
+  if (request.csrfToken) headers[CSRF_HEADER] = request.csrfToken;
+  const response = await fetch(`${apiUrl('/api/scripts/rename')}?${query.toString()}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+    body: JSON.stringify({
+      path: request.path,
+      newPath: request.newPath,
+      baseSignature: request.baseSignature,
+    }),
+  });
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return (await response.json()) as RenameResult;
+}
+
+/** A parent project's copy of a resource, and which project it came from. */
+export interface InheritedCopy {
+  text: string;
+  parent: string;
+}
+
+/**
+ * The parent project's copy, for comparing an override against what it
+ * overrides. Throws a 404 ApiError when no ancestor has one.
+ */
+export async function readInheritedContent(
+  project: string,
+  path: string,
+  key?: string
+): Promise<InheritedCopy> {
+  let url = scriptRouteUrl('/api/scripts/inherited', path, project);
+  if (key) url += `&key=${encodeURIComponent(key)}`;
+  const response = await fetch(url, {
+    credentials: 'same-origin',
+    headers: { Accept: 'text/plain' },
+  });
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return {
+    text: await response.text(),
+    parent: response.headers.get('X-Parent-Project') ?? 'the parent project',
+  };
+}
+
+// ==================== Run history (R3, 1.16.0) ====================
+
+/** One finished console execution, kept across gateway restarts. */
+export interface PastRun {
+  id: string;
+  at: number;
+  project: string;
+  source: string;
+  output: string;
+  ok: boolean;
+  error?: string;
+  outputTruncated: boolean;
+}
+
+export interface PastRuns {
+  runs: PastRun[];
+  maxRuns: number;
+}
+
+/**
+ * What this user has run, newest first.
+ *
+ * Read from the run store, not the audit profile: the audit keeps a HASH of the
+ * source by design, so it can say a run happened and never what was run.
+ */
+export async function fetchRuns(): Promise<PastRuns> {
+  return getJson<PastRuns>(apiUrl('/api/runs'));
 }

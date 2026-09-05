@@ -93,6 +93,20 @@ export function pathForModule(moduleName: string): string {
 }
 
 /**
+ * `ignition/script-python/util/helpers` → `util.helpers`, or null.
+ *
+ * The inverse of {@link pathForModule}, and null for anything that is not a
+ * library script: a timer script has a resource path and no importable name, so
+ * there is nothing to rewrite at a call site.
+ */
+export function moduleNameFor(path: string): string | null {
+  const prefix = 'ignition/script-python/';
+  if (!path.startsWith(prefix)) return null;
+  const tail = path.slice(prefix.length);
+  return tail.length > 0 ? tail.replace(/\//g, '.') : null;
+}
+
+/**
  * The label for a hit's file, for a results heading.
  *
  * Prefers the module name the server sent, because `util.helpers` is how the

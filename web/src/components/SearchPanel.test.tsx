@@ -42,9 +42,12 @@ describe('SearchPanel — text search', () => {
   it('says what it searches before anything has been run', () => {
     // "No results" for a search nobody has run is a lie about the project.
     renderPanel();
+    // Names the whole corpus, which since 1.16.0 is every script AND named-query
+    // SQL — the panel previously said Project Library only, and it was right.
     expect(screen.getByRole('status')).toHaveTextContent(
-      /Searches every Project Library script on the gateway/
+      /Searches every script on the gateway/
     );
+    expect(screen.getByRole('status')).toHaveTextContent(/named-query SQL/);
   });
 
   it('searches the gateway and groups results by file', async () => {
@@ -59,7 +62,10 @@ describe('SearchPanel — text search', () => {
     searchFor('compute');
     expect(await screen.findByText('util.helpers')).toBeInTheDocument();
     expect(screen.getByText('orders.intake')).toBeInTheDocument();
-    expect(screen.getAllByRole('button')).toHaveLength(3);
+    // The RESULT rows, not every button on the panel. Counting all of them made
+    // this fail the moment the panel grew a control (the Unused button, 1.16.0)
+    // — an assertion about results should not be a census of the whole view.
+    expect(document.querySelectorAll('.search-panel-hit')).toHaveLength(3);
   });
 
   it('shows one-based line numbers against zero-based server lines', async () => {
@@ -75,7 +81,8 @@ describe('SearchPanel — text search', () => {
     });
     const props = renderPanel({ lsp });
     searchFor('compute');
-    fireEvent.click(await screen.findByRole('button'));
+    await screen.findByText('util');
+    fireEvent.click(document.querySelector('.search-panel-hit') as HTMLElement);
     expect(props.onOpenLocation).toHaveBeenCalledWith(
       'ignition://P/ignition/script-python/util',
       12,

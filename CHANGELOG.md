@@ -2,6 +2,85 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.16.1] — 2026-09-06
+
+feat: search that covers what the IDE actually edits, guards on the way out, and most of the product review's own backlog.
+
+Nigel, 06/09/2026, after five more ideas: *"do all 5 they are good"* — and then
+*"also fix up everything from the past review. that should have all been done
+already."*
+
+### Added — the five
+- **Search covers everything the IDE edits.** `ProjectIndex` filtered to
+  library scripts while the module had grown to edit gateway event scripts, Web
+  Dev handlers and pages, and named-query SQL. So search, references and (since
+  1.15.0) replace covered about a quarter of what a user can open, and looking
+  for a string in your own timer script returned nothing — which reads as "it
+  isn't there". The NAME index stays library-only, deliberately: definition and
+  quick-open symbols are about IMPORTABLE modules, and a timer script is not one.
+- **A save that does not parse asks once.** Nothing stopped writing broken
+  Python into a running gateway; on a timer script that starts failing on the
+  next tick. Only an ERROR stops — a warning never does.
+- **Rename a script**, with the call sites offered as a separate, confirmed
+  project-wide replace. One resource, never a folder: the server refuses a
+  folder rather than half-moving it, and the dialog says so before you type.
+- **Compare an override with its parent.** *Discard Overrides* has always been
+  one click and there was no way to see what it would discard — in this IDE or
+  the Designer. Read-only, and it walks the parent CHAIN rather than stopping at
+  the immediate parent.
+- **An unused report.** Top-level functions and classes nothing else names.
+  Name-based, and the panel says so at length: anything called from a
+  Perspective binding, a Vision window or outside the project appears here and
+  is not unused.
+
+### Added — the product review's backlog
+- **R1, impact before save.** A save that removes or re-declares a top-level
+  function names its call sites first. A line scan, not the AST: the question is
+  about two versions of a buffer and the server only knows one of them.
+- **R3, run history that survives a restart.** The console kept nothing;
+  `ExecAudit` stores a SHA-256 of the source by design, so it could say a run
+  happened and never what was run. Source and output now, per user, bounded.
+  "Load into console" does not re-run it.
+- **R4, tag event scripts — the blocker was never the Designer.** This type has
+  been body-only since 1.1.0 waiting for someone to measure the tag-path list in
+  the Designer's workspace. A real tag-change resource on the rig had the shape
+  written on it all along: `paths` and `changeTypes` as JSON ARRAYS and
+  `enabled`. Both arrays are now editable, with `changeTypes` as an allowlist —
+  the platform ignores an unrecognised one silently, so the script would sit
+  there configured and never fire.
+- **F4, the `Administrator` literal** is a policy key now
+  (`com.gaskony.scriptide.admin.role`), resolved file &gt; `-D` &gt; default. A
+  gateway whose admin role is called anything else fell back to a check that
+  could only say no.
+- **R2, half of it, and the half that is real.** The review asked for last fire,
+  duration and next fire per event script. **The 8.3.0 SDK exposes none of
+  them** — there is no timer-task registry to ask, and a log line appears only
+  on failure, so inventing "last run" from one would make a healthy script look
+  like one that never runs. What ships is which gateway event scripts are
+  FAILING, how often and when, in the Problems panel.
+
+### Not done, and why
+**R5 (two gateways side by side)** and **R6 (a Jython test runner)** are
+untouched. R5 is a cross-gateway authentication surface rather than a feature
+flag; R6 is a product in its own right. **F1** (internal or public) and **F2**
+(prove it on a second gateway) are decisions and environment, not code.
+
+### Fixed
+- Two over-broad test assertions that counted every `button` in the Search panel
+  and broke the moment it grew a control — the same shape as 1.15.0's class-name
+  collisions. They assert the result rows now, which is what they meant.
+
+### Verified
+`deploy_gate.py` PASS (6 checks, 14 routes, none unmounted). `v13` 27/27,
+`v15_tree` 18/18, `v16_nav` 25/25, `v17_nq` 45/45, `v23_insight` 27/27.
+Java 450, Vitest 619.
+
+**The Tag Change labels came from driving the real Designer**, and they had to:
+the resource stores `ValueChange` and the Designer's Change Triggers row says
+`Value`. Reading the JSON alone — which is how the shape was found — would have
+shipped a vocabulary this IDE invented for a control that already has names
+people know. Screenshot at `docs/images/designer-tag-change.png`.
+
 ## [1.15.3] — 2026-09-05
 
 feat: five things the IDE already knew and never said.

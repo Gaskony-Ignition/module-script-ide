@@ -30,7 +30,7 @@ import { IconSearch } from './Icons';
 import './SearchPanel.css';
 
 /** What the results currently are. */
-export type SearchMode = 'text' | 'references';
+export type SearchMode = 'text' | 'references' | 'unused';
 
 export interface SearchPanelProps {
   project: string;
@@ -55,6 +55,15 @@ export interface SearchPanelProps {
     replacement: string,
     caseSensitive: boolean
   ) => Promise<ReplaceReport>;
+  /**
+   * A replace handed over by a rename: search for `from`, pre-fill `to`.
+   *
+   * The panel does NOT run it. A rename that rewrote every file mentioning the
+   * old name would be a bulk write with no preview; this puts the user in front
+   * of the file list with both boxes filled and the confirm still to press.
+   */
+  pendingReplace?: { from: string; to: string } | null;
+  onPendingReplaceHandled?: () => void;
 }
 
 /** Results grouped by the file they are in, in the order the server sent them. */
@@ -74,6 +83,7 @@ function groupByFile(hits: TextSearchHit[]): Array<{ label: string; hits: TextSe
 
 export default function SearchPanel({
   project, lsp, referencesRequest, onOpenLocation, onReplaceAll,
+  pendingReplace, onPendingReplaceHandled,
 }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -125,6 +135,37 @@ export default function SearchPanel({
     [lsp, project]
   );
 
+  const runUnused = useCallback(async () => {
+    if (!lsp || !project) return;
+    setMode('unused');
+    setSubject('');
+    setBusy(true);
+    setError('');
+    setReport(null);
+    setConfirming(false);
+    try {
+      setHits(await lsp.unusedSymbols(project));
+    } catch (e: unknown) {
+      setHits([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setSearched(true);
+    }
+  }, [lsp, project]);
+
+  // A rename has just moved a module and wants its call sites updated.
+  useEffect(() => {
+    if (!pendingReplace) return;
+    setQuery(pendingReplace.from);
+    setReplacement(pendingReplace.to);
+    void runText(pendingReplace.from, true);
+    onPendingReplaceHandled?.();
+    // `runText` is stable for a given project and lsp; re-running this on its
+    // identity would re-search on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingReplace]);
+
   // A references request arrives from the editor. It sets the input to the name
   // too, so the box always says what the list below it is about — and so the
   // next Enter re-runs it as an ordinary text search, which is the honest
@@ -174,6 +215,9 @@ export default function SearchPanel({
   /** The files a replace would touch, in the order they are listed. */
   const fileUris = useMemo(() => [...new Set(hits.map((hit) => hit.uri))], [hits]);
 
+  // Text mode only. A references list matches by name, and an unused list is a
+  // list of DEFINITIONS — replacing across either renames things that merely
+  // share a spelling.
   const canReplace =
     Boolean(onReplaceAll) && mode === 'text' && searched && hits.length > 0 && subject.length > 0;
 
@@ -234,6 +278,14 @@ export default function SearchPanel({
           />
           Match case
         </label>
+        <button
+          type="button"
+          className="search-panel-unused"
+          onClick={() => void runUnused()}
+          title="Library functions and classes nothing in the project appears to call"
+        >
+          Unused
+        </button>
       </form>
 
       {canReplace && (
@@ -308,14 +360,20 @@ export default function SearchPanel({
           : error
             ? error
             : !searched
-              ? 'Searches every Project Library script on the gateway, not just the open ones. '
-                + 'Named-query SQL is not searched in this version.'
+              ? 'Searches every script on the gateway — Project Library, Gateway Events, '
+                + 'Web Dev handlers and pages, and named-query SQL — not just the open ones.'
+              : mode === 'unused'
+                ? `${hits.length} top-level ${hits.length === 1 ? 'function or class' : 'functions and classes'} `
+                  + 'that nothing in this project names anywhere else — matched by NAME, so '
+                  + 'anything called from a Perspective binding, a Vision window, an alarm '
+                  + 'pipeline or outside this project will appear here and is NOT unused. '
+                  + 'Read it; do not delete from it unexamined.'
               : mode === 'references'
                 ? `${hits.length} ${hits.length === 1 ? 'place' : 'places'} where “${subject}” `
                   + 'is written — matched by NAME, not by type, so unrelated members '
                   + 'with the same name are included.'
-                : `${hits.length} ${hits.length === 1 ? 'result' : 'results'} for “${subject}”. `
-                  + 'Named-query SQL is not searched in this version.'}
+                : `${hits.length} ${hits.length === 1 ? 'result' : 'results'} for “${subject}”, `
+                  + 'across every script and named query in the project.'}
       </p>
 
       <div className="search-panel-results">

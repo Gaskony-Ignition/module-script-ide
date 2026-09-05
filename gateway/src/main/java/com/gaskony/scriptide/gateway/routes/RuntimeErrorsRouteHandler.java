@@ -27,6 +27,45 @@ public class RuntimeErrorsRouteHandler {
         this.context = context;
     }
 
+    /**
+     * The bare names of a project's gateway event scripts.
+     *
+     * <p>Read from the resource collection rather than accepted from the caller:
+     * matching arbitrary strings against the log would turn a health endpoint
+     * into a log-search one.</p>
+     */
+    private java.util.List<String> gatewayEventNames(String project) {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        if (context == null) {
+            return names;
+        }
+        try {
+            var found = context.getProjectManager().find(project);
+            if (found.isEmpty()) {
+                return names;
+            }
+            for (var resource : found.get().getResources()) {
+                var type = resource.getResourcePath().getResourceType();
+                if (!"ignition".equals(type.moduleId())
+                    || !GATEWAY_EVENT_TYPES.contains(type.typeId())) {
+                    continue;
+                }
+                String tail = resource.getResourcePath().getPath().toString();
+                if (tail.isEmpty()) {
+                    continue;       // a singleton has no name to match on
+                }
+                int slash = tail.lastIndexOf('/');
+                names.add(slash < 0 ? tail : tail.substring(slash + 1));
+            }
+        } catch (Exception e) {
+            return names;
+        }
+        return names;
+    }
+
+    private static final java.util.Set<String> GATEWAY_EVENT_TYPES = java.util.Set.of(
+        "timer", "message", "tag-change", "scheduled");
+
     /** GET /api/runtime/errors?project=&minutes= */
     public Object errors(RequestContext req, HttpServletResponse resp) throws IOException {
         String project = req.getParameter("project");
@@ -60,8 +99,23 @@ public class RuntimeErrorsRouteHandler {
             }
             items.add(item);
         }
+        // Per-script attribution, so a tree row can badge a script that has been
+        // failing. Names come from the project's own gateway event resources —
+        // the caller does not get to pass a list, or this becomes a way to ask
+        // "does the log mention <anything I like>".
+        JsonArray health = new JsonArray();
+        for (ScriptErrors.ScriptHealth each
+                : ScriptErrors.byScript(found, gatewayEventNames(project))) {
+            JsonObject item = new JsonObject();
+            item.addProperty("script", each.script());
+            item.addProperty("count", each.count());
+            item.addProperty("lastSeen", each.lastSeen());
+            health.add(item);
+        }
+
         JsonObject out = new JsonObject();
         out.add("errors", items);
+        out.add("byScript", health);
         out.addProperty("windowMinutes", window / 60_000L);
         // Stated so the panel can say what it is showing. "What the gateway
         // logged ABOUT this project" is not the same claim as "errors this

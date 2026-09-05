@@ -147,6 +147,20 @@ public class ScriptIdeRouteRegistrar {
             .handler(scriptAttributesRouteHandler::read)
             .mount();
 
+        routes.newRoute(ScriptIdePaths.ROUTE_SCRIPT_RENAME)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(scriptResourceRouteHandler::rename)
+            .mount();
+
+        // text/plain: the parent's body is source, like the read above.
+        routes.newRoute(ScriptIdePaths.ROUTE_SCRIPT_INHERITED)
+            .type(RouteGroup.TYPE_PLAIN_TEXT)
+            .accessControl(authed)
+            .handler(scriptResourceRouteHandler::inherited)
+            .mount();
+
         routes.newRoute(ScriptIdePaths.ROUTE_SCRIPT_ATTRIBUTES)
             .method(HttpMethod.POST)
             .type(RouteGroup.TYPE_JSON)
@@ -254,6 +268,12 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_PLAIN_TEXT)
             .accessControl(authed)
             .handler(historyRouteHandler::content)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_RUNS)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(historyRouteHandler::runs)
             .mount();
 
         routes.newRoute(ScriptIdePaths.ROUTE_RUNTIME_ERRORS)
