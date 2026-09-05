@@ -828,9 +828,14 @@ only exists on a RENDERED row and the tree ships collapsed, and quick open ranks
 the listing the CLIENT holds — searching for a name changed through the API is
 testing the 20 s watch interval, not the palette.
 
-**Next — the review against purpose.** Every batch is live-gated now: review
-the module as a product against Nigel's brief and deliver recommendations for
-going beyond the Designer (offer the write-up as an artifact page).
+**The review against purpose — DONE, 05/09/2026**, in
+`docs/PRODUCT-REVIEW.md`. The brief is met and the module is past the Designer
+in four places; six recommendations are ranked by leverage per unit of work, and
+four findings are decisions rather than features. The three worth acting on
+first (R1 impact-before-save, R2 event scripts you can see running, R3 run
+history that survives a restart) are built almost entirely from parts that
+already exist and are already gated. **F3 is the cheapest and is not a feature:
+the README's screenshots are from 01/09 and show a UI nine releases old.**
 
 **Open decisions for Nigel**, parked, none blocking. Four were answered on
 05/09/2026 and are recorded under "1.14.x" at the top of this file:
