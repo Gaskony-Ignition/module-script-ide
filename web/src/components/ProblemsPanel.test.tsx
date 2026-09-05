@@ -1,11 +1,23 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { act } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LspClient, LspDiagnostic } from '../api/lspClient';
 import { lspUri } from '../api/lspClient';
 import type { OpenDoc } from '../workspace/documents';
 import { docUri } from '../workspace/documents';
-import ProblemsPanel, { severityLabel, sortProblems, type ProblemRow } from './ProblemsPanel';
+import ProblemsPanel, {
+  relativeTime,
+  severityLabel,
+  sortProblems,
+  type ProblemRow,
+} from './ProblemsPanel';
+
+vi.mock('../api/scripts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/scripts')>()),
+  fetchRuntimeErrors: vi.fn(),
+}));
+
+import { fetchRuntimeErrors } from '../api/scripts';
 
 function doc(path: string, label: string): OpenDoc {
   return {
@@ -174,5 +186,113 @@ describe('ProblemsPanel', () => {
     // A gateway whose socket never came up gets a plain editor, not a broken one.
     render(<ProblemsPanel docs={[doc('ignition/script-python/a', 'a')]} lsp={null} onOpen={vi.fn()} />);
     expect(screen.getByText(/Only open scripts are checked/)).toBeInTheDocument();
+  });
+});
+
+describe('relativeTime', () => {
+  const now = 1_757_030_000_000;
+
+  it('reads the way someone asks the question', () => {
+    expect(relativeTime(now - 5_000, now)).toBe('5s ago');
+    expect(relativeTime(now - 3 * 60_000, now)).toBe('3 min ago');
+    expect(relativeTime(now - 5 * 3_600_000, now)).toBe('5h ago');
+    expect(relativeTime(now - 3 * 86_400_000, now)).toBe('3d ago');
+  });
+
+  it('never goes negative on a clock that is slightly ahead', () => {
+    expect(relativeTime(now + 4_000, now)).toBe('0s ago');
+  });
+});
+
+describe('ProblemsPanel — errors from the gateway', () => {
+  const runtimeApi = vi.mocked(fetchRuntimeErrors);
+
+  // The spy is module-level, so without this the call counts below accumulate
+  // across the tests above and "called once" is whatever ran before it.
+  beforeEach(() => {
+    runtimeApi.mockClear();
+  });
+
+  function payload(overrides: Partial<Awaited<ReturnType<typeof runtimeApi>>> = {}) {
+    return {
+      errors: [
+        {
+          logger: 'com.inductiveautomation.ignition.common.script.'
+            + 'ExtensionFunctionTimerScriptTask',
+          level: 'ERROR',
+          message: "Parse Error in timer script: 'P/MyTimerScript @1,000ms '",
+          lastSeen: Date.now() - 30_000,
+          count: 42,
+          exception: 'at org.python.core.Py.SyntaxError(Py.java:1)',
+        },
+      ],
+      windowMinutes: 60,
+      matchedBy: 'project name in the log message or logger',
+      ...overrides,
+    };
+  }
+
+  it('shows nothing at all without a project — there is no log to read', async () => {
+    runtimeApi.mockResolvedValue(payload());
+    render(<ProblemsPanel docs={[]} lsp={null} onOpen={vi.fn()} />);
+    expect(screen.queryByText(/From the gateway/)).not.toBeInTheDocument();
+    expect(runtimeApi).not.toHaveBeenCalled();
+  });
+
+  it('shows a failing timer script even with NO documents open', async () => {
+    // The point of the whole feature: which tabs are up has nothing to do with
+    // whether a timer script is failing every thirty seconds.
+    runtimeApi.mockResolvedValue(payload());
+    render(<ProblemsPanel docs={[]} lsp={null} onOpen={vi.fn()} project="P" />);
+    expect(await screen.findByText(/Parse Error in timer script/)).toBeInTheDocument();
+    expect(screen.getByText(/42× ·/)).toBeInTheDocument();
+  });
+
+  it('collapses repeats into a count rather than a row each', async () => {
+    runtimeApi.mockResolvedValue(payload());
+    render(<ProblemsPanel docs={[]} lsp={null} onOpen={vi.fn()} project="P" />);
+    expect(await screen.findByText(/42× ·/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Parse Error in timer script/)).toHaveLength(1);
+  });
+
+  it('states how a row was matched, in the server’s words', async () => {
+    // The rule is looser than the heading implies, and a reader has to know
+    // that before acting on a row.
+    runtimeApi.mockResolvedValue(payload());
+    render(<ProblemsPanel docs={[]} lsp={null} onOpen={vi.fn()} project="P" />);
+    expect(await screen.findByText(/Matched by project name in the log message or logger/))
+      .toBeInTheDocument();
+  });
+
+  it('says the log is quiet rather than implying the project is clean', async () => {
+    runtimeApi.mockResolvedValue(payload({ errors: [] }));
+    render(<ProblemsPanel docs={[]} lsp={null} onOpen={vi.fn()} project="P" />);
+    expect(await screen.findByText(/Nothing at warning level or worse mentioning/))
+      .toBeInTheDocument();
+  });
+
+  it('names a failure instead of rendering as an empty list', async () => {
+    // An empty runtime list and a broken query look identical, and one of them
+    // means "you are fine".
+    runtimeApi.mockRejectedValue(new Error('no log store'));
+    render(<ProblemsPanel docs={[]} lsp={null} onOpen={vi.fn()} project="P" />);
+    expect(await screen.findByText(/Could not read the gateway log: no log store/))
+      .toBeInTheDocument();
+  });
+
+  it('re-reads on demand', async () => {
+    runtimeApi.mockResolvedValue(payload());
+    render(<ProblemsPanel docs={[]} lsp={null} onOpen={vi.fn()} project="P" />);
+    await screen.findByText(/Parse Error in timer script/);
+    expect(runtimeApi).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(runtimeApi).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows one line of the trace, not the whole thing', async () => {
+    runtimeApi.mockResolvedValue(payload());
+    render(<ProblemsPanel docs={[]} lsp={null} onOpen={vi.fn()} project="P" />);
+    expect(await screen.findByText('at org.python.core.Py.SyntaxError(Py.java:1)'))
+      .toBeInTheDocument();
   });
 });

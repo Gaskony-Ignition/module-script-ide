@@ -159,6 +159,22 @@ public final class ScriptIdePaths {
      */
     public static final String ROUTE_NAMED_QUERY_TEST = "/api/named-queries/test";
 
+    /**
+     * The versions this IDE has saved for one document, for the current user.
+     *
+     * <p>Query parameters rather than a {@code :path} segment: this route takes
+     * project, path AND data key, and a Web Dev endpoint's key (`doGet.py`) is
+     * part of the document's identity. Encoding three things into one path
+     * segment is how the tab-aliasing bug of 1.2.0 happened.</p>
+     */
+    public static final String ROUTE_HISTORY = "/api/history";
+
+    /** One saved version's source. */
+    public static final String ROUTE_HISTORY_CONTENT = "/api/history/content";
+
+    /** What this project's scripts are actually throwing, from the gateway log. */
+    public static final String ROUTE_RUNTIME_ERRORS = "/api/runtime/errors";
+
     // ==================== Servlets (NOT under /data) ====================
 
     /**

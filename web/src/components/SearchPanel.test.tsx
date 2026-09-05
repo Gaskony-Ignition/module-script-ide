@@ -171,3 +171,127 @@ describe('SearchPanel — references', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/^1 place /));
   });
 });
+
+describe('SearchPanel — replace across the project', () => {
+  const found = [
+    hit('util.helpers', 3, '\treturn compute(x)'),
+    hit('util.helpers', 9, 'compute = 1'),
+    hit('orders.intake', 2, 'from util.helpers import compute'),
+  ];
+
+  function emptyReport() {
+    return { outcomes: [], filesChanged: 0, occurrences: 0, wrote: false };
+  }
+
+  function renderWithHits(onReplaceAll?: unknown) {
+    const lsp = fakeLsp({ searchText: vi.fn().mockResolvedValue(found) });
+    return renderPanel({
+      lsp,
+      onReplaceAll: onReplaceAll as React.ComponentProps<typeof SearchPanel>['onReplaceAll'],
+    });
+  }
+
+  it('offers no replace at all when the caller cannot write', async () => {
+    // A non-administrator gets the search. A button that 403s would be worse
+    // than no button.
+    renderWithHits(undefined);
+    searchFor('compute');
+    expect(await screen.findByText('util.helpers')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Replace with')).not.toBeInTheDocument();
+  });
+
+  it('offers replace once a text search has found something', async () => {
+    renderWithHits(vi.fn());
+    expect(screen.queryByLabelText('Replace with')).not.toBeInTheDocument();
+    searchFor('compute');
+    expect(await screen.findByLabelText('Replace with')).toBeInTheDocument();
+  });
+
+  it('takes two presses, and the first one states the count and the exact text', async () => {
+    const onReplaceAll = vi.fn().mockResolvedValue(emptyReport());
+    renderWithHits(onReplaceAll);
+    searchFor('compute');
+    fireEvent.change(await screen.findByLabelText('Replace with'), {
+      target: { value: 'recompute' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all…' }));
+    expect(onReplaceAll).not.toHaveBeenCalled();
+    // Two files, three occurrences — both numbers, because the risk of this
+    // feature is doing more than you meant to.
+    expect(screen.getByText(/3 occurrences of “compute” with “recompute”/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Replace in 2 files' }));
+    await waitFor(() =>
+      expect(onReplaceAll).toHaveBeenCalledWith(
+        [found[0].uri, found[2].uri], 'compute', 'recompute', false
+      )
+    );
+  });
+
+  it('says DELETE when the replacement is empty', async () => {
+    renderWithHits(vi.fn().mockResolvedValue(emptyReport()));
+    searchFor('compute');
+    await screen.findByLabelText('Replace with');
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all…' }));
+    expect(screen.getByText(/DELETE all 3 occurrences/)).toBeInTheDocument();
+  });
+
+  it('editing the replacement cancels a pending confirmation', async () => {
+    const onReplaceAll = vi.fn().mockResolvedValue(emptyReport());
+    renderWithHits(onReplaceAll);
+    searchFor('compute');
+    await screen.findByLabelText('Replace with');
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all…' }));
+    fireEvent.change(screen.getByLabelText('Replace with'), { target: { value: 'z' } });
+    expect(screen.getByRole('button', { name: 'Replace all…' })).toBeInTheDocument();
+    expect(onReplaceAll).not.toHaveBeenCalled();
+  });
+
+  it('reports what happened, including every file it did NOT change', async () => {
+    const onReplaceAll = vi.fn().mockResolvedValue({
+      outcomes: [
+        { uri: 'a', label: 'util.helpers', status: 'changed', count: 2 },
+        {
+          uri: 'b',
+          label: 'orders.intake',
+          status: 'skipped',
+          count: 0,
+          reason: 'inherited, and read-only until you override it',
+        },
+      ],
+      filesChanged: 1,
+      occurrences: 2,
+      wrote: true,
+    });
+    renderWithHits(onReplaceAll);
+    searchFor('compute');
+    await screen.findByLabelText('Replace with');
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Replace in 2 files' }));
+    expect(await screen.findByText(/Replaced 2 occurrences in 1 file\./)).toBeInTheDocument();
+    expect(screen.getByText(/read-only until you override it/)).toBeInTheDocument();
+  });
+
+  it('re-runs the search afterwards, so the list is not about the old text', async () => {
+    const searchText = vi.fn().mockResolvedValue(found);
+    const lsp = fakeLsp({ searchText });
+    renderPanel({ lsp, onReplaceAll: vi.fn().mockResolvedValue(emptyReport()) });
+    searchFor('compute');
+    await screen.findByLabelText('Replace with');
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Replace in 2 files' }));
+    await waitFor(() => expect(searchText).toHaveBeenCalledTimes(2));
+  });
+
+  it('is not offered for a references list — those match by NAME', async () => {
+    // Replacing across a name-based list renames unrelated members that happen
+    // to share the name. It is the exact trap the panel's own label warns about.
+    const lsp = fakeLsp({ references: vi.fn().mockResolvedValue(found) });
+    renderPanel({
+      lsp,
+      onReplaceAll: vi.fn(),
+      referencesRequest: { name: 'compute', nonce: 1 },
+    });
+    expect(await screen.findByText('util.helpers')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Replace with')).not.toBeInTheDocument();
+  });
+});

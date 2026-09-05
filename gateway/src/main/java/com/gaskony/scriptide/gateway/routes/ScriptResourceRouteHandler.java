@@ -67,8 +67,20 @@ public final class ScriptResourceRouteHandler {
 
     private final ProjectManager projectManager;
 
+    /**
+     * Where every accepted save is also recorded. Null on a gateway context this
+     * handler was built without — the save still happens, unrecorded.
+     */
+    private final com.gaskony.scriptide.gateway.history.SaveHistory history;
+
     public ScriptResourceRouteHandler(ProjectManager projectManager) {
+        this(projectManager, null);
+    }
+
+    public ScriptResourceRouteHandler(ProjectManager projectManager,
+            com.gaskony.scriptide.gateway.history.SaveHistory history) {
         this.projectManager = projectManager;
+        this.history = history;
     }
 
     // ==================== GET /api/projects ====================
@@ -532,10 +544,30 @@ public final class ScriptResourceRouteHandler {
             op = ChangeOperation.newModifyOp(builder.build(), existing.getResourceSignature());
         }
 
+        // Read the CURRENT body before the push, while the old resource is still
+        // the one on the gateway. See SaveHistory: the state someone started
+        // from is otherwise the one state their history cannot return them to,
+        // and the first save is usually the one that broke it.
+        // The RESOLVED key, not the raw one from the body. A save that omits the
+        // key is written under the resource's default, so recording the history
+        // under "" would file it where no read can find it — the dialog asks
+        // with the document's real key and would show an empty history for a
+        // file that has one.
+        String historyKey = existingOpt
+            .map(existing -> body.key == null || body.key.isBlank()
+                ? defaultKeyFor(existing, resourcePath)
+                : body.key)
+            .orElse(body.key == null || body.key.isBlank() ? "code.py" : body.key);
+        String previousBody = existingOpt
+            .map(existing -> bodyTextOf(existing, resourcePath, historyKey))
+            .orElse(null);
+
         Object pushError = push(op, project, resourcePath, req, resp);
         if (pushError != null) {
             return pushError;
         }
+
+        recordHistory(req, project, resourcePath, historyKey, body.source, previousBody);
 
         JsonObject out = new JsonObject();
         out.addProperty("ok", true);
@@ -735,6 +767,58 @@ public final class ScriptResourceRouteHandler {
     }
 
     /** The .py key a resource actually carries, falling back to its type's default. */
+    /**
+     * Record this save in the caller's own local history.
+     *
+     * <p>Never throws and never affects the response. By the time this runs the
+     * push has already succeeded, so the user's work is on the gateway; turning
+     * a successful save into an error because a side store could not be written
+     * would be the worst trade available.</p>
+     */
+    private void recordHistory(RequestContext req, String project, ResourcePath resourcePath,
+                               String key, String source, String previousBody) {
+        if (history == null) {
+            return;
+        }
+        try {
+            String user = com.gaskony.scriptide.gateway.security.SessionSecurity
+                .authenticatedUser(req)
+                .map(u -> u.getUserName())
+                .orElse(null);
+            if (user == null || user.isBlank()) {
+                return;
+            }
+            String path = HandlerSupport.encodePath(resourcePath);
+            history.recordBaselineIfEmpty(user, project, path, key, previousBody);
+            history.record(user, project, path, key, source);
+        } catch (RuntimeException e) {
+            logger.debug("Could not record save history for {}: {}", resourcePath, e.toString());
+        }
+    }
+
+    /**
+     * One resource's body as text, or null when it has none for that key.
+     *
+     * <p>Mirrors the branch in {@link #read}, including the Web Dev text
+     * resource whose body lives inside {@code config.json} rather than as a data
+     * key — a history that silently skipped those would be missing exactly the
+     * files that are hardest to retype.</p>
+     */
+    private static String bodyTextOf(Resource resource, ResourcePath resourcePath, String key) {
+        try {
+            if (WebDevResources.TEXT_DATA_KEY.equals(key)) {
+                return isWebDevPath(resourcePath)
+                    ? WebDevResources.body(WebDevResources.parseConfig(resource)).orElse(null)
+                    : null;
+            }
+            return resource.getData(key)
+                .map(data -> new String(data.getBytes(), StandardCharsets.UTF_8))
+                .orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     private static String defaultKeyFor(Resource resource, ResourcePath path) {
         // A Web Dev text resource has no .py at all, and its type's create key is
         // doGet.py — so without this the default read on one 404s with "No such

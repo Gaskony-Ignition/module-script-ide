@@ -41,6 +41,8 @@ public class ScriptIdeRouteRegistrar {
     private final WebDevConfigRouteHandler webDevConfigRouteHandler;
     private final NamedQueryRouteHandler namedQueryRouteHandler;
     private final NamedQueryTestRouteHandler namedQueryTestRouteHandler;
+    private final HistoryRouteHandler historyRouteHandler;
+    private final RuntimeErrorsRouteHandler runtimeErrorsRouteHandler;
 
     public ScriptIdeRouteRegistrar(GatewayContext context) {
         this.spaAssetRouteHandler = new SpaAssetRouteHandler();
@@ -48,7 +50,17 @@ public class ScriptIdeRouteRegistrar {
         // context is null only in the mount-order unit test, which never invokes a
         // handler — it just records the paths and their order.
         var projectManager = context == null ? null : context.getProjectManager();
-        this.scriptResourceRouteHandler = new ScriptResourceRouteHandler(projectManager);
+        // The history store needs the data directory, which only a real context
+        // has; without one the handler answers an empty list rather than 500ing,
+        // which is also what the mount-order unit test wants.
+        var saveHistory = context == null
+            ? null
+            : new com.gaskony.scriptide.gateway.history.SaveHistory(
+                context.getSystemManager().getDataDir().toPath());
+        this.scriptResourceRouteHandler =
+            new ScriptResourceRouteHandler(projectManager, saveHistory);
+        this.historyRouteHandler = new HistoryRouteHandler(saveHistory);
+        this.runtimeErrorsRouteHandler = new RuntimeErrorsRouteHandler(context);
         this.scriptAttributesRouteHandler =
             new ScriptAttributesRouteHandler(projectManager, scriptResourceRouteHandler);
         this.webDevConfigRouteHandler = new WebDevConfigRouteHandler(projectManager);
@@ -223,6 +235,31 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_JSON)
             .accessControl(admin)
             .handler(namedQueryTestRouteHandler::test)
+            .mount();
+
+        // ==================== Local history and runtime errors ====================
+        // Both are READS, so both take the authenticated gate rather than the
+        // write one: a reader who can already open every script in the tree is
+        // not further trusted by seeing their own saved versions, or a log line
+        // that names the project.
+
+        routes.newRoute(ScriptIdePaths.ROUTE_HISTORY)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(historyRouteHandler::list)
+            .mount();
+
+        // text/plain: a saved version is source, like the script read above.
+        routes.newRoute(ScriptIdePaths.ROUTE_HISTORY_CONTENT)
+            .type(RouteGroup.TYPE_PLAIN_TEXT)
+            .accessControl(authed)
+            .handler(historyRouteHandler::content)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_RUNTIME_ERRORS)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(runtimeErrorsRouteHandler::errors)
             .mount();
 
         // ==================== SPA static assets (catch-all) ====================

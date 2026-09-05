@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.14.4 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.15.3 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -119,6 +119,28 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   it holds a value its own reader already stripped, and a proxy may quote either.
   Comparing raw strings turns any of those into a permanent 409 that reads on
   screen as somebody else editing the file.
+- **Every API call goes through `apiUrl`, never a bare `/api/...`.** The SPA is
+  served from `/data/scriptide/` on a gateway and from `/` under `npm run dev`,
+  so a hardcoded path resolves against the server root and 404s on every real
+  install. It also passes every unit test, because a mocked `fetch` accepts any
+  string — all three routes added in 1.15.0 shipped to the rig broken with 588
+  tests green, and `validate_v13`'s console-error check is what caught it. Tests
+  for a new route assert the RESOLVED url, not that fetch was called.
+- **A CSS class name is a shared claim — do not reuse one for a new kind of
+  thing.** The live suites select on these class names, so widening what a class
+  matches silently changes what a suite asserts. 1.15.0 did it twice in one
+  release: runtime rows reused `.problems-row`, which is how
+  `validate_v19_ruler` counts static problems; and the replace box reused
+  `.search-panel-input`, which made `validate_v16_nav`'s `fill` ambiguous the
+  moment a search returned hits. A new kind of row gets a new class.
+- **A history restore LOADS THE BUFFER; it never writes.** `SaveHistory` is a
+  side store, and the one write path stays the ordinary save — with its
+  If-Match, its inheritance rule and its byte fidelity. A restore that wrote
+  directly would be a second write path with its own bugs, and it would remove
+  the moment where someone can look at what they are about to do. Both segments
+  of a history path are HASHES of the username and the resource path, never the
+  names: both are attacker-influenced strings that would otherwise become
+  directories.
 - **This module is not becoming a git module** (Nigel, 01/09/2026).
   `Gaskony-Ignition/module-git` exists. git is driven from the terminal's command
   line; anything added later is VS Code-shaped status and diffs on top of the

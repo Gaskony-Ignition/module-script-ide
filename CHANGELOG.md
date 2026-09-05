@@ -2,6 +2,93 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.15.3] — 2026-09-05
+
+feat: five things the IDE already knew and never said.
+
+Nigel, 05/09/2026, having read the product review: *"Please do all 5."* They
+ship as one release because they are one idea. The deprecation flag was already
+in the hint index and only ever reached a hover card. The gateway's log already
+knew which scripts were failing and nothing asked it. Search could find a string
+across the project and could not change it. And every save went straight into a
+running gateway with no way back to the version before it.
+
+### Added
+- **Local history.** Every save is kept on the gateway, per user, and the
+  version that was there BEFORE the first save is recorded as well — otherwise
+  the state you started from is the one state the history cannot return you to,
+  and the first save is usually the one that broke it. Bounded by construction:
+  25 versions and 2 MB per document, pruned oldest-first on every write, with a
+  512 KB ceiling on a single version. **Restore loads the buffer; it does not
+  write.** The old text goes into the tab as an unsaved edit and the ordinary
+  Save writes it, with the same If-Match, inheritance rule and byte fidelity as
+  any other save. Both path segments in the store are hashes, never names: a
+  username and a resource path are attacker-influenced strings that would
+  otherwise become directories.
+- **Deprecated calls are now a diagnostic**, not just a word in a hover card.
+  `CompletionDescriptor.getDeprecation()` has been read into `HintIndex` since
+  1.0 and was used for exactly two things — sorting a completion down the list
+  and printing "Deprecated." on hover. So the IDE knew a script called a
+  deprecated API and would only say so if you happened to hover the call.
+- **Scope-aware checks.** `system.gui` and `system.nav` do not exist on a
+  Gateway, and a timer script calling one fails at the next tick in a log nobody
+  is reading. Narrow by construction, and each narrowing removes a class of
+  false positive rather than a class of bug: only where the scope is CERTAIN
+  (gateway event scripts and Web Dev handlers, never a Project Library module a
+  Vision client may import); only the PACKAGE, never the function, because the
+  hint index is built under a time budget and a missing leaf can mean the walk
+  gave up; and only when `system` itself resolves, because a broken index would
+  otherwise report every line in the project.
+- **Replace across the project.** Search has been able to find a string in every
+  Project Library script since 1.0.0 and there was no way to change it — the
+  Designer has no project-wide replace either. Literal, never a pattern. Each
+  file is written through the ORDINARY save route with the If-Match from its own
+  read, so inheritance, CSRF and byte fidelity all still apply; it is the same
+  write, done several times. Inherited scripts and tabs with unsaved changes are
+  skipped and named in the report rather than silently included.
+- **Runtime errors in the Problems panel.** Everything the panel showed before
+  was static analysis of code that has not run. A timer script failing every
+  thirty seconds since Tuesday produced nothing there — it parses, its names
+  resolve — while being the most urgent thing on the gateway. The second list is
+  what the gateway has actually logged at WARN or worse in the last hour,
+  grouped so a script failing every second is one row with a count rather than
+  3,600 rows. The two lists are kept visibly apart: a runtime error has no line
+  number, because the gateway logs a message and not a range.
+
+### Fixed
+- **Local history was filed under the wrong key.** A save that omits the data
+  key is written under the resource's DEFAULT key, and the history recorded it
+  under `""` — while the dialog asks with the document's real key. So every
+  version was stored where no read could find it, and the dialog showed an empty
+  history for a file that had one. `validate_v23_insight` reported 0 versions
+  after two saves that both returned 200.
+- **The three new routes shipped to the rig with a bare `/api/...` and 404'd
+  there.** The SPA is served from `/data/scriptide/` on a gateway and from `/`
+  in dev, so every call goes through `apiUrl`; a hardcoded path works under a
+  mocked fetch and nowhere else. Caught by `validate_v13`'s console-error check
+  with 588 unit tests green either side of it, and now pinned by four tests that
+  assert the resolved URL rather than the call.
+- **Two new classes collided with selectors the live suites count.** The runtime
+  rows reused `.problems-row`, which is how `validate_v19_ruler` asserts how
+  many static problems there are; and the replace box reused
+  `.search-panel-input`, which made `validate_v16_nav`'s fill ambiguous the
+  moment a search returned hits. Both have their own class now. A shared class
+  name is a shared claim.
+
+### Verified
+`validate_v23_insight.py` — **27/27** — gates all five against the live gateway, and asserts
+the scope check as a DIFFERENCE — the same `system.gui` line in a message
+handler and in a library module, one marked and one not — because a check that
+only looked for a mark would pass on a build that marked everything. It also
+asserts that a local-history restore wrote NOTHING to the gateway, and that a
+traversal id reads nothing.
+
+`ApiCallsTest`, `PlatformApiChecksTest`, `SaveHistoryTest` and `ScriptErrorsTest`
+cover the rules; `PlatformApiRealScriptsTest` runs the new AST walk over the
+estate's own scripts, on the standing rule that any check judging a name gets a
+real-corpus test before it ships — the rule `UnknownNames` earned in 1.13.0 by
+producing 21 false positives on its first run over the same corpus.
+
 ## [1.14.4] — 2026-09-05
 
 feat: diagnostics for every language the IDE opens, and the terminal mystery root-caused.

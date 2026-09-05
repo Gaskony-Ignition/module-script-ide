@@ -69,10 +69,20 @@ public final class ModuleSymbols {
     private final int errorLine;
     private final int errorColumn;
     private final List<UnknownNames.Unknown> unknownNames;
+    private final List<ApiCalls.Call> apiCalls;
 
     private ModuleSymbols(String moduleName, List<Symbol> symbols, List<ImportBinding> imports,
                           String syntaxError, int errorLine, int errorColumn,
                           List<UnknownNames.Unknown> unknownNames) {
+        this(moduleName, symbols, imports, syntaxError, errorLine, errorColumn,
+            unknownNames, List.of());
+    }
+
+    private ModuleSymbols(String moduleName, List<Symbol> symbols, List<ImportBinding> imports,
+                          String syntaxError, int errorLine, int errorColumn,
+                          List<UnknownNames.Unknown> unknownNames,
+                          List<ApiCalls.Call> apiCalls) {
+        this.apiCalls = List.copyOf(apiCalls);
         this.moduleName = moduleName;
         this.symbols = List.copyOf(symbols);
         this.imports = List.copyOf(imports);
@@ -119,6 +129,16 @@ public final class ModuleSymbols {
         return unknownNames;
     }
 
+    /**
+     * Dotted platform paths this module names — see {@link ApiCalls}.
+     *
+     * <p>Empty for a module that does not parse, on the same reasoning as
+     * {@link #unknownNames()}.</p>
+     */
+    public List<ApiCalls.Call> apiCalls() {
+        return apiCalls;
+    }
+
     /** Find a top-level symbol by name. */
     public Optional<Symbol> find(String name) {
         return symbols.stream()
@@ -144,7 +164,7 @@ public final class ModuleSymbols {
                 collect(module.getInternalBody(), null, symbols, imports);
             }
             return new ModuleSymbols(moduleName, symbols, imports, null, 0, 0,
-                UnknownNames.find(parsed));
+                UnknownNames.find(parsed), ApiCalls.find(parsed));
         } catch (ParseException e) {
             // ANTLR-level failure. Positions live on the exception itself.
             return new ModuleSymbols(moduleName, symbols, imports,
