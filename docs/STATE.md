@@ -622,11 +622,13 @@ Done in 1.8.5: favicon; sidebar trees keep their open branches across a view
 switch; pull-from-gateway with stale markers. The rest followed:
 
 1. ~~The Designer's error ruler.~~ **DONE in 1.8.7**, `validate_v19_ruler.py`
-   16/16. Still true and still open: Problems covers neither WebDev nor
-   named-query documents, because neither is registered with the language
-   server — so the ruler is absent on those too.
+   16/16. The gap left open here — Problems and the ruler both absent on WebDev
+   and named-query documents, because neither is registered with the language
+   server — **was closed in 1.14.x**: those documents are linted by their own
+   language's parser and published into the same store, so both surfaces work
+   without knowing the difference.
 2. ~~WebDev static resources.~~ **DONE in 1.9.0**, `validate_v20_webdev.py`
-   29/29 against the real `Machine_HMI_Demo` endpoints. See "1.9.0" below.
+   32/32 against the real `Machine_HMI_Demo` endpoints. See "1.9.0" below.
 3. ~~Split view.~~ **DONE in 1.10.0**, `validate_v21_split.py` 21/21. See
    "1.10.0" below.
 
@@ -830,23 +832,28 @@ testing the 20 s watch interval, not the palette.
 the module as a product against Nigel's brief and deliver recommendations for
 going beyond the Designer (offer the write-up as an artifact page).
 
-**Open decisions for Nigel**, parked, none blocking:
-- `terminal.docker` default (currently true — the larger grant, on by default).
-- The `groups: cannot find name for group ID` notice — leave, or suppress in
-  the shell's environment.
-- The Administrator role name is assumed (`Administrator`); make it policy?
+**Open decisions for Nigel**, parked, none blocking. Four were answered on
+05/09/2026 and are recorded under "1.14.x" at the top of this file:
+`terminal.docker` stays on; gateway write access joins the role name as a
+UNION; `_wd_scratch_` is Inheritable; the login notice is suppressed. What is
+still open:
+
+- The Administrator role name is still assumed (`Administrator`). The 05/09
+  decision widened the gate rather than replacing it, so the literal string is
+  still in the code and a gateway that names the role anything else falls back
+  to `SESSION_WRITE` alone — which, measured on 8.3.8, denies. Make it policy?
 - ETag format (bare vs quoted).
 - The rig's API tokens are gone (noticed 02/09; nothing here uses them).
-- `_wd_scratch_` inheritable: flipping it lets the tree suite's read-only
-  checks run; it is web-designer's project.
 - `_si_child_` on the rig: keep as the fixture, or delete after the suites.
-- The rig admin password reached a scratchpad file and one agent transcript
-  line during the 02/09 fixture work (both scrubbed): rotate it.
+- ~~The rig admin password reached a scratchpad file and one agent transcript
+  line during the 02/09 fixture work (both scrubbed): rotate it.~~ **WAIVED**
+  by Nigel, 05/09/2026 — *"it's purely a test gateway"*.
 
 ## What is proved on a real gateway
 
-Eight suites plus a per-theme contrast sweep, **all green on 1.6.0**, all run
-against the live gateway rather than mocks.
+Nine suites plus a per-theme contrast sweep, **all green on 1.14.4**, all run
+against the live gateway rather than mocks. The per-suite tally is at the top of
+this file; the paragraphs below say what each one covers and why it exists.
 
 Two of them had stopped being gates and were repaired in 1.6.0, which is worth
 knowing before trusting a tally: `validate_p1_p2.py` had been reading
@@ -1105,9 +1112,14 @@ gutter marker.
   diagnostics for documents this client opened, so a project-wide problem list
   would need every script opened on the server. The empty state names the limit
   rather than reading as "the project is clean".
-- **Diagnostics are syntax-only.** Undefined-name, unused-import and arity checks
-  were designed but not shipped: the release bar was zero false positives, and one
+- **Diagnostics are syntax plus undefined names, and nothing more.** Unused
+  imports and arity checks are still designed-but-not-shipped, on the same bar
+  that held undefined names back until 1.13.0: zero false positives, because one
   wrong squiggle on correct code costs more trust than ten missed problems.
+  Undefined names cleared that bar only with `UnknownNamesRealScriptsTest`
+  behind them. Every language now has SOME check (1.14.x) — Python's is the
+  gateway's Jython parser, the other five use their own Lezer parser — but
+  HTML's is structural only, because its parser reports no errors at all.
 - **Perspective/Vision event scripts** are not editable — their code lives inside
   view JSON, not as its own resource.
 - **No git UI**, still. Nigel's decision (01/09/2026): this module is not becoming a git
@@ -1117,11 +1129,18 @@ gutter marker.
 - **Tag Change attribute writes are still refused**, because that Designer
   workspace has never been measured. Its tag-path list is the missing piece, and
   guessing the key would write a value the Designer never reads.
-- **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`; `v1.0.0`
-  through `v1.5.4` tagged 01–02/09/2026, `CHANGELOG.md` complete to 1.5.4. The
-  folder is gitignored by the workspace repo, like every sibling module. There
-  is **no GitHub release artefact** — the signed `.modl` is built locally and
-  has not been attached to any tag.
+- **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`. Tagged
+  `v1.0.0`–`v1.5.4` (01–02/09/2026) and `v1.7.0`–`v1.14.4` (05/09/2026,
+  retroactively — the tag dates are the day they were written, the commit dates
+  are real). `CHANGELOG.md` is complete to 1.14.4. **Some shipped versions have
+  no tag and can never have one**: 1.6.0, 1.6.1 and 1.7.1 have no commit of
+  their own — their source is inside the 1.7.0 commit — and the same is true of
+  1.12.0 inside 1.13.0's. The interim rig builds (1.12.1–1.12.2,
+  1.14.0–1.14.3) were never separate commits either, by intent. The folder is
+  gitignored by the workspace repo, like every sibling module.
+  **`v1.14.4` carries the signed `.modl` as a GitHub release asset**, verified
+  md5-identical to the file the rig is running; no earlier tag has one, because
+  those builds no longer exist.
 
 ## Measured facts worth not rediscovering
 

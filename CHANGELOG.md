@@ -2,6 +2,162 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.14.4] — 2026-09-05
+
+feat: diagnostics for every language the IDE opens, and the terminal mystery root-caused.
+
+### Fixed
+- **Only Python had error signalling at all.** A document was registered with
+  the language server only when it was a `.py` file, so a Web Dev `cell3d.html`,
+  a `site.css`, a WebDev JavaScript file and a named query's SQL had no
+  squiggle, no gutter mark, no line-number mark, no ruler entry and no Problems
+  row — and nothing said so. `syntaxLint.ts` uses each language's own parser,
+  the one CodeMirror already loads for highlighting, and publishes into the same
+  store the server publishes to, so the ruler and the Problems panel need no
+  change. Measured per language first: CSS, JavaScript, JSON and SQL report real
+  error nodes; **HTML's parser reports none**, by design, so HTML gets a narrow
+  structural check behind an allowlist — `<div><p>hi</div>` is valid and must
+  stay silent.
+- **The 401 save bar and the phantom pull** (both 1.13.0) are gated by
+  `validate_v22_editing.py` from this release, after two suite bugs of their own
+  were found: it counted lint marks with an unscoped selector, so it saw the
+  marks of hidden tabs, and one check formatted its message from a second query
+  that disagreed with its own assertion.
+
+### Changed — Nigel's four parked decisions, answered 05/09/2026
+- **Gateway write access joins the role name as a UNION.**
+  `SessionSecurity.canWriteGateway` grants on the platform's own
+  `WebUiSession.SESSION_WRITE` **or** the `Administrator` role. Measured on
+  8.3.8, `SESSION_WRITE` alone DENIED the gateway's own `admin`, so replacing
+  the role check with it would have shipped a module nobody could save from.
+- **`terminal.docker` stays on by default** — the larger grant, deliberately.
+- **`_wd_scratch_` is Inheritable**, so `validate_v15_tree.py`'s read-only
+  checks run instead of skipping. The child now inherits an Update, so the
+  suite discovers two fixtures rather than assuming one.
+- **The `groups: cannot find name for group ID` login notice is suppressed**
+  via Debian's own `$HOME/.hushlogin`, which is the same condition guarding the
+  block that printed it. The nameless gid is the host docker group.
+
+### Verified
+The v13 terminal input checks are **restored**. They were removed on 02/09/2026
+as "NOT ROOT-CAUSED"; hooking `WebSocket.prototype.send` and replaying the
+suite's exact sequence put every keystroke on the wire — 14 `term`/`input`
+frames with a real terminal id, and the echo came back. There was no defect.
+Everything in the earlier investigation had looked at the DOM; nothing had
+looked at the socket, which is the only place that separates "the browser never
+sent it" from "the server never answered". `stty size` now proves the pty
+carries the fitted size rather than 80x24.
+
+Two goes at the HTML check were wrong and a real file caught both.
+`cell3d.html` is 1,559 lines that render in every browser; the first version
+marked `<html>`, `<head>` and `<style>` "never closed", because CodeMirror
+parses lazily and the close tags were outside the tree. `syntaxTreeAvailable`
+looks like the API for this and is not — it returned TRUE for a tree covering
+3,041 characters of 72,626 — and `tree.length` equals the document length in
+the live editor while most of it is still placeholder. The rule confirms the
+close tag in the **text**, which no parse state can lie about;
+`syntaxLint.corpus.test.ts` pins it, opt-in behind `SI_HTML_CORPUS`.
+
+`deploy_gate.py` PASS (6 checks) on `ignition-module-testing`. `v13` 27/27,
+`v15_tree` 18/18, `v16_nav` 25/25, `v17_nq` 45/45, `v18_pull` 20/20,
+`v19_ruler` 16/16, `v20_webdev` 32/32, `v21_split` 21/21, `v22_editing` 20/20,
+theme sweep 10/10 with no illegible element. Java 379, Vitest 545.
+
+Interim builds 1.14.0–1.14.3 were this work under test on the rig and shipped
+to no one else.
+
+## [1.13.0] — 2026-09-04
+
+feat: six things Nigel found in one sitting, every one of them a case where it looked like it was working.
+
+### Added
+- **A name that is defined nowhere is now reported.** *"I can put absolute
+  garbage in here and it doesn't show up as an error"* — `j;sdfj;asdfjk;dksfj`.
+  The parser was right: that is four semicolon-separated expression statements
+  and valid Python 2. There was simply no check for an undefined name.
+  `UnknownNames` reports a name bound nowhere in the module that is neither a
+  builtin nor one of the ~20 the platform injects, and gives up every scope rule
+  deliberately — a mark on working code teaches a reader to ignore the marks.
+  **`UnknownNamesRealScriptsTest` is the load-bearing test**: over the 38 real
+  scripts on this rig the first version produced 21 complaints, every one a
+  project script-library root (`MachineDemo`, `MiningDemo`, `Access`). It would
+  have marked a line in nearly every script in the estate. The server supplies
+  the roots from `ProjectIndex` now.
+
+### Fixed
+- **"the error mark showed up high instead of in line with the actual line."**
+  The overview ruler maps the whole document, so a fault on line 22 of 190 sits
+  a tenth of the way down it — correct, and unreadable as anything but a mark in
+  the wrong place. `lintLineGutter` colours the **line number**, the thing a
+  reader is already using to find a line. The ruler stays: this adds a signal,
+  it does not move one.
+- **"the hover over information display needs to be more solid."** The tooltip
+  used `--surface`, which on a glass pack is that pack's own
+  `rgba(255,255,255,0.10)` film, so code read straight through the
+  documentation. It uses `--glass-panel` now — the composited fill the palette
+  and the dialogs already had. The tooltip was the one floating layer that
+  never got it.
+- **"tried to save but it came up with an authentication error… I could
+  potentially lose work."** A 401 fell through to the generic save-failed
+  notice, which printed the servlet container's JSON body verbatim in a
+  one-line strip, and nothing said the work was safe. Now a dedicated bar says
+  the buffer is untouched and offers "Sign in again" and "Retry the save"; the
+  20 s watch raises it too, so it surfaces before the next Ctrl+S rather than
+  at it. `toApiError` reads the container's `message` field instead of the
+  envelope and refuses to put a proxy's HTML on screen as a message.
+- **"no changes were made via the designer… when I click on the compare I
+  couldn't see any differences"**, then *"when I just refreshed the page it
+  stopped showing me any need to pull"*. Both say the resource signature moved
+  and the bytes did not, which a gateway restart does; the watch announced it
+  anyway, because the listing carries only signatures. Every newly-stale
+  document is now verified once by reading it — identical, adopt the signature
+  and say nothing; different, leave the bar up. The compare dialog names the
+  count of differing lines, marks each change with a fill, a solid edge **and**
+  a ±glyph, scrolls the first into view, and says plainly when there are none.
+- **"I want by default the WebDev to start shrunk but remember what I've
+  expanded between tabs."** The Web Dev tree shipped fully expanded and reset on
+  every view switch. It ships collapsed and keeps its open branches, like the
+  other trees since 1.8.5.
+
+### Verified
+`validate_v22_editing.py` (20 checks) gates five of the six; the sixth is in
+`v20_webdev`, now 32/32.
+
+## [1.12.0] — 2026-09-04
+
+fix: the status colours — three themes, not one.
+
+### Fixed
+- **Two themes painted error, warning and success as a single hex**, and a
+  third painted two greys 13 apart:
+
+      industrial-day-cyan     error #545454   success #4f545e
+      leather-night-tan       error = warning = success = #c9996e
+      leather-parchment-tan   error = warning = success = #7a550b
+
+  Recorded at 1.7.0 as a contrast problem on one theme and left as Nigel's
+  call. That was the wrong diagnosis and the wrong size: the pack's red clears
+  4.5:1 easily, and what the generator picked was never a red. Nothing caught
+  it because nothing had ever compared one status token against another, or
+  asked whether either was a colour at all.
+
+  The cause is the 1.2.0 lesson one level down. `text.status-alarm` is not the
+  pack's alarm colour — it is the **ink** that goes on an alarm chip, and in a
+  light industrial pack that ink is `#FFFFFF`. `pick_legible` takes the first
+  token present, correctly, so a present-but-achromatic ink beat the real
+  signal colour every time, and `lift_to_contrast` could not rescue it because
+  lightness is the only axis it moves. Three changes in `tools/build-themes.py`:
+  a signal role skips a candidate below `SIGNAL_CHROMA_MIN` (28/255, read off
+  the measured spread of all 110 candidates — the rejects score 0…26, the keeps
+  start at 31, and the bar goes in the one gap there is); `border.danger` moves
+  ahead of `accent.alarm-high` for `--error`, because both industrial packs
+  paint "alarm-high" AMBER, which is high priority and not danger; and
+  `differentiate_signals` pulls apart status colours that resolved to one
+  another **by weight only** — a status colour is never rotated, because an
+  amber turned 50° to clear a red is a green.
+
+Interim builds 1.12.1–1.12.2 were this work under test on the rig.
+
 ## [1.11.0] — 2026-09-04
 
 feat: the themes pass — colour in the grounds, the packs' own rails, and a syntax palette that distinguishes.
