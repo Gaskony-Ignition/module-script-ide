@@ -445,6 +445,81 @@ public final class ScriptResourceRouteHandler {
         return null;
     }
 
+    // ==================== GET /api/scripts/inherited/:path ====================
+
+    /**
+     * The PARENT project's copy of a resource, for comparing an override against
+     * what it overrides.
+     *
+     * <p>Overriding a resource does not lose inheritance — {@code Discard
+     * Overrides} returns it to the parent's copy — and until 1.16.0 there was no
+     * way to see what your override had actually changed, nor to look before
+     * discarding. The Designer does not offer this either.</p>
+     *
+     * <p>Walks the parent CHAIN, not just the immediate parent: a resource can be
+     * inherited from a grandparent, and stopping at the first parent would report
+     * "no parent copy" for a resource that plainly has one. Bounded, because a
+     * manifest could name a cycle and this must not become an infinite loop on a
+     * misconfigured gateway.</p>
+     */
+    public Object inherited(RequestContext req, HttpServletResponse resp) throws IOException {
+        String project = req.getParameter("project");
+        if (project == null || project.isBlank()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Missing required 'project' parameter");
+        }
+        ResourcePath resourcePath;
+        try {
+            resourcePath = HandlerSupport.decodePath(req.getParameter("path"));
+        } catch (IllegalArgumentException e) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
+        }
+
+        Map<String, ResourceCollectionManifest> manifests;
+        try {
+            manifests = projectManager.getManifests();
+        } catch (Exception e) {
+            logger.debug("getManifests() failed: {}", e.getMessage());
+            manifests = Map.of();
+        }
+
+        String current = project;
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        for (int hop = 0; hop < MAX_PARENT_HOPS; hop++) {
+            ResourceCollectionManifest manifest = manifests.get(current);
+            String parent = manifest == null ? null : manifest.parent();
+            if (parent == null || parent.isBlank() || !visited.add(parent)) {
+                break;
+            }
+            Optional<Resource> found = projectManager.getResource(parent, resourcePath);
+            if (found.isPresent()) {
+                Resource resource = found.get();
+                String key = req.getParameter("key");
+                if (key == null || key.isBlank()) {
+                    key = defaultKeyFor(resource, resourcePath);
+                }
+                String body = bodyTextOf(resource, resourcePath, key);
+                if (body != null) {
+                    // Named so the dialog can say WHICH project it is comparing
+                    // against — with a chain, "the parent" is not specific enough
+                    // to act on.
+                    resp.setHeader("X-Parent-Project", parent);
+                    resp.setContentType("text/plain; charset=UTF-8");
+                    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                    resp.setContentLength(bytes.length);
+                    resp.getOutputStream().write(bytes);
+                    return null;
+                }
+            }
+            current = parent;
+        }
+        return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+            "No parent project has a copy of this resource");
+    }
+
+    /** How far up a parent chain to look before giving up. */
+    private static final int MAX_PARENT_HOPS = 10;
+
     // ==================== POST /api/scripts/content/:path ====================
 
     /**
@@ -672,6 +747,174 @@ public final class ScriptResourceRouteHandler {
         out.addProperty("ok", true);
         out.addProperty("deleted", resourcePath.toString());
         return out;
+    }
+
+    // ==================== POST /api/scripts/rename ====================
+
+    /**
+     * Move one script resource to a new path.
+     *
+     * <p>Named queries have had this since 1.7.0; scripts have not, so renaming a
+     * library module meant create-at-the-new-path, delete-the-old, and then find
+     * every import by hand. The last step is the one that gets missed.</p>
+     *
+     * <h3>Deliberately narrower than the named-query rename</h3>
+     *
+     * <p>ONE resource, never a folder and never its children. A folder move is a
+     * multi-resource push with collision checking across the whole subtree — the
+     * named-query handler does it and is long because of it — and shipping a
+     * half-version that moved a folder's direct children only would be worse than
+     * not offering it. Renaming a package is still a manual job, and the UI says
+     * so rather than the button silently doing less than it looks like.</p>
+     *
+     * <h3>Call sites are the CLIENT's job, and separately</h3>
+     *
+     * <p>This moves the resource and returns the old and new dotted module names.
+     * It does not touch anybody else's source: rewriting imports is a
+     * project-wide replace, which already exists, already shows a preview, and
+     * already refuses inherited and dirty documents. Doing it silently inside a
+     * rename would be a bulk write with none of those guards, hidden behind a
+     * button that says "rename".</p>
+     */
+    public Object rename(RequestContext req, HttpServletResponse resp) throws IOException {
+        String project = req.getParameter("project");
+        if (project == null || project.isBlank()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Missing required 'project' parameter");
+        }
+        Object csrf = HandlerSupport.enforceCsrf(req, resp);
+        if (csrf != null) {
+            return csrf;
+        }
+        RenameRequest body;
+        try {
+            body = HandlerSupport.GSON.fromJson(req.readBody(), RenameRequest.class);
+        } catch (JsonParseException e) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Malformed JSON request body");
+        }
+        if (body == null || body.path == null || body.newPath == null) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Request body must contain 'path' and 'newPath'");
+        }
+
+        ResourcePath from;
+        ResourcePath to;
+        try {
+            from = HandlerSupport.decodePath(body.path);
+            to = HandlerSupport.decodePath(body.newPath);
+        } catch (IllegalArgumentException e) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
+        }
+        Object rejected = rejectNonScript(from, resp);
+        if (rejected != null) {
+            return rejected;
+        }
+        rejected = rejectNonScript(to, resp);
+        if (rejected != null) {
+            return rejected;
+        }
+        if (from.equals(to)) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "'path' and 'newPath' are the same");
+        }
+        // The two ends must be the same KIND of thing. Moving a timer script into
+        // the library would produce a resource whose type says timer and whose
+        // path says library, which nothing downstream expects.
+        if (!from.getResourceType().equals(to.getResourceType())) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "A script can only be renamed within its own resource type");
+        }
+        if (projectManager.find(project).isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+                "No such project: " + project);
+        }
+        if (!projectManager.isMutable(project)) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_CONFLICT,
+                "Project is not mutable: " + project);
+        }
+
+        // OWN-project lookup, like write and delete: an inherited script is not
+        // this project's to move, and a merged lookup would rename the PARENT's.
+        Resource source = projectManager.getResource(project, from).orElse(null);
+        if (source == null) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_NOT_FOUND,
+                "No such script in " + project + " (an inherited script cannot be renamed "
+                    + "from the project that inherits it): " + from);
+        }
+        if (source.isFolder() || source.getDataKeys().isEmpty()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Renaming a folder is not supported — move its scripts individually");
+        }
+        Object stale = null;
+        String expected = HandlerSupport.expectedSignature(req, body.baseSignature);
+        if (expected == null || expected.isBlank()) {
+            stale = HandlerSupport.error(resp, HandlerSupport.SC_PRECONDITION_REQUIRED,
+                "Missing If-Match/baseSignature — read the script before renaming it");
+        } else if (!expected.equals(source.getResourceSignature().toString())) {
+            stale = HandlerSupport.error(resp, HttpServletResponse.SC_CONFLICT,
+                "This script changed on the gateway since you opened it (concurrent edit)");
+        }
+        if (stale != null) {
+            return stale;
+        }
+        if (projectManager.getResource(project, to).isPresent()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_CONFLICT,
+                "'" + to + "' already exists in " + project);
+        }
+
+        // Create-then-delete in ONE push. Two pushes would leave the project with
+        // both copies, or neither, if the second failed.
+        ResourceBuilder builder = source.toBuilder().setResourcePath(to);
+        ChangeOperation create = ChangeOperation.newCreateOp(builder.build());
+        ChangeOperation remove = ChangeOperation.newDeleteOp(source.getResourceSignature());
+        try {
+            projectManager.push(new PushOperation(List.of(create, remove),
+                HandlerSupport.actorFor(req)))
+                .get(HandlerSupport.PUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_GATEWAY,
+                "Interrupted while renaming");
+        } catch (Exception e) {
+            logger.debug("Rename push failed for {} -> {}: {}", from, to, e.toString());
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_GATEWAY,
+                "The gateway refused the rename: " + e.getMessage());
+        }
+
+        logger.info("Script renamed: {} -> {} in {} by {}", from, to, project,
+            HandlerSupport.actorFor(req));
+
+        JsonObject out = new JsonObject();
+        out.addProperty("ok", true);
+        out.addProperty("path", HandlerSupport.encodePath(to));
+        // The dotted names, so the client can offer to update call sites without
+        // having to know how a resource path maps onto an import.
+        out.addProperty("oldModule", dottedModuleOf(from));
+        out.addProperty("newModule", dottedModuleOf(to));
+        projectManager.getResource(project, to)
+            .ifPresent(now -> out.addProperty("signature",
+                now.getResourceSignature().toString()));
+        return out;
+    }
+
+    /**
+     * {@code ignition/script-python/util/helpers} → {@code util.helpers}, or null
+     * for a resource type that is not importable.
+     */
+    private static String dottedModuleOf(ResourcePath path) {
+        if (!ScriptResourceTypes.TYPE_SCRIPT_PYTHON.equals(path.getResourceType().typeId())) {
+            return null;
+        }
+        String tail = path.getPath().toString();
+        return tail.isEmpty() ? null : tail.replace('/', '.');
+    }
+
+    /** Body of POST /api/scripts/rename. */
+    static final class RenameRequest {
+        String path;
+        String newPath;
+        String baseSignature;
     }
 
     /** Run a push, mapping every failure onto a status. Returns null on success. */

@@ -31,6 +31,7 @@ public final class ScriptIdeSocketRegistry {
     private static volatile ExecutionService executionService;
     private static volatile ExecAudit execAudit;
     private static volatile TerminalService terminalService;
+    private static volatile com.gaskony.scriptide.gateway.history.RunHistory runHistory;
 
     private static final Set<ScriptIdeSocket> OPEN_SOCKETS = ConcurrentHashMap.newKeySet();
 
@@ -42,6 +43,8 @@ public final class ScriptIdeSocketRegistry {
         executionService = new ExecutionService(ctx);
         execAudit = new ExecAudit(ctx);
         terminalService = new TerminalService(ctx);
+        runHistory = new com.gaskony.scriptide.gateway.history.RunHistory(
+            ctx.getSystemManager().getDataDir().toPath());
         logger.debug("Script IDE socket registry initialised");
     }
 
@@ -53,6 +56,18 @@ public final class ScriptIdeSocketRegistry {
     /** The terminal pool, or null when the module is not started. */
     public static TerminalService getTerminalService() {
         return terminalService;
+    }
+
+    /**
+     * Where finished executions are kept for the user who ran them.
+     *
+     * <p>Distinct from {@link #getExecAudit()} and not a replacement for it: the
+     * audit is the estate's record that a run HAPPENED and stores a hash rather
+     * than the code, and this is the user's own scratch history and stores the
+     * source and the output. Different readers, different retention.</p>
+     */
+    public static com.gaskony.scriptide.gateway.history.RunHistory getRunHistory() {
+        return runHistory;
     }
 
     /** The audit recorder, or null when the module is not started. */

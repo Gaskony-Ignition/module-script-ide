@@ -42,19 +42,24 @@ class ScriptResourceTypesTest {
     }
 
     @Test
-    @DisplayName("Tag Change is STILL body-only, because its tag list was never measured")
-    void tagChangeRejectsAttributeWrites() {
-        // The Designer's Tag Change workspace has a tag-path list and NOTHING
-        // measured records the attribute holding it. Guessing the key would put a
-        // value on a live gateway that the Designer never reads — which is worse
-        // than declining, because it looks configured and is not.
+    @DisplayName("Tag Change carries exactly the three attributes measured on a real resource")
+    void tagChangeAttributesAreMeasured() {
+        // Body-only from 1.1.0 to 1.15.x, because the tag-path list's attribute
+        // name was unknown and guessing it would put a value on a live gateway
+        // that the Designer never reads — configured-looking and inert.
         //
-        // The other three types moved OFF this list in 1.1.0 on measured
-        // evidence, not analogy: see enabledIsMeasuredNotInferred below. If you
-        // are here to add tag-change from analogy, go and measure the workspace
-        // instead; that is a smaller job than the bug it prevents.
+        // Measured 06/09/2026 off `_wd_scratch_/ignition/tag-change/...`, a real
+        // resource written by the platform:
+        //
+        //   "paths": ["[default]A201"],
+        //   "changeTypes": ["ValueChange", "QualityChange", "TimestampChange"],
+        //   "enabled": true
+        //
+        // EXACTLY these three. If you are here to add a fourth from analogy, go
+        // and measure it instead; that is a smaller job than the bug it prevents.
         assertThat(ScriptResourceTypes.byTypeId(ScriptResourceTypes.TYPE_TAG_CHANGE)
-            .orElseThrow().attributeAllowlist()).isEmpty();
+            .orElseThrow().attributeAllowlist())
+            .containsExactlyInAnyOrder("enabled", "paths", "changeTypes");
     }
 
     @Test

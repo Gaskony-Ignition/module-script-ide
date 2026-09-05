@@ -165,3 +165,36 @@
 .config-field-trailing select {
   padding: 0 var(--space-2);
 }
+
+/* Tag Change's two array attributes (R4, 1.16.0). One tag path per line: a
+   comma-separated box invites a comma inside a tag path, which is legal. */
+.config-paths {
+  min-width: 22rem;
+  padding: var(--space-1, 4px) var(--space-2);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.config-paths:focus-visible {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.config-changetypes {
+  display: inline-flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.config-changetypes label {
+  display: inline-flex;
+  gap: var(--space-1, 4px);
+  align-items: center;
+  white-space: nowrap;
+}

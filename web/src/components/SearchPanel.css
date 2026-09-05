@@ -252,3 +252,23 @@
 .search-panel-report-file {
   color: var(--text-secondary);
 }
+
+/* The unused-symbols button (1.16.0). A quiet control beside "Match case": it is
+   a report, not the panel's main job, and it takes a moment to run. */
+.search-panel-unused {
+  margin-left: auto;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.search-panel-unused:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}

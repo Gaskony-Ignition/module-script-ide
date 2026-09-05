@@ -168,6 +168,8 @@ public final class LanguageServer {
                 return workspaceSymbol(params);
             case "scriptide/searchText":
                 return searchText(params);
+            case "scriptide/unusedSymbols":
+                return unusedSymbols();
             case "scriptide/references":
                 return references(params);
             default:
@@ -737,6 +739,34 @@ public final class LanguageServer {
     }
 
     /**
+     * Library functions and classes nothing in the project appears to call.
+     *
+     * <p>Namespaced as our own method for the same reason references is: the
+     * answer is NAME-based and the client has to opt into that and label it. A
+     * standard method would imply a certainty this cannot have — see
+     * {@link ProjectIndex#unusedSymbols}.</p>
+     */
+    private JsonElement unusedSymbols() {
+        JsonArray out = new JsonArray();
+        if (projectIndex == null || project == null) {
+            return out;
+        }
+        for (ProjectIndex.UnusedSymbol unused : projectIndex.unusedSymbols(project, 200)) {
+            JsonObject item = new JsonObject();
+            item.addProperty("module", unused.moduleName());
+            item.addProperty("name", unused.symbolName());
+            item.addProperty("kind", unused.kind());
+            item.addProperty("line", unused.line());
+            item.addProperty("character", unused.column());
+            item.addProperty("text", unused.symbolName());
+            item.addProperty("uri", "ignition://" + project + "/ignition/script-python/"
+                + unused.moduleName().replace('.', '/'));
+            out.add(item);
+        }
+        return out;
+    }
+
+    /**
      * One cross-file hit as the wire object both search and references return.
      *
      * <p>Shared so the two cannot drift: the client renders them through one
@@ -749,8 +779,22 @@ public final class LanguageServer {
         item.addProperty("line", hit.line());
         item.addProperty("character", hit.column());
         item.addProperty("text", hit.lineText());
-        item.addProperty("uri", "ignition://" + project + "/ignition/script-python/"
-            + hit.moduleName().replace('.', '/'));
+        // The RESOURCE PATH the hit carries, never a path rebuilt from the label.
+        // Until 1.16.0 this composed `ignition/script-python/` + the dotted module
+        // name, which was correct only because nothing but library scripts was
+        // ever searched. With gateway event scripts, Web Dev handlers and
+        // named-query SQL in the corpus, rebuilding would address the wrong
+        // resource for three of the four — silently, since the URI is well formed.
+        String uri = "ignition://" + project + "/" + hit.resourcePath();
+        // The data key is part of a document's identity wherever one resource
+        // holds several scripts, which is every Web Dev endpoint. `lspUri` on the
+        // client omits it for the default key, and `parseLocationUri` reads it
+        // back off the fragment.
+        if (hit.dataKey() != null && !hit.dataKey().isBlank()
+            && !"code.py".equals(hit.dataKey())) {
+            uri = uri + "#" + hit.dataKey();
+        }
+        item.addProperty("uri", uri);
         return item;
     }
 

@@ -22,6 +22,10 @@
  * - **A read-only (inherited) script is skipped.** It is read-only for the same
  *   reason it is in the Designer, and creating an override for every hit would
  *   fork half a project on one button.
+ * - **A named query is skipped.** Its SQL is searched (1.16.0) but written
+ *   through a different route, against a signature it shares with its settings.
+ *   Writing it here would need the settings half too — see the lost-update
+ *   `validate_v17_nq` found — so it is reported rather than half-done.
  * - **A file whose signature moved is skipped.** Each write carries the
  *   If-Match from its own read, so a concurrent edit fails that one file's write
  *   rather than overwriting it. The report names it.
@@ -43,7 +47,7 @@ export interface ReplaceTarget {
   /** A human label for the report — the dotted module name where known. */
   label: string;
   /** Why this one cannot be written, or undefined when it can. */
-  skip?: 'read-only' | 'unsaved-changes';
+  skip?: 'read-only' | 'unsaved-changes' | 'named-query';
 }
 
 /** What happened to one script. */
@@ -129,7 +133,9 @@ export async function runReplaceAll(
         reason:
           target.skip === 'read-only'
             ? 'inherited, and read-only until you override it'
-            : 'has unsaved changes in an open tab',
+            : target.skip === 'named-query'
+              ? 'a named query — searched, but SQL is edited through its own tab'
+              : 'has unsaved changes in an open tab',
       });
       continue;
     }

@@ -193,3 +193,29 @@
 .workspace-signedout .button {
   flex: 0 0 auto;
 }
+
+/* The unparseable-save question (1.16.0).
+
+   Same shape as the session bar above — icon, message, two answers — because it
+   is the same kind of moment. WARNING rather than error on the edge: nothing has
+   gone wrong yet, and this is a question, not a failure. Its own class rather
+   than a modifier on `.workspace-signedout`, so a suite counting either one
+   cannot pick up the other. */
+.workspace-savewarn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-bottom: 2px solid var(--warning);
+  color: var(--text-primary);
+}
+
+.workspace-savewarn > svg {
+  color: var(--warning);
+  flex: 0 0 auto;
+}
+
+.workspace-savewarn .button {
+  flex: 0 0 auto;
+}

@@ -92,6 +92,42 @@ public class HistoryRouteHandler {
         return null;
     }
 
+    /**
+     * GET /api/runs — this user's finished executions, newest first.
+     *
+     * <p>Read from the store rather than from the audit profile: the audit keeps
+     * a HASH of the source by design, so it can say a run happened and never
+     * what was run. See {@code RunHistory}.</p>
+     */
+    public Object runs(RequestContext req, HttpServletResponse resp) throws IOException {
+        String user = SessionSecurity.authenticatedUser(req)
+            .map(u -> u.getUserName())
+            .orElse(null);
+        JsonObject out = new JsonObject();
+        JsonArray items = new JsonArray();
+        var store = com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry.getRunHistory();
+        if (user != null && !user.isBlank() && store != null) {
+            for (var run : store.list(user)) {
+                JsonObject item = new JsonObject();
+                item.addProperty("id", run.id());
+                item.addProperty("at", run.at());
+                item.addProperty("project", run.project());
+                item.addProperty("source", run.source());
+                item.addProperty("output", run.output());
+                item.addProperty("ok", run.ok());
+                item.addProperty("outputTruncated", run.outputTruncated());
+                if (run.error() != null) {
+                    item.addProperty("error", run.error());
+                }
+                items.add(item);
+            }
+        }
+        out.add("runs", items);
+        out.addProperty("maxRuns",
+            com.gaskony.scriptide.gateway.history.RunHistory.MAX_RUNS);
+        return out;
+    }
+
     private static JsonObject empty() {
         JsonObject out = new JsonObject();
         out.add("versions", new JsonArray());

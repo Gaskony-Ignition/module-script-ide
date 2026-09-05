@@ -2,6 +2,51 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
+**Version 1.16.1 · deployed on `ignition-module-testing` (8.3.8) 06/09/2026 —
+`deploy_gate.py` PASS (6 checks, 14 routes, none unmounted). Java 450,
+Vitest 619.**
+
+### 1.16.x — the reach of what was already built (06/09/2026)
+
+Nigel: *"do all 5 they are good"*, then *"also fix up everything from the past
+review. that should have all been done already."* Almost everything here is a
+feature that existed and did not reach far enough.
+
+**Search covered a quarter of what the IDE edits.** `ProjectIndex` filtered to
+`script-python` — the same filter the NAME index uses — while the module had
+grown to edit gateway event scripts, Web Dev handlers and pages, and named-query
+SQL. So search, references and (from 1.15.0) replace all stopped at the library,
+and looking for a string in your own timer script returned nothing, which reads
+as "it isn't there". Two corpora now: the NAME index stays library-only, because
+definition and quick-open symbols are about IMPORTABLE modules and a timer
+script is not one. The TEXT scan covers everything openable.
+
+**A save that does not parse asks once** (only an ERROR; a warning never stops
+a save). **A save that removes or re-declares a top-level function names its
+call sites first** — R1, and a line scan rather than the AST, because the
+question compares two versions of a buffer and the server only knows one.
+
+**R4 — Tag Change, and the lesson about measuring.** Body-only since 1.1.0
+waiting for someone to drive the Designer. It needed BOTH a real `resource.json`
+AND the Designer, and they disagree: the resource stores `ValueChange`, the
+Designer's checkbox says `Value`. Reading the JSON alone would have shipped a
+vocabulary this IDE invented for a control that already has names people know.
+See "Tag Change, measured off the real Designer" below.
+
+**R2 is half-delivered, deliberately.** The review asked for last fire, duration
+and NEXT fire per event script. **The 8.3.0 SDK exposes none of them** — there
+is no timer-task registry on `GatewayContext` to ask. A gateway log line appears
+only on FAILURE, so deriving "last run" from one would make a healthy script
+indistinguishable from one that has never run. What ships is which event scripts
+are failing, how often, and when.
+
+**R5 (two gateways) and R6 (a test runner) are untouched**, and are not small:
+R5 is a cross-gateway authentication surface, R6 a product in its own right.
+F1 (internal or public) and F2 (prove it on a second gateway) are decisions and
+environment rather than code.
+
+### Superseded header — 1.15.3 (05/09/2026)
+
 **Version 1.15.3 · deployed on `ignition-module-testing` (8.3.8) 05/09/2026 —
 `deploy_gate.py` PASS (6 checks). `v13` 27/27, `v15_tree` 18/18, `v16_nav`
 25/25, `v17_nq` 45/45, `v18_pull` 20/20, `v19_ruler` 16/16, `v20_webdev` 32/32, `v21_split` 21/21,
@@ -1242,6 +1287,40 @@ gutter marker.
   **`v1.14.4` carries the signed `.modl` as a GitHub release asset**, verified
   md5-identical to the file the rig is running; no earlier tag has one, because
   those builds no longer exist.
+
+## Tag Change, measured off the real Designer (06/09/2026)
+
+Held back since 1.1.0 for want of a measurement. It needed BOTH sources, and
+they disagree in a way only driving the Designer could show.
+
+**What the resource stores** (`_wd_scratch_/ignition/tag-change/WDTagChangeProbe/
+resource.json`, written by the platform):
+
+```json
+"attributes": {
+  "paths": ["[default]A201"],
+  "changeTypes": ["ValueChange", "QualityChange", "TimestampChange"],
+  "enabled": true
+}
+```
+
+**What the Designer's workspace shows** — `designer-drive` against
+`ignition-test-gateway`, screenshot at `docs/images/designer-tag-change.png`:
+
+| Designer control | Resource attribute |
+| --- | --- |
+| `Enabled` checkbox, top right | `enabled` |
+| **Change Triggers**: `Value` · `Quality` · `Timestamp` | `changeTypes`, stored as `ValueChange` / `QualityChange` / `TimestampChange` |
+| **Tag Path(s)**: a multi-line box, one path per line | `paths` |
+
+**The labels are NOT the stored values**, and that is the whole reason to drive
+the thing rather than read a JSON file and stop. Showing `ValueChange` on a
+checkbox would have been a vocabulary this IDE invented for a control that
+already has names people know. The stored form still goes on the wire.
+
+The Designer also states a rule worth carrying into the tooltip: **wildcards
+work at the FOLDER level only** — `[default]folder/*` runs for every tag in the
+folder; `[default]folder/ramp*` does not work at all.
 
 ## The real-script corpus, and how to dump it
 

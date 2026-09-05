@@ -186,8 +186,24 @@ public final class ProjectIndex {
         }
     }
 
-    /** One matching line from a cross-file search. */
-    public record TextHit(String moduleName, int line, int column, String lineText) {
+    /**
+     * One matching line from a cross-file search.
+     *
+     * @param moduleName a LABEL for the results heading — the dotted module name
+     *                   for a library script, and the resource's own tail for
+     *                   everything else
+     * @param resourcePath the encoded resource path, e.g.
+     *                     {@code ignition/timer/Hourly}. This, not the label, is
+     *                     what identifies the document — a label is for reading
+     * @param dataKey which script inside that resource, since a Web Dev endpoint
+     *                holds up to eight
+     */
+    public record TextHit(String moduleName, String resourcePath, String dataKey,
+                          int line, int column, String lineText) {
+    }
+
+    /** One searchable body: where it lives, what to call it, and its text. */
+    private record Searchable(String label, String resourcePath, String dataKey, String text) {
     }
 
     /**
@@ -208,7 +224,7 @@ public final class ProjectIndex {
             return new ArrayList<>();
         }
         String needle = caseSensitive ? query : query.toLowerCase(Locale.ROOT);
-        return scanLibrary(project, limit,
+        return scanProject(project, limit,
             line -> (caseSensitive ? line : line.toLowerCase(Locale.ROOT)).indexOf(needle));
     }
 
@@ -231,7 +247,7 @@ public final class ProjectIndex {
         if (!isIdentifier(name)) {
             return new ArrayList<>();
         }
-        return scanLibrary(project, limit, line -> identifierAt(line, name));
+        return scanProject(project, limit, line -> identifierAt(line, name));
     }
 
     /** True for a name this can search: a Python identifier and nothing else. */
@@ -283,30 +299,30 @@ public final class ProjectIndex {
     }
 
     /**
-     * Walk every library script in a project, reporting the FIRST match per line.
+     * Walk every searchable body in a project, reporting the FIRST match per line.
      *
      * <p>One hit per line, because the consumer is a results list: a line matching
      * a name three times is still one line to click on, and three rows reading
      * identically is how a results panel stops being scannable.</p>
+     *
+     * <h3>What "every" means, and why it changed in 1.16.0</h3>
+     *
+     * <p>Until 1.16.0 this walked <em>library scripts only</em> — the same filter
+     * the module index uses — while the IDE had grown to edit gateway event
+     * scripts, Web Dev handlers and named-query SQL as well. So search, references
+     * and (from 1.15.0) replace all covered about a quarter of what a user can
+     * open, and the status line's honest "Named-query SQL is not searched" was the
+     * only sign of it. Searching for a string in your own timer script returned
+     * nothing, which reads as "it isn't there".</p>
+     *
+     * <p>The NAME index above stays library-only, and that is not an oversight:
+     * go-to-definition, quick-open symbols and completions are about IMPORTABLE
+     * modules, and a timer script is not importable. Two corpora, two questions.</p>
      */
-    private List<TextHit> scanLibrary(String project, int limit, LineScan scan) {
+    private List<TextHit> scanProject(String project, int limit, LineScan scan) {
         List<TextHit> hits = new ArrayList<>();
-        Optional<RuntimeResourceCollection> collectionOpt = projectManager.find(project);
-        if (collectionOpt.isEmpty()) {
-            return hits;
-        }
-        for (Resource resource : collectionOpt.get().getResources()) {
-            var type = resource.getResourcePath().getResourceType();
-            if (!ScriptResourceTypes.IGNITION_MODULE.equals(type.moduleId())
-                || !ScriptResourceTypes.TYPE_SCRIPT_PYTHON.equals(type.typeId())) {
-                continue;
-            }
-            String source = readSource(resource);
-            if (source.isEmpty()) {
-                continue;
-            }
-            String moduleName = moduleNameOf(resource);
-            String[] lines = source.split("\n", -1);
+        for (Searchable body : searchableBodies(project)) {
+            String[] lines = body.text().split("\n", -1);
             for (int i = 0; i < lines.length; i++) {
                 int at = scan.matchIn(lines[i]);
                 if (at < 0) {
@@ -316,13 +332,214 @@ public final class ProjectIndex {
                 if (text.length() > 200) {
                     text = text.substring(0, 200) + "\u2026";
                 }
-                hits.add(new TextHit(moduleName, i, at, text));
+                hits.add(new TextHit(body.label(), body.resourcePath(), body.dataKey(),
+                    i, at, text));
                 if (hits.size() >= limit) {
                     return hits;
                 }
             }
         }
         return hits;
+    }
+
+    /**
+     * Every body in a project that a user can open in this IDE, with its text.
+     *
+     * <p>Bodies are read on demand rather than held in the index, for the reason
+     * given on {@link #searchText}: names in memory, sources not.</p>
+     */
+    private List<Searchable> searchableBodies(String project) {
+        List<Searchable> out = new ArrayList<>();
+        Optional<RuntimeResourceCollection> collectionOpt = projectManager.find(project);
+        if (collectionOpt.isEmpty()) {
+            return out;
+        }
+        for (Resource resource : collectionOpt.get().getResources()) {
+            var type = resource.getResourcePath().getResourceType();
+            String path = type.moduleId() + "/" + type.typeId();
+            String tail = resource.getResourcePath().getPath().toString();
+            if (!tail.isEmpty()) {
+                path = path + "/" + tail;
+            }
+            try {
+                if (ScriptResourceTypes.IGNITION_MODULE.equals(type.moduleId())
+                    && ScriptResourceTypes.TYPE_SCRIPT_PYTHON.equals(type.typeId())) {
+                    addIfPresent(out, moduleNameOf(resource), path, "code.py",
+                        readSource(resource));
+                } else if (ScriptResourceTypes.IGNITION_MODULE.equals(type.moduleId())
+                    && GATEWAY_EVENT_TYPES.contains(type.typeId())) {
+                    // The data key is READ OFF THE RESOURCE, never assumed: a timer
+                    // script's is not necessarily `code.py`, and a wrong key here
+                    // would silently produce zero hits for a whole resource type.
+                    String key = firstPythonKey(resource);
+                    if (key != null) {
+                        addIfPresent(out, label(type.typeId(), tail), path, key,
+                            textOf(resource, key));
+                    }
+                } else if (WEBDEV_MODULE.equals(type.moduleId())
+                    && WEBDEV_TYPE.equals(type.typeId())) {
+                    addWebDev(out, resource, path, tail);
+                } else if (ScriptResourceTypes.IGNITION_MODULE.equals(type.moduleId())
+                    && NAMED_QUERY_TYPE.equals(type.typeId())) {
+                    addIfPresent(out, label("named-query", tail), path, NAMED_QUERY_KEY,
+                        namedQuerySql(resource));
+                }
+            } catch (RuntimeException e) {
+                // One unreadable resource must not end the search. A project with
+                // a legacy named query in it is the normal case, not an error.
+                logger.debug("Skipping {} while searching: {}", path, e.toString());
+            }
+        }
+        return out;
+    }
+
+    /** The resource's first {@code .py} data key, or null when it has none. */
+    private static String firstPythonKey(Resource resource) {
+        return resource.getDataKeys().stream()
+            .filter(k -> k.endsWith(".py"))
+            .findFirst()
+            .orElse(null);
+    }
+
+    /** One data key's bytes as UTF-8 text, or null. */
+    private static String textOf(Resource resource, String key) {
+        return resource.getData(key)
+            .map(data -> new String(data.getBytes(), java.nio.charset.StandardCharsets.UTF_8))
+            .orElse(null);
+    }
+
+    private static void addIfPresent(List<Searchable> out, String label, String path,
+                                     String key, String text) {
+        if (text != null && !text.isEmpty()) {
+            out.add(new Searchable(label, path, key, text));
+        }
+    }
+
+    /**
+     * A Web Dev endpoint contributes SEVERAL bodies, not one.
+     *
+     * <p>Up to eight `do&lt;Method&gt;.py` handlers, plus — for a text resource —
+     * the page body that lives inside `config.json` rather than as a data key.
+     * Missing the second kind would leave `cell3d.html` unsearchable, which is the
+     * single largest file anyone here edits.</p>
+     */
+    private static void addWebDev(List<Searchable> out, Resource resource, String path,
+                                  String tail) {
+        for (String key : resource.getDataKeys()) {
+            if (!key.endsWith(".py")) {
+                continue;
+            }
+            resource.getData(key).ifPresent(data -> addIfPresent(out,
+                label("webdev", tail + "/" + key), path, key,
+                new String(data.getBytes(), java.nio.charset.StandardCharsets.UTF_8)));
+        }
+        var config = com.gaskony.scriptide.gateway.routes.WebDevResources.parseConfig(resource);
+        com.gaskony.scriptide.gateway.routes.WebDevResources.body(config).ifPresent(text ->
+            addIfPresent(out, label("webdev", tail), path,
+                com.gaskony.scriptide.gateway.routes.WebDevResources.TEXT_DATA_KEY, text));
+    }
+
+    /** A named query's SQL, or null when the resource cannot be read as one. */
+    private static String namedQuerySql(Resource resource) {
+        try {
+            // `read` throws rather than returning null for a query it cannot
+            // parse, so there is nothing to null-check here.
+            return com.gaskony.scriptide.gateway.routes.NamedQueryCodec.read(resource).getQuery();
+        } catch (Exception e) {
+            // Exception, not RuntimeException: the codec declares a checked one,
+            // and a version-1 query throws here. Those are unreadable by the
+            // PLATFORM too, so not searching them is the honest answer.
+            return null;
+        }
+    }
+
+    /** {@code timer} + {@code Hourly} → {@code timer/Hourly}, for a results heading. */
+    private static String label(String kind, String tail) {
+        return tail.isEmpty() ? kind : kind + "/" + tail;
+    }
+
+    /** The gateway event script types, which hold Python exactly as a library does. */
+    private static final java.util.Set<String> GATEWAY_EVENT_TYPES = java.util.Set.of(
+        ScriptResourceTypes.TYPE_TIMER, ScriptResourceTypes.TYPE_MESSAGE,
+        ScriptResourceTypes.TYPE_TAG_CHANGE, ScriptResourceTypes.TYPE_STARTUP,
+        ScriptResourceTypes.TYPE_SHUTDOWN, ScriptResourceTypes.TYPE_UPDATE,
+        ScriptResourceTypes.TYPE_SCHEDULED);
+
+    private static final String WEBDEV_MODULE = "com.inductiveautomation.webdev";
+    private static final String WEBDEV_TYPE = "resources";
+    private static final String NAMED_QUERY_TYPE = "named-query";
+
+    /** The synthetic key a named query's SQL is addressed by. */
+    public static final String NAMED_QUERY_KEY = "query.sql";
+
+    /** A top-level library symbol that nothing else in the project names. */
+    public record UnusedSymbol(String moduleName, String symbolName, String kind,
+                               int line, int column) {
+    }
+
+    /**
+     * Library functions and classes that nothing in the project appears to call.
+     *
+     * <h3>What this can and cannot know</h3>
+     *
+     * <p>It counts whole-identifier occurrences of a name across every searchable
+     * body — so a name that appears exactly ONCE appears only at its own
+     * definition. That is a real signal and it is the same machinery
+     * {@code scriptide/references} uses, with the same honest limit: it is
+     * NAME-based. A function called through {@code getattr}, from a Perspective
+     * binding, from a Vision window, from an alarm pipeline, or by a gateway that
+     * imports the module from outside this project, will look unused and is not.
+     * Every surface that shows this must say so — it is a list to READ, never a
+     * list to delete from without looking.</p>
+     *
+     * <p>Names beginning with an underscore are skipped: a leading underscore is
+     * Python's own marker for "not part of the interface", so reporting one is
+     * reporting a decision the author already made.</p>
+     */
+    public List<UnusedSymbol> unusedSymbols(String project, int limit) {
+        List<UnusedSymbol> out = new ArrayList<>();
+        Map<String, ModuleSymbols> modules = modules(project);
+        if (modules.isEmpty()) {
+            return out;
+        }
+        // Every body once, rather than once per symbol: a project with 400
+        // symbols would otherwise read every script 400 times.
+        List<Searchable> bodies = searchableBodies(project);
+        Map<String, Integer> counts = new java.util.HashMap<>();
+        java.util.Set<String> wanted = new java.util.HashSet<>();
+        for (Map.Entry<String, ModuleSymbols> entry : modules.entrySet()) {
+            for (ModuleSymbols.Symbol symbol : entry.getValue().symbols()) {
+                if (symbol.container() == null && !symbol.name().startsWith("_")) {
+                    wanted.add(symbol.name());
+                }
+            }
+        }
+        for (Searchable body : bodies) {
+            for (String line : body.text().split("\n", -1)) {
+                for (String name : wanted) {
+                    if (identifierAt(line, name) >= 0) {
+                        counts.merge(name, 1, Integer::sum);
+                    }
+                }
+            }
+        }
+        for (Map.Entry<String, ModuleSymbols> entry : modules.entrySet()) {
+            for (ModuleSymbols.Symbol symbol : entry.getValue().symbols()) {
+                if (symbol.container() != null || symbol.name().startsWith("_")) {
+                    continue;
+                }
+                // Exactly one line mentions it, and that line is its own `def`.
+                if (counts.getOrDefault(symbol.name(), 0) <= 1) {
+                    out.add(new UnusedSymbol(entry.getKey(), symbol.name(),
+                        symbol.kind().name().toLowerCase(Locale.ROOT),
+                        symbol.line(), symbol.column()));
+                    if (out.size() >= limit) {
+                        return out;
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     /** Number of indexed modules in a project — for diagnostics and tests. */

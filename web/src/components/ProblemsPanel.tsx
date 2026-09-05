@@ -305,6 +305,21 @@ function RuntimeProblems({
         </button>
       </h3>
 
+      {/* Which SCRIPTS are failing, ahead of the individual messages. This is
+          the R2 question — "has that timer been throwing since Tuesday" — and
+          it is the half of it the SDK can actually answer: there is no
+          timer-task registry, so there is no last fire or next fire, and a log
+          line appears only on failure. Silence here is not proof of health, and
+          the wording says only what it knows. */}
+      {runtime && runtime.byScript.length > 0 && (
+        <p className="problems-runtime-scripts" role="status">
+          <strong>Failing scripts:</strong>{' '}
+          {runtime.byScript
+            .map((s) => `${s.script} (${s.count}×, ${relativeTime(s.lastSeen, now)})`)
+            .join(' · ')}
+        </p>
+      )}
+
       {error ? (
         <p className="problems-empty muted">Could not read the gateway log: {error}</p>
       ) : !runtime ? (

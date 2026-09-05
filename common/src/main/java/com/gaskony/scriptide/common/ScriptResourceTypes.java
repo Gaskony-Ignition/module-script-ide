@@ -172,13 +172,24 @@ public final class ScriptResourceTypes {
             new LinkedHashSet<>(Set.of("enabled", "cronExpression"))));
         // Tag Change stays body-only. The Designer's Tag Change workspace has a
         // tag-path list that NOTHING measured describes, so the attribute name
-        // holding it is unknown. Writing a guessed key onto a live gateway is
-        // exactly the failure this module refuses; `enabled` alone is not offered
-        // either, because a half-configured tag-change script that fires on no
-        // tags is worse than one this IDE declines to configure. Measure the
-        // workspace with designer-drive, then fill this in.
+        // Tag Change — MEASURED at last (06/09/2026), off a real resource on the
+        // module rig rather than by driving the Designer:
+        //
+        //   "attributes": {
+        //     "paths": ["[default]A201"],
+        //     "changeTypes": ["ValueChange", "QualityChange", "TimestampChange"],
+        //     "enabled": true
+        //   }
+        //
+        // From 1.1.0 to 1.15.x this type was body-only, because the tag-path
+        // list's attribute name was unknown and writing a guessed key onto a
+        // live gateway is exactly the failure this module refuses. `paths` and
+        // `changeTypes` are both JSON ARRAYS of strings, which is why they need
+        // the array-aware handling in ScriptAttributesRouteHandler rather than
+        // the scalar path every other attribute here takes.
         m.put(TYPE_TAG_CHANGE, new ScriptType(
-            TYPE_TAG_CHANGE, "Tag Change", "onTagChange.py", false, new LinkedHashSet<>()));
+            TYPE_TAG_CHANGE, "Tag Change", "onTagChange.py", false,
+            new LinkedHashSet<>(Set.of("enabled", "paths", "changeTypes"))));
         // Web Dev. Its allowlist is EMPTY and that is not a "not yet measured"
         // case like tag-change: this resource genuinely has no editable
         // resource.json attributes. Its settings are in config.json.

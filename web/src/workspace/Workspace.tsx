@@ -15,6 +15,7 @@ import {
   deleteScript,
   fetchProjects,
   fetchScriptTree,
+  renameScript,
   readScriptAttributes,
   readScriptContent,
   saveScriptAttributes,
@@ -63,6 +64,8 @@ import OutlinePanel from '../components/OutlinePanel';
 import ProblemsPanel from '../components/ProblemsPanel';
 import QuickOpen from '../components/QuickOpen';
 import HistoryDialog from '../components/HistoryDialog';
+import ParentDiffDialog from '../components/ParentDiffDialog';
+import RenameDialog from '../components/RenameDialog';
 import SearchPanel from '../components/SearchPanel';
 import ScriptConsole from '../components/ScriptConsole';
 import type { ActiveSource } from '../components/ScriptConsole';
@@ -87,7 +90,17 @@ import {
   settingsEqual,
   type OpenDoc,
 } from './documents';
-import { entryForLocation, labelForLocation, parseLocationUri } from './locations';
+import {
+  entryForLocation,
+  labelForLocation,
+  moduleNameFor,
+  parseLocationUri,
+} from './locations';
+import {
+  describeImpact,
+  hasImpact,
+  signatureImpact,
+} from './signatureImpact';
 import {
   runReplaceAll,
   summarise as summariseReplace,
@@ -497,6 +510,79 @@ export default function Workspace({ session }: WorkspaceProps) {
   /** Bumped to make the watch below look NOW rather than on its next tick. */
   const [watchNonce, setWatchNonce] = useState(0);
 
+  /** A save held back because the buffer does not parse. Null when there is none. */
+  const [saveWarning, setSaveWarning] =
+    useState<{ uri: string; detail: string; label: string } | null>(null);
+
+  /**
+   * A save held back because it changes something other files call.
+   *
+   * Separate from `saveWarning`: one is about whether the code RUNS, the other
+   * about what it breaks elsewhere, and a single bar carrying both would have to
+   * generalise its wording until it said nothing.
+   */
+  const [impactWarning, setImpactWarning] = useState<
+    { uri: string; label: string; detail: string; names: string[] } | null>(null);
+
+  /**
+   * The first ERROR-severity diagnostic per open document, if any.
+   *
+   * Kept so a save can refuse to go through silently on code that does not
+   * parse. Before 1.16.0 nothing stopped writing a broken script straight into a
+   * running gateway — and on a timer script that starts failing on the next
+   * tick, in a log nobody has open.
+   *
+   * A ref as well as state: `saveDoc` reads it from a callback that must not be
+   * rebuilt on every diagnostic push, and a stale closure there would let
+   * exactly the save this exists to catch go through.
+   */
+  const [syntaxErrors, setSyntaxErrors] = useState<Record<string, string>>({});
+  const syntaxErrorsRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    syntaxErrorsRef.current = syntaxErrors;
+  }, [syntaxErrors]);
+
+  /**
+   * Subscribe every open Python document to its diagnostics.
+   *
+   * Only to learn whether it PARSES — the Problems panel renders the full list
+   * and does its own subscribing. Keyed on the set of open documents rather than
+   * on `docs`, which is a new array on every keystroke.
+   */
+  const openPythonKey = docs
+    .filter((doc) => isPythonDoc(doc))
+    .map((doc) => `${doc.uri}\u0000${doc.project}\u0000${doc.path}\u0000${doc.scriptKey}`)
+    .join('\n');
+
+  useEffect(() => {
+    if (!lsp || openPythonKey.length === 0) return;
+    const entries = openPythonKey.split('\n').map((row) => {
+      const [uri, proj, path, key] = row.split('\u0000');
+      return { uri, serverUri: lspUri(proj, path, key) };
+    });
+    const offs = entries.map(({ uri, serverUri }) =>
+      lsp.onDiagnostics(serverUri, (diagnostics) => {
+        // Severity 1 is Error, and the only source that reports one for Python is
+        // the gateway's real Jython parser. A WARNING — an undefined name, a
+        // deprecated call — must never block a save: those are advisory by
+        // design, and a guard that fired on them would be trained away.
+        const fatal = diagnostics.find((d) => (d.severity ?? 1) === 1);
+        setSyntaxErrors((current) => {
+          const next = { ...current };
+          if (fatal) {
+            next[uri] = `${fatal.message} (line ${fatal.range.start.line + 1})`;
+          } else {
+            delete next[uri];
+          }
+          return next;
+        });
+      })
+    );
+    return () => {
+      for (const off of offs) off();
+    };
+  }, [lsp, openPythonKey]);
+
   /**
    * Notice that the gateway has moved on, without being asked.
    *
@@ -703,6 +789,10 @@ export default function Workspace({ session }: WorkspaceProps) {
   const handleChange = useCallback((uri: string, text: string) => {
     setDocs((current) => current.map((d) => (d.uri === uri ? { ...d, text } : d)));
     setDocRevision((n) => n + 1);
+    // Typing is the answer to "are you sure": the question was about the buffer
+    // as it stood, and it no longer stands.
+    setSaveWarning((current) => (current && current.uri === uri ? null : current));
+    setImpactWarning((current) => (current && current.uri === uri ? null : current));
   }, []);
 
   /**
@@ -1088,12 +1178,56 @@ export default function Workspace({ session }: WorkspaceProps) {
   );
 
   const saveDoc = useCallback(
-    async (uri: string, baseSignature?: string) => {
+    async (uri: string, baseSignature?: string, force = false) => {
       const doc = docsRef.current.find((d) => d.uri === uri);
       // Locked as well as read-only: without this, Ctrl+S on an inherited tab
       // would fork the parent's script even though the buffer refused to be
       // typed into — the keybinding does not go through the disabled button.
       if (!doc || readOnly || isLockedByInheritance(doc)) return;
+
+      // Code that does not PARSE gets one question before it reaches a running
+      // gateway. Not a refusal: saving broken code deliberately is legitimate —
+      // stopping halfway through a refactor is the ordinary case — so this asks
+      // once and remembers nothing. Only an ERROR stops here; warnings never do.
+      const fatal = syntaxErrorsRef.current[uri];
+      if (!force && fatal) {
+        setSaveWarning({ uri, detail: fatal, label: doc.label });
+        return;
+      }
+      setSaveWarning(null);
+
+      // What this save is about to break elsewhere. Library modules only: a
+      // gateway event script is called by the platform, not by name, so there
+      // are no call sites to warn about.
+      if (!force && lsp && isPythonDoc(doc) && moduleNameFor(doc.path)) {
+        const impact = signatureImpact(doc.baseText, doc.text);
+        if (hasImpact(impact)) {
+          const names = [...impact.removed, ...impact.changed];
+          let callSites = 0;
+          try {
+            for (const name of names) {
+              const found = await lsp.references(doc.project, name);
+              // The definition's own line is a hit. One hit means nothing else
+              // in the project writes the name, which is not worth stopping for.
+              callSites += Math.max(0, found.length - 1);
+            }
+          } catch {
+            // A references lookup that fails must not block a save. Better to
+            // write the file than to refuse it over a question nobody asked.
+            callSites = 0;
+          }
+          if (callSites > 0) {
+            setImpactWarning({
+              uri,
+              label: doc.label,
+              names,
+              detail: describeImpact(impact, callSites),
+            });
+            return;
+          }
+        }
+      }
+      setImpactWarning(null);
       setSaving(true);
       setNotice(null);
       // Capture the text being written: the user can keep typing during the
@@ -1729,19 +1863,37 @@ export default function Workspace({ session }: WorkspaceProps) {
       for (const uri of uris) {
         const location = parseLocationUri(uri);
         if (!location || location.project !== project) continue;
-        const entry = entryForLocation(tree?.scripts ?? [], location);
-        if (!entry) continue;
-        const key = docUri(project, entry.path, entry.scriptKey);
-        const open = docs.find((doc) => doc.uri === key);
         const label = labelForLocation({ uri });
+
+        // A named query's SQL is searched (1.16.0) and cannot be written through
+        // the script route — it has its own, with settings against the same
+        // signature. Skipping it LOUDLY rather than dropping it: a replace that
+        // silently ignored half its own results would be the worst kind of
+        // half-feature.
+        if (isNamedQueryResourcePath(location.path)) {
+          targets.push({
+            uri, project, path: location.path, label, skip: 'named-query',
+          });
+          continue;
+        }
+
+        // Resolved from the URI, not from the script tree. The tree does not list
+        // Web Dev endpoints at all — they have their own view — so a tree lookup
+        // dropped every Web Dev hit without a word. The tree is still consulted,
+        // but only for what it alone knows: whether a resource is inherited.
+        const entry = entryForLocation(tree?.scripts ?? [], location);
+        const path = entry?.path ?? location.path;
+        const scriptKey = entry?.scriptKey ?? location.scriptKey;
+        const key = docUri(project, path, scriptKey);
+        const open = docs.find((doc) => doc.uri === key);
         targets.push({
           uri,
           project,
-          path: entry.path,
-          key: entry.scriptKey,
+          path,
+          key: scriptKey,
           label,
           skip:
-            entry.origin === 'inherited'
+            entry?.origin === 'inherited'
               ? 'read-only'
               : open && open.text !== open.baseText
                 ? 'unsaved-changes'
@@ -1774,6 +1926,57 @@ export default function Workspace({ session }: WorkspaceProps) {
   );
 
   /**
+   * Rename the active script, then OFFER to update its call sites.
+   *
+   * Two writes, never one: the move is a single resource push, and updating
+   * imports is the ordinary project-wide replace with its preview, its skipping
+   * of inherited and dirty documents, and its per-file report. A rename that
+   * silently rewrote every file that mentioned the old name would be a bulk
+   * write with none of those guards behind a button that says "Rename".
+   */
+  const doRename = useCallback(
+    async (entry: ScriptEntry, newName: string, updateCallSites: boolean) => {
+      const parts = entry.path.split('/');
+      parts[parts.length - 1] = newName;
+      const newPath = parts.join('/');
+      const oldModule = moduleNameFor(entry.path);
+      setRenameBusy(true);
+      try {
+        const result = await renameScript({
+          project,
+          path: entry.path,
+          newPath,
+          baseSignature: entry.signature,
+          csrfToken: session.csrfToken,
+        });
+        setRenaming(null);
+        // The open tab still points at a path that no longer exists. Closing it
+        // is honest — its buffer was written to the NEW path a moment ago — and
+        // the tree refresh below makes the new one openable.
+        const oldUri = docUri(project, entry.path, entry.scriptKey);
+        setDocs((current) => current.filter((doc) => doc.uri !== oldUri));
+        setActiveUri((current) => (current === oldUri ? null : current));
+        setTree(await fetchScriptTree(project));
+        setNotice({ kind: 'info', text: `Renamed to ${newName}.` });
+
+        if (updateCallSites && oldModule && result.newModule) {
+          // Straight into the Search view with the old name in the box: the user
+          // sees every call site and confirms the replace, exactly as if they
+          // had searched for it themselves.
+          setView('search');
+          setReferencesRequest(null);
+          setPendingReplace({ from: oldModule, to: result.newModule });
+        }
+      } catch (e: unknown) {
+        setNotice({ kind: 'error', text: `Could not rename: ${describe(e)}` });
+      } finally {
+        setRenameBusy(false);
+      }
+    },
+    [project, session.csrfToken]
+  );
+
+  /**
    * A references request, raised from the editor's Shift+F12.
    *
    * The nonce is what makes a second Shift+F12 on the same identifier re-run the
@@ -1788,11 +1991,28 @@ export default function Workspace({ session }: WorkspaceProps) {
   /** True while the local-history dialog is open for the ACTIVE document. */
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  /** True while the parent-comparison dialog is open for the ACTIVE document. */
+  const [parentDiffOpen, setParentDiffOpen] = useState(false);
+
+  /**
+   * A replace the Search view should offer, set by a rename.
+   *
+   * The rename does not perform it — it hands the two names over and the user
+   * confirms in the panel, seeing every file first.
+   */
+  const [pendingReplace, setPendingReplace] =
+    useState<{ from: string; to: string } | null>(null);
+
+  /** The tree entry being renamed, or null. */
+  const [renaming, setRenaming] = useState<ScriptEntry | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+
   // A history dialog belongs to the document it was opened on. Switching tabs
   // with it open would leave it showing one file's versions above another
   // file's editor, and "Load into editor" would then put the wrong text in.
   useEffect(() => {
     setHistoryOpen(false);
+    setParentDiffOpen(false);
   }, [activeUri]);
 
   useEffect(() => {
@@ -2006,6 +2226,89 @@ export default function Workspace({ session }: WorkspaceProps) {
                   where you are looking — which is at the code. This sits between
                   the tab and the buffer it is about, and only for the document
                   actually on screen. */}
+              {impactWarning !== null && impactWarning.uri === activeUri && (
+                /* The one thing the Designer cannot tell you, at the one moment
+                   it matters. Not a refusal — changing a signature on purpose is
+                   ordinary — but the call sites are named BEFORE the write, not
+                   discovered at run time by whatever imported it. */
+                <div className="workspace-savewarn" role="alert">
+                  <IconAlert size={16} />
+                  <div className="workspace-signedout-text">
+                    <strong>Other files call into {impactWarning.label}.</strong>{' '}
+                    {impactWarning.detail} Matched by NAME, so an unrelated
+                    member spelled the same is included — read the list, do not
+                    trust the count.
+                  </div>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      // Straight to the list, with the save still pending. The
+                      // bar stays up behind it, so the decision is still there
+                      // to take when they come back.
+                      setView('search');
+                      setReferencesRequest({
+                        name: impactWarning.names[0],
+                        nonce: Date.now(),
+                      });
+                    }}
+                  >
+                    Show the call sites
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      const uri = impactWarning.uri;
+                      setImpactWarning(null);
+                      void saveDoc(uri, undefined, true);
+                    }}
+                  >
+                    Save anyway
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => setImpactWarning(null)}
+                  >
+                    Keep editing
+                  </button>
+                </div>
+              )}
+              {saveWarning !== null && saveWarning.uri === activeUri && (
+                /* One question, in the same place as the session bar and with the
+                   same shape: what is wrong, what happens next, and both answers
+                   as buttons. It does NOT refuse — stopping halfway through a
+                   refactor and saving is ordinary — it just makes writing code
+                   that cannot run a deliberate act rather than an accident. */
+                <div className="workspace-savewarn" role="alert">
+                  <IconAlert size={16} />
+                  <div className="workspace-signedout-text">
+                    <strong>{saveWarning.label} does not parse.</strong>{' '}
+                    {saveWarning.detail}. Saving it puts it on the gateway as it
+                    is — a gateway event script would start failing on its next
+                    run.
+                  </div>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      const uri = saveWarning.uri;
+                      setSaveWarning(null);
+                      void saveDoc(uri, undefined, true);
+                    }}
+                  >
+                    Save anyway
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => setSaveWarning(null)}
+                  >
+                    Keep editing
+                  </button>
+                </div>
+              )}
               {signedOut !== null && (
                 /* Above the stale bar and above the editor, and it does not go
                    away on its own. Everything the user needs is here: that the
@@ -2119,6 +2422,29 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   return (
     <main className="workspace">
+      {renaming && (
+        <RenameDialog
+          entry={renaming}
+          moduleName={moduleNameFor(renaming.path) ?? undefined}
+          busy={renameBusy}
+          onCancel={() => setRenaming(null)}
+          onRename={(newName, updateCallSites) =>
+            void doRename(renaming, newName, updateCallSites)
+          }
+        />
+      )}
+
+      {parentDiffOpen && activeDoc && !activeQueryDoc && (
+        <ParentDiffDialog
+          project={activeDoc.project}
+          path={activeDoc.path}
+          scriptKey={activeDoc.scriptKey}
+          label={activeDoc.label}
+          mine={activeDoc.text}
+          onClose={() => setParentDiffOpen(false)}
+        />
+      )}
+
       {historyOpen && activeDoc && !activeQueryDoc && (
         <HistoryDialog
           project={activeDoc.project}
@@ -2170,6 +2496,35 @@ export default function Workspace({ session }: WorkspaceProps) {
             title="Versions this IDE has saved of this file"
           >
             History
+          </button>
+        )}
+
+        {/* Only where there is something to compare against. `override` means
+            this project owns a copy of a resource a parent also has; anything
+            else has no parent copy and the dialog would only ever say so. */}
+        {activeDoc && !activeQueryDoc && activeDoc.origin === 'override' && (
+          <button
+            type="button"
+            className="button"
+            onClick={() => setParentDiffOpen(true)}
+            title="What this override changes, compared with the project it inherits from"
+          >
+            Compare with parent
+          </button>
+        )}
+
+        {/* Not a singleton (the platform names those) and not inherited (not this
+            project's to move) — the same two the server refuses, so the button is
+            absent rather than present and failing. */}
+        {activeEntry && !readOnly && !activeEntry.singleton
+          && activeEntry.origin !== 'inherited' && (
+          <button
+            type="button"
+            className="button"
+            onClick={() => setRenaming(activeEntry)}
+            title={`Rename ${activeEntry.name}`}
+          >
+            Rename
           </button>
         )}
 
@@ -2265,6 +2620,8 @@ export default function Workspace({ session }: WorkspaceProps) {
                   // is absent rather than a button that 403s. `readOnly` is the
                   // same gate the save path uses.
                   onReplaceAll={readOnly ? undefined : replaceAcrossProject}
+                  pendingReplace={pendingReplace}
+                  onPendingReplaceHandled={() => setPendingReplace(null)}
                 />
               ) : view === 'webdev' ? (
                 <WebDevTree

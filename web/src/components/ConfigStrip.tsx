@@ -246,6 +246,21 @@ function TypeDocs({ docs }: { docs?: (typeof TYPE_DOCS)[string] }) {
   );
 }
 
+/**
+ * The change types, as the Designer LABELS them and as the resource STORES them.
+ *
+ * They are not the same string, which is exactly the kind of thing that only
+ * turns up by driving the real thing: the resource holds `ValueChange`, and the
+ * Designer's Change Triggers row says `Value`. Measured on 8.3.8, 06/09/2026, on
+ * `_wd_scratch_`'s WDTagChangeProbe. Showing the stored value would have been a
+ * vocabulary this IDE invented for a control that already has names people know.
+ */
+const CHANGE_TYPES: Array<{ stored: string; label: string }> = [
+  { stored: 'ValueChange', label: 'Value' },
+  { stored: 'QualityChange', label: 'Quality' },
+  { stored: 'TimestampChange', label: 'Timestamp' },
+];
+
 function renderField(
   name: string,
   value: AttributeValue | undefined,
@@ -259,6 +274,55 @@ function renderField(
         checked={value === true}
         disabled={readOnly}
         onChange={(e) => onChange(name, e.target.checked)}
+      />
+    );
+  }
+  // Tag Change's two arrays. One per line is the shape a tag path list actually
+  // has — a comma-separated box invites a comma inside a tag path, which is
+  // legal — and it is what the Designer's own list looks like.
+  if (name === 'paths' || name === 'changeTypes') {
+    const lines = Array.isArray(value) ? value : [];
+    if (name === 'changeTypes') {
+      return (
+        <span className="config-changetypes">
+          {CHANGE_TYPES.map((type) => (
+            <label key={type.stored}>
+              <input
+                type="checkbox"
+                checked={lines.includes(type.stored)}
+                disabled={readOnly}
+                onChange={(e) => {
+                  const next = e.target.checked
+                    ? [...lines, type.stored]
+                    : lines.filter((t) => t !== type.stored);
+                  // Kept in the platform's own order, not click order: the
+                  // resource is diffed against the Designer's copy.
+                  onChange(name, CHANGE_TYPES
+                    .map((t) => t.stored)
+                    .filter((t) => next.includes(t)));
+                }}
+              />
+              {type.label}
+            </label>
+          ))}
+        </span>
+      );
+    }
+    return (
+      <textarea
+        className="config-paths"
+        rows={Math.min(6, Math.max(2, lines.length + 1))}
+        spellCheck={false}
+        placeholder="[default]Path/To/Tag&#10;One path per line"
+        title={'One tag path per line. Wildcards work at the FOLDER level only — '
+          + '[default]folder/* runs for every tag in the folder, and '
+          + '[default]folder/ramp* does not work. (Measured off the Designer, '
+          + '8.3.8.)'}
+        value={lines.join('\n')}
+        disabled={readOnly}
+        onChange={(e) =>
+          onChange(name, e.target.value.split('\n').map((l) => l.trim()).filter(Boolean))
+        }
       />
     );
   }

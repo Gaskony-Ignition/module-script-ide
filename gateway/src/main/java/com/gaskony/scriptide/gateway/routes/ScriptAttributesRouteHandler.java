@@ -317,12 +317,85 @@ public final class ScriptAttributesRouteHandler {
             case "fixedDelay":
             case "sharedThread":
                 return asBoolean(name, value);
+            // Tag Change, measured 06/09/2026 off a real resource: both are JSON
+            // ARRAYS of strings, not scalars.
+            case "paths":
+                return asStringArray(name, value, MAX_TAG_PATHS, path -> {
+                    if (path.isBlank()) {
+                        throw new IllegalArgumentException("A tag path cannot be blank");
+                    }
+                    if (path.length() > MAX_TAG_PATH_LENGTH) {
+                        throw new IllegalArgumentException(
+                            "A tag path must be at most " + MAX_TAG_PATH_LENGTH
+                                + " characters");
+                    }
+                });
+            case "changeTypes":
+                return asStringArray(name, value, CHANGE_TYPES.size(), type -> {
+                    if (!CHANGE_TYPES.contains(type)) {
+                        // An allowlist, not a free string: an unrecognised change
+                        // type is silently ignored by the platform, so the script
+                        // would sit there configured and never fire.
+                        throw new IllegalArgumentException(
+                            "changeTypes must be one of " + CHANGE_TYPES + ", got '"
+                                + type + "'");
+                    }
+                });
             default:
                 // Unreachable: the allowlist is checked before this is called.
                 // Fail loudly rather than write an unvalidated value.
                 throw new IllegalArgumentException(
                     "No validator for attribute '" + name + "' on " + typeId);
         }
+    }
+
+    /** The change types a tag-change script may subscribe to. Measured. */
+    private static final java.util.List<String> CHANGE_TYPES =
+        java.util.List.of("ValueChange", "QualityChange", "TimestampChange");
+
+    /** Tag paths per script, and the length of one. Bounds, not opinions. */
+    private static final int MAX_TAG_PATHS = 500;
+    private static final int MAX_TAG_PATH_LENGTH = 1000;
+
+    /** What each element of a string array must satisfy. */
+    private interface ElementCheck {
+        void check(String value);
+    }
+
+    /**
+     * A JSON array of strings, validated element by element.
+     *
+     * <p>Returned as a {@code List<String>} so the resource writer stores a real
+     * JSON array. Storing it as a comma-joined string would round-trip through
+     * this module and be unreadable to the Designer, which is the worse half of
+     * getting a resource shape wrong: it looks like it worked.</p>
+     */
+    private static java.util.List<String> asStringArray(String name, JsonElement v,
+                                                        int max, ElementCheck check) {
+        if (!v.isJsonArray()) {
+            throw new IllegalArgumentException(name + " must be an array of strings, got " + v);
+        }
+        var array = v.getAsJsonArray();
+        if (array.size() > max) {
+            throw new IllegalArgumentException(
+                name + " must have at most " + max + " entries, got " + array.size());
+        }
+        java.util.List<String> out = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        for (JsonElement element : array) {
+            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+                throw new IllegalArgumentException(
+                    name + " must contain only strings, got " + element);
+            }
+            String value = element.getAsString().trim();
+            check.check(value);
+            // Duplicates dropped: subscribing twice to one tag is not an error
+            // the platform reports, and it doubles every event the script sees.
+            if (seen.add(value)) {
+                out.add(value);
+            }
+        }
+        return out;
     }
 
     private static boolean asBoolean(String name, JsonElement v) {

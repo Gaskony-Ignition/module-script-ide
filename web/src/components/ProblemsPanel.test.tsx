@@ -228,6 +228,7 @@ describe('ProblemsPanel — errors from the gateway', () => {
       ],
       windowMinutes: 60,
       matchedBy: 'project name in the log message or logger',
+      byScript: [],
       ...overrides,
     };
   }

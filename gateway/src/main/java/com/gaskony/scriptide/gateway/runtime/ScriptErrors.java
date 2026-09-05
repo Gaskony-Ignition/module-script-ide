@@ -152,6 +152,84 @@ public final class ScriptErrors {
             : List.copyOf(out);
     }
 
+    /** How badly one named script is doing, over the window. */
+    public record ScriptHealth(String script, int count, long lastSeen) {
+    }
+
+    /**
+     * Errors attributed to individual gateway event scripts.
+     *
+     * <h3>What this can honestly claim</h3>
+     *
+     * <p>The review asked for last fire, duration and NEXT fire on each row. The
+     * 8.3.0 SDK exposes none of those: there is no timer-task registry to ask,
+     * and inventing a "last run" from a log line that only appears when
+     * something FAILS would be worse than showing nothing — a healthy script
+     * would read as one that has never run.</p>
+     *
+     * <p>So this answers the half that is real, and it is the half that costs
+     * hours: whether a script has been FAILING, how often, and when it last did.
+     * A timer script throwing every thirty seconds since Tuesday looks identical
+     * to a healthy one in the Designer and, until now, here.</p>
+     *
+     * <p>Attribution uses the measured shape — the project and script name are
+     * in the message text, as {@code 'Project/ScriptName @1,000ms '} — so a
+     * script is matched when its own name appears in an event already
+     * attributed to the project. Names are compared as WHOLE segments to keep
+     * {@code Hourly} from matching {@code HourlyBackup}.</p>
+     */
+    public static List<ScriptHealth> byScript(List<ScriptError> errors,
+                                              java.util.Collection<String> scriptNames) {
+        if (errors == null || errors.isEmpty() || scriptNames == null) {
+            return List.of();
+        }
+        Map<String, ScriptHealth> found = new LinkedHashMap<>();
+        for (ScriptError error : errors) {
+            String haystack = error.message() + " " + error.loggerName();
+            for (String name : scriptNames) {
+                if (name == null || name.isBlank() || !mentionsSegment(haystack, name)) {
+                    continue;
+                }
+                ScriptHealth existing = found.get(name);
+                found.put(name, existing == null
+                    ? new ScriptHealth(name, error.count(), error.lastSeen())
+                    : new ScriptHealth(name, existing.count() + error.count(),
+                        Math.max(existing.lastSeen(), error.lastSeen())));
+            }
+        }
+        List<ScriptHealth> out = new ArrayList<>(found.values());
+        out.sort((a, b) -> Long.compare(b.lastSeen(), a.lastSeen()));
+        return List.copyOf(out);
+    }
+
+    /**
+     * True when {@code name} appears in {@code text} as a whole path segment.
+     *
+     * <p>Segment, not substring: a script called {@code Hourly} must not be
+     * blamed for {@code HourlyBackup}'s failures, and a row that badges the
+     * wrong script is worse than one that badges nothing.</p>
+     */
+    static boolean mentionsSegment(String text, String name) {
+        int from = 0;
+        while (true) {
+            int at = text.indexOf(name, from);
+            if (at < 0) {
+                return false;
+            }
+            char before = at == 0 ? '/' : text.charAt(at - 1);
+            int end = at + name.length();
+            char after = end >= text.length() ? '/' : text.charAt(end);
+            if (!isNamePart(before) && !isNamePart(after)) {
+                return true;
+            }
+            from = at + 1;
+        }
+    }
+
+    private static boolean isNamePart(char c) {
+        return c == '_' || Character.isLetterOrDigit(c);
+    }
+
     /** True when this event names the project in its message or its logger. */
     static boolean mentions(LogEvent event, String project) {
         String message = event.getMessage();

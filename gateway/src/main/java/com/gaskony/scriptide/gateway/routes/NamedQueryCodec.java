@@ -56,7 +56,10 @@ import java.util.Set;
  * does the reading, for the same reason {@code ModuleLibrary.serializeScript} does
  * for scripts: a hand-built resource can be byte-perfect and still be ignored.</p>
  */
-final class NamedQueryCodec {
+// Public for `read` alone — the index searches named-query SQL, and reading a
+// NamedQuery off a resource is this class's measured knowledge, not something to
+// re-derive elsewhere.
+public final class NamedQueryCodec {
 
     /** How many rows a test-run returns before it reports a truncation. */
     static final int TEST_ROW_CAP = 500;
@@ -579,7 +582,7 @@ final class NamedQueryCodec {
      * {@code GatewayContext.createDeserializer()}, which changed nothing. So null
      * is passed deliberately rather than for want of a context.</p>
      */
-    static NamedQuery read(Resource resource) throws Exception {
+    public static NamedQuery read(Resource resource) throws Exception {
         // fromResource never returns null — a resource it cannot read comes back
         // as a BLANK NamedQuery, which is the case handled below.
         NamedQuery q = NamedQuery.fromResource(resource, null);

@@ -62,7 +62,12 @@ import java.util.Optional;
  * ScriptResourceRouteHandler#isSafeDataKey} rejects anything with a {@code #} in
  * it, so the synthetic key can never be created by an ordinary write.</p>
  */
-final class WebDevResources {
+// Public, and only these three members are: `ProjectIndex` has to read a Web Dev
+// body to search it, and the alternative was duplicating the two-shape model
+// (handlers as data keys, a text page inside config.json) in a second package.
+// That model has already been got wrong once — see the 1.9.0 note in STATE.md —
+// and one copy of it is the whole point.
+public final class WebDevResources {
 
     private static final Logger logger = LoggerFactory.getLogger(WebDevResources.class);
 
@@ -77,7 +82,7 @@ final class WebDevResources {
     static final String TEXT = "text";
 
     /** The key a text resource's body is addressed by. See the class Javadoc. */
-    static final String TEXT_DATA_KEY = "config.json#text";
+    public static final String TEXT_DATA_KEY = "config.json#text";
 
     /** What the platform serves when a text resource declares nothing. */
     static final String DEFAULT_CONTENT_TYPE = "text/plain";
@@ -139,7 +144,7 @@ final class WebDevResources {
      * and refusing to open an endpoint because its config file is malformed
      * would lock a user out of the very file they need to fix.</p>
      */
-    static JsonObject parseConfig(Resource resource) {
+    public static JsonObject parseConfig(Resource resource) {
         try {
             return resource.getData(ScriptResourceTypes.WEBDEV_CONFIG_KEY)
                 .map(data -> new String(data.getBytes(), StandardCharsets.UTF_8))
@@ -189,7 +194,7 @@ final class WebDevResources {
     }
 
     /** A text resource's body, absent when the config carries no string {@code text}. */
-    static Optional<String> body(JsonObject config) {
+    public static Optional<String> body(JsonObject config) {
         JsonElement text = config.get(TEXT);
         if (text != null && text.isJsonPrimitive() && text.getAsJsonPrimitive().isString()) {
             return Optional.of(text.getAsString());

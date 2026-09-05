@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
+import RunHistoryDialog from './RunHistoryDialog';
 import { byteFidelity, editorTheme, findAndReplace, pythonKeymap, pythonSurface } from './editorCore';
 import {
   sharedExecClient,
@@ -128,6 +129,8 @@ export default function ScriptConsole({
 }: ScriptConsoleProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  /** True while the run-history dialog is open. */
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [entries, setEntries] = useState<OutputEntry[]>([]);
   const [running, setRunning] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -447,6 +450,20 @@ export default function ScriptConsole({
 
   return (
     <section className="console" aria-label="Script Console">
+      {historyOpen && (
+        <RunHistoryDialog
+          onClose={() => setHistoryOpen(false)}
+          onLoad={(source) => {
+            // Into the buffer, not into a run. The Run button stays the user's.
+            const view = viewRef.current;
+            if (!view) return;
+            view.dispatch({
+              changes: { from: 0, to: view.state.doc.length, insert: source },
+            });
+            view.focus();
+          }}
+        />
+      )}
       <div className="console-toolbar">
         <button
           type="button"
@@ -487,6 +504,9 @@ export default function ScriptConsole({
         <span className="console-project muted" title="Scripts run in this project's scope">
           {project}
         </span>
+        <button type="button" onClick={() => setHistoryOpen(true)}>
+          History
+        </button>
         <button type="button" onClick={() => setEntries([])} disabled={entries.length === 0}>
           Clear output
         </button>
