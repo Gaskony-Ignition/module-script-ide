@@ -24,13 +24,17 @@ these four defects lives at the browser/gateway boundary:
             on the TAB itself (`(Read-Only)`), not only in the settings-strip
             notice below it.
 
-READONLY needs a project with a PARENT and DRAFT needs one with no
-`ignition/update` resource of its own. Both were pinned to `Site_Redgum_Sewer`
-until 04/09/2026, which this gateway does not have and never did — the
-water-suite projects live on another rig — so `select_option` threw and the
-run ended there with eleven checks unreported. Both fixtures are DISCOVERED
-now, preferring a project that has a parent; SI_INHERIT_PROJECT still pins one,
-and a name this gateway does not offer is a FAIL rather than a silent fallback.
+TWO fixtures, discovered, and they are no longer the same project. DRAFT needs
+one whose Update row is genuinely ABSENT; READONLY needs one that INHERITS from
+an Inheritable parent. Both were pinned to `Site_Redgum_Sewer` until 04/09/2026
+— a water-suite project this gateway does not have and never did — so
+`select_option` threw and the run ended there with eleven checks unreported.
+They were then briefly one discovered project, which worked only while
+`_wd_scratch_` was not Inheritable: once it was (05/09/2026, so these very
+READONLY checks could run at all) its child inherited an Update, whose row is
+present-but-read-only and therefore serves neither check. SI_INHERIT_PROJECT
+still pins the draft one, and a name this gateway does not offer is a FAIL
+rather than a silent fallback.
 FOLDER needs a project with an empty script-python package; `Mining_Demo` is
 the known fixture, but this script also scans every mutable project for one,
 so a gateway where that project has since gained content still finds a
@@ -100,7 +104,14 @@ def tree_of(page, project):
 
 
 def has_update(page, project):
-    return any(e.get("path") == "ignition/update" for e in tree_of(page, project))
+    """Does an Update script exist for this project, from ANY origin?
+
+    Any origin, deliberately: DRAFT needs a row that is genuinely ABSENT, and an
+    INHERITED Update is not absent — it opens read-only, which is the other
+    check's subject entirely.
+    """
+    return any(e.get("path") == "ignition/update" and e.get("defined", True)
+               for e in tree_of(page, project))
 
 
 def expand_tree(page, passes=6):
@@ -195,11 +206,20 @@ with sync_playwright() as p:
     # inheritance at all.
     parented = sorted(q["name"] for q in projects if q.get("parent"))
     orphans = sorted(q["name"] for q in projects if not q.get("parent"))
+    # TWO fixtures, because since `_wd_scratch_` was made Inheritable
+    # (04/09/2026) no single project can be both. DRAFT needs a project whose
+    # Update row is genuinely ABSENT; READONLY needs one that INHERITS — and a
+    # project inheriting from a parent that HAS an Update has a row which is
+    # present-but-read-only, which is neither.
     INHERIT_PROJECT = wanted or next(
         (n for n in parented + orphans if draftable(n)), None)
+    READONLY_PROJECT = next(
+        (n for n in parented
+         if by_name.get(by_name.get(n, {}).get("parent") or "", {}).get("inheritable")),
+        None)
     if INHERIT_PROJECT:
-        print(f"  [FIXTURE] inherit project = {INHERIT_PROJECT} "
-              f"(parent={by_name.get(INHERIT_PROJECT, {}).get('parent')})")
+        print(f"  [FIXTURE] draft project = {INHERIT_PROJECT}; "
+              f"read-only project = {READONLY_PROJECT}")
 
     if INHERIT_PROJECT is None:
         for name in ("FIXTURE: the inherit project has no Update script yet",
@@ -294,6 +314,13 @@ with sync_playwright() as p:
                     page.wait_for_timeout(300)
 
         # ---------- READONLY: an inherited tab's label says so ----------
+        # Its OWN project — see the two-fixture note above.
+        if READONLY_PROJECT and READONLY_PROJECT != INHERIT_PROJECT:
+            page.select_option(".workspace-project select", READONLY_PROJECT)
+            page.wait_for_timeout(1800)
+            expand_tree(page)
+            page.wait_for_timeout(1000)
+        INHERIT_PROJECT = READONLY_PROJECT or INHERIT_PROJECT
         inherited = next((e for e in tree_of(page, INHERIT_PROJECT) if e.get("origin") == "inherited"), None)
         # An empty inherited set has two opposite meanings: the listing is broken,
         # or the parent on this rig is not marked Inheritable — in which case the
@@ -304,7 +331,15 @@ with sync_playwright() as p:
         listing = {p["name"]: p for p in json_of(api(page, "GET", "api/projects", "")).get("projects", [])}
         me = listing.get(INHERIT_PROJECT, {})
         parent = listing.get(me.get("parent") or "", {})
-        if inherited is None and me.get("parent") and parent and not parent.get("inheritable", True):
+        if inherited is None and not me.get("parent"):
+            # No parent at all, so there is nothing to inherit and nothing to
+            # check. This used to fall through to a FAIL, which reads as a
+            # defect in the listing rather than as "this gateway offered no
+            # inheriting project".
+            skip("FIXTURE: the inherit project has an inherited script to open",
+                 f"{INHERIT_PROJECT} has no parent — the READONLY checks need a "
+                 "project that inherits from an Inheritable one")
+        elif inherited is None and me.get("parent") and parent and not parent.get("inheritable", True):
             skip("FIXTURE: the inherit project has an inherited script to open",
                  f"{INHERIT_PROJECT} inherits {me['parent']}, which is not marked Inheritable on "
                  f"this gateway — the READONLY checks need a parent that is")

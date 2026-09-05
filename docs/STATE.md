@@ -2,11 +2,71 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.13.0 · deployed on `ignition-module-testing` (8.3.8) 04/09/2026 —
-`deploy_gate.py` PASS (6 checks) and every suite green: `v13` 23/23,
-`v15_tree` 16/16, `v16_nav` 25/25, `v17_nq` 45/45, `v18_pull` 20/20,
-`v19_ruler` 16/16, `v20_webdev` 31/31, `v21_split` 21/21, `v22_editing` 15/15,
-theme sweep 10/10 with no illegible element. Java 379 tests, Vitest 528.**
+**Version 1.14.4 · deployed on `ignition-module-testing` (8.3.8) 05/09/2026 —
+`deploy_gate.py` PASS (6 checks) and every suite green: `v13` 27/27,
+`v15_tree` 18/18, `v16_nav` 25/25, `v17_nq` 45/45, `v18_pull` 20/20,
+`v19_ruler` 16/16, `v20_webdev` 32/32, `v21_split` 21/21, `v22_editing` 20/20,
+theme sweep 10/10 with no illegible element. Java 379 tests, Vitest 545.**
+
+### 1.14.x — the last two known gaps, closed (05/09/2026)
+
+**Diagnostics existed only for Python.** The editor registered a document with
+the language server only when it was a `.py` file, so a Web Dev `cell3d.html`,
+a `site.css`, a WebDev JavaScript file and a named query's SQL had **no error
+signalling at all** — no squiggle, no gutter mark, no line-number mark, no
+ruler, no Problems row — and nothing said so. `syntaxLint.ts` uses each
+language's OWN parser, which CodeMirror already loads for highlighting, and
+publishes into the same store the server publishes to (`LspClient.publishLocal`)
+so the ruler and the Problems panel see them. Measured per language before
+being trusted: CSS, JavaScript, JSON and SQL report real error nodes (SQL with
+`:v` parameters is clean, which is what makes it checkable at all); **HTML's
+parser reports NOTHING**, by design, so it gets a narrow structural check with
+an allowlist — `<div><p>hi</div>` is valid HTML and must stay silent.
+
+**Two goes at the HTML check were wrong, and a real file caught both.**
+`cell3d.html` is 1,559 lines that render in every browser; the first version
+marked `<html>`, `<head>` and `<style>` as "never closed". CodeMirror parses
+LAZILY, so the close tags were simply outside the tree. `syntaxTreeAvailable`
+looks like the API for this and is not — it returned TRUE for a tree covering
+3,041 characters of 72,626 — and `tree.length` equals the document length in
+the live editor while most of it is still placeholder. The rule now confirms
+the close tag in the **text**, which no parse state can lie about.
+`syntaxLint.corpus.test.ts` pins it, opt-in behind `SI_HTML_CORPUS`.
+
+**The v13 terminal mystery is root-caused, and the checks are back.** Three
+input checks were removed on 02/09/2026 with "NOT ROOT-CAUSED … if the terminal
+ever drops input for a user, start here". Hooking `WebSocket.prototype.send`
+and replaying the suite's exact sequence showed **every keystroke on the wire**
+— 14 `term`/`input` frames with a real terminal id, and the echo came back.
+Everything in the 02/09 investigation looked at the DOM; nothing looked at the
+socket, which is the only place that separates "the browser never sent it" from
+"the server never answered". `v13` is 27/27 with the checks restored, and
+`stty size` now proves the pty carries the fitted size rather than 80x24.
+
+**Nigel's four decisions, 05/09/2026:**
+
+- **`terminal.docker` stays on by default** — the larger grant, deliberately.
+- **Gateway write access replaces the role NAME**, as a UNION not a
+  replacement: `SessionSecurity.canWriteGateway` grants on the platform's own
+  `WebUiSession.SESSION_WRITE` **or** the `Administrator` role. Measured on
+  8.3.8, `SESSION_WRITE` alone DENIED the gateway's own `admin` — the gate went
+  straight to `canExecute=false` — so using it alone would have shipped a module
+  nobody could save from. Whatever that constant gates, it is not "may this
+  caller write configuration".
+- **`_wd_scratch_` is Inheritable now**, so `v15_tree`'s read-only checks
+  actually RUN instead of skipping. That made the DRAFT and READONLY fixtures
+  incompatible — the child now inherits an Update, whose row is
+  present-but-read-only and serves neither — so the suite discovers two.
+- **The login chatter is suppressed** via Debian's own `$HOME/.hushlogin`,
+  which is the same condition guarding the block that printed it. The gid with
+  no name is the HOST docker group this container is given.
+
+Two suite bugs found on the way, both the same shape as ones found the day
+before: `validate_v22` counted lint marks with an UNSCOPED selector, so it saw
+the marks of hidden tabs (`CodeEditor` keeps one view per open document,
+mounted, to preserve scroll and undo) — it reported a fault in `cell3d.html`
+that belonged to a Python probe behind it. And one check formatted its message
+from a second query, which disagreed with its own assertion.
 
 ### 1.13.0 — six things Nigel found in one sitting (04/09/2026)
 

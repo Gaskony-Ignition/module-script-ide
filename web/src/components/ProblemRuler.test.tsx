@@ -215,13 +215,23 @@ describe('ProblemRuler', () => {
     expect(screen.queryAllByRole('button', { name: /on line/ })).toHaveLength(0);
   });
 
-  it('is absent for a named query, which the language server does not hold', () => {
+  it('is PRESENT for a named query — it carries its own parser\'s problems', () => {
+    // Reversed at 1.14.0. It used to be gated on isPythonDoc, which was right
+    // while the Jython server was the only source of diagnostics: a query's SQL
+    // is not Python and the server holds no document for it, so the ruler had
+    // nothing to draw and hid itself.
+    //
+    // Since 1.14.0 a non-Python document is linted by its OWN language's parser
+    // and publishes into the same store (see syntaxLint), so the ruler must
+    // subscribe for every document — gating it left a blank strip beside a file
+    // that had a squiggle in it.
     const { client } = fakeLsp([diagnostic(0, 'x')]);
     const { container } = render(
       <ProblemRuler doc={doc('SELECT 1', { kind: 'named-query' })} lsp={client} onSelect={vi.fn()} />
     );
-    expect(container).toBeEmptyDOMElement();
-    expect(client.onDiagnostics).not.toHaveBeenCalled();
+    expect(container).not.toBeEmptyDOMElement();
+    expect(client.onDiagnostics).toHaveBeenCalled();
+    expect(screen.getAllByRole('button', { name: /on line/ })).toHaveLength(1);
   });
 
   it('is absent with no document at all', () => {

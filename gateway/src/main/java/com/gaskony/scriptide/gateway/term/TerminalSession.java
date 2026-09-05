@@ -262,6 +262,10 @@ public class TerminalSession {
                 : sudo + " -n -H " + shell + " -i";
             String launch = "tty > '" + ttyFile + "'; "
                 + "stty cols " + safeCols + " rows " + safeRows + " 2>/dev/null; "
+                // Debian's own opt-out for the login chatter — see DockerExec.HUSH
+                // for the whole story. Ahead of the exec, and harmless on an
+                // image whose bashrc does not read it.
+                + ": > \"$HOME/.hushlogin\" 2>/dev/null; "
                 + "exec " + exec;
             argv.add(scriptBinary);
             argv.add("-q");

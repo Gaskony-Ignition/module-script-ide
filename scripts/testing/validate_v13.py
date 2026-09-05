@@ -153,30 +153,70 @@ with sync_playwright() as p:
     rows = await_terminal(lambda t: "$" in t or "#" in t)
     rec("TERM: a shell prompt appeared", "$" in rows or "#" in rows, rows.strip()[-70:].replace("\n", " | "))
 
-    # ---- terminal INPUT checks removed 02/09/2026, and this is NOT a tidy-up ----
+    # ---- terminal INPUT, restored 05/09/2026 after being root-caused ----
     #
-    # `echo`, `stty size` and `git --version` were driven from here. They now
-    # fail in THIS suite's page state: no byte reaches the shell, not even a bare
-    # Enter, while output keeps flowing and the helper textarea reports as
-    # document.activeElement. The identical code in validate_v14.py, on the same
-    # build and the same gateway, types and reads back fine — it runs `id -u` and
-    # a 60-line loop and asserts on both.
+    # These three checks were removed on 02/09/2026 because no byte reached the
+    # shell from THIS suite's page state — not even a bare Enter — while output
+    # kept flowing and the helper textarea reported as document.activeElement.
+    # The identical code in validate_v14.py worked on the same build. It was
+    # written down rather than deleted quietly, with "if the terminal ever drops
+    # input for a user, start here."
     #
-    # Ruled out: the focus method (clicking the helper textarea, clicking
-    # .xterm-screen, and .focus() from JS all behave the same), the
-    # customise-layout menu step above (removing it changes nothing), the panel
-    # being hidden (asserted visible), and a second stale xterm instance
-    # (there is exactly one helper textarea in the DOM).
+    # Root-caused 05/09/2026 by instrumenting `WebSocket.prototype.send` and
+    # replaying this suite's exact sequence — the console run, then the
+    # terminal. **Every keystroke was on the wire**: 14 `term`/`input` frames
+    # with a real terminal id, and the echo came back. Everything tried in
+    # 02/09's investigation looked at the DOM; nothing looked at the socket,
+    # which is the one place that could tell "the browser never sent it" from
+    # "the server never answered".
     #
-    # NOT ROOT-CAUSED. Something in the state this suite leaves the page in after
-    # its layout toggles and its Script Console run stops xterm's input path, and
-    # I did not find it. Written down rather than deleted quietly, because "the
-    # checks were flaky so I removed them" is how a real bug gets buried. If the
-    # terminal ever drops input for a user, start here.
+    # So the checks are back, and they are the evidence. If they ever fail
+    # again, hook `WebSocket.prototype.send` FIRST — with a plain statement, not
+    # an arrow function, because `add_init_script` runs a script rather than
+    # calling one and an arrow-function literal silently does nothing.
+    focus_terminal()
+    page.keyboard.type("echo TERM_INPUT_OK")
+    page.keyboard.press("Enter")
+    echoed = await_terminal(lambda t: "TERM_INPUT_OK" in t)
+    rec("TERM: a typed command reaches the shell and comes back",
+        "TERM_INPUT_OK" in echoed, echoed.strip()[-70:].replace("\n", " | "))
+
+    # The size the browser told the pty, read back from the pty itself. A
+    # terminal that echoes but was never resized shows the shell 80x24 whatever
+    # the pane is, and every full-screen program then paints in the wrong box.
+    page.keyboard.type("stty size")
+    page.keyboard.press("Enter")
+    sized = await_terminal(lambda t: any(
+        line.strip() and line.strip()[0].isdigit() and " " in line.strip()
+        for line in t.splitlines()[-6:]))
+    rec("TERM: the pty carries the size the browser fitted, not 80x24",
+        any(line.strip() and line.strip()[0].isdigit()
+            for line in sized.splitlines()[-6:]),
+        sized.strip()[-60:].replace("\n", " | "))
+
+    # A real command from the image, not a shell builtin: a builtin proves the
+    # shell is alive, an external binary proves the PATH and the exec are too.
     #
-    # Two checks above still cover the terminal from this suite: it is visible,
-    # and the shell's OUTPUT reaches the browser. INPUT is covered by
-    # validate_v14.py, which is where those assertions now live.
+    # `uname`, not `git`. The rig runs a STOCK Ignition image again (Nigel,
+    # 03/09/2026 — no custom images), so git is installed from the root terminal
+    # when it is wanted and is absent on a fresh container. Asserting on it made
+    # this check a test of the image rather than of the shell.
+    page.keyboard.type("uname -s")
+    page.keyboard.press("Enter")
+    versioned = await_terminal(lambda t: "Linux" in t)
+    rec("TERM: an external binary runs — the shell is a real shell",
+        "Linux" in versioned, versioned.strip()[-60:].replace("\n", " | "))
+
+    # The login chatter is gone (Nigel, 04/09/2026: "suppress it"). Debian's
+    # bashrc runs `$(groups)` to decide whether to print its sudo hint, and the
+    # HOST docker gid this container is given has no name in /etc/group, so
+    # every terminal opened with `groups: cannot find name for group ID 984`
+    # ahead of the prompt. See DockerExec.HUSH.
+    everything = page.locator(".xterm-rows").inner_text()
+    rec("TERM: no 'cannot find name for group ID' before the prompt",
+        "cannot find name for group" not in everything,
+        [line for line in everything.splitlines() if "group ID" in line][:1] or "clean")
+
     page.screenshot(path=f"{OUT}/v13-terminal.png")
 
     # maximise / restore

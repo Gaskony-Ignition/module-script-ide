@@ -36,6 +36,8 @@ import ProblemRuler, { geometryOffset } from './ProblemRuler';
 import { lspUri } from '../api/lspClient';
 import { lintGutter } from '@codemirror/lint';
 import { lintLineGutter } from './lintLineGutter';
+import { hasSyntaxCheck, syntaxLint } from './syntaxLint';
+import type { DocLanguage } from '../workspace/docLanguage';
 import {
   byteFidelity, cssSurface, editorTheme, findAndReplace, folding, goToLine, htmlSurface,
   javascriptSurface, jsonSurface, plainSurface, pythonSurface, sqlSurface,
@@ -408,6 +410,30 @@ function readOnlyExtension(readOnly: boolean): Extension {
  * 1.9.0, and the field is optional so an older caller cannot lose highlighting
  * by omitting it.
  */
+/** The language a document is in, with the same default `surfaceFor` uses. */
+function languageOf(doc: OpenDoc): DocLanguage {
+  if (doc.kind === 'named-query') return 'sql';
+  return doc.language ?? 'python';
+}
+
+/**
+ * Line/character for a document offset.
+ *
+ * The inverse of `positionToOffset`, and needed here because the editor's
+ * diagnostics are offsets while everything downstream of the LSP store speaks
+ * positions. Counting newlines in the buffer rather than asking the view: the
+ * publish happens inside the lint source, where the text is what the caller
+ * passed and the view's own document is the same string.
+ */
+function offsetToPosition(text: string, offset: number): { line: number; character: number } {
+  const upto = text.slice(0, Math.max(0, Math.min(offset, text.length)));
+  const lastBreak = upto.lastIndexOf('\n');
+  return {
+    line: upto.length === 0 ? 0 : upto.split('\n').length - 1,
+    character: offset - (lastBreak + 1),
+  };
+}
+
 function surfaceFor(doc: OpenDoc): Extension[] {
   if (doc.kind === 'named-query') return sqlSurface;
   switch (doc.language) {
@@ -480,6 +506,33 @@ function baseExtensions(
     ...(lsp && isPythonDoc(doc)
       ? [lintGutter(), lintLineGutter,
          lspExtension(lsp, { project: doc.project, path: doc.path, scriptKey: doc.scriptKey })]
+      : []),
+
+    // ...and everything the Jython server does NOT own gets its own language's
+    // parser instead. Until 1.14.0 those documents had no error signalling at
+    // all — no squiggle, no gutter mark, no ruler, no Problems row — because
+    // the whole diagnostic path hung off the LSP branch above and a Web Dev
+    // stylesheet is not Python. They share the two gutters, so a marked line
+    // looks the same whatever language it is in.
+    ...(!isPythonDoc(doc) && hasSyntaxCheck(languageOf(doc))
+      ? [lintGutter(), lintLineGutter,
+         syntaxLint(languageOf(doc), (found) => {
+           // Into the same store the server publishes to, so the ruler and the
+           // Problems panel see these too. Converted back to LSP shape because
+           // that is what both of them read.
+           lsp?.publishLocal(
+             lspUri(doc.project, doc.path, doc.scriptKey),
+             found.map((d) => ({
+               range: {
+                 start: offsetToPosition(doc.text, d.from),
+                 end: offsetToPosition(doc.text, d.to),
+               },
+               severity: d.severity === 'error' ? 1 : d.severity === 'warning' ? 2 : 3,
+               source: d.source,
+               message: d.message,
+             }))
+           );
+         })]
       : []),
 
     EditorView.updateListener.of((update) => {

@@ -80,6 +80,30 @@ public final class DockerExec {
     /** Environment variable carrying the per-session tag. See {@link #reapScript}. */
     static final String TAG_VARIABLE = "SCRIPTIDE_TERM";
 
+    /**
+     * Silence the login chatter before the interactive shell starts.
+     *
+     * <p>Every terminal opened on this rig began with
+     * {@code groups: cannot find name for group ID 984} (Nigel, 04/09/2026:
+     * "suppress it"). The cause is exact: Debian's {@code /etc/bash.bashrc}
+     * runs {@code $(groups)} to decide whether to print its "use sudo" hint,
+     * and gid 984 is the HOST's docker group, added to this container by
+     * {@code group_add} so the socket is reachable. It has no name in the
+     * container's {@code /etc/group}, so {@code groups} complains — to a
+     * terminal where stdout and stderr are one pty, in front of the prompt.</p>
+     *
+     * <p>The hint itself is meaningless here anyway: this shell is already
+     * root. So rather than filtering a stream that cannot be separated, this
+     * uses Debian's OWN opt-out, which is the same condition that guards the
+     * block — {@code $HOME/.hushlogin}. One empty file, created idempotently,
+     * and both the error and the hint it was printed for go away.</p>
+     *
+     * <p>The outer shell is non-interactive so it reads no rc file; the
+     * {@code exec} then starts the interactive one with the file already
+     * there.</p>
+     */
+    private static final String HUSH = ": > \"$HOME/.hushlogin\" 2>/dev/null; ";
+
     /** How many times to try the post-attach resize before giving up on it. */
     private static final int RESIZE_ATTEMPTS = 3;
     private static final long RESIZE_RETRY_MS = 100;
@@ -185,7 +209,7 @@ public final class DockerExec {
         if (workingDir != null && !workingDir.isBlank()) {
             create.addProperty("WorkingDir", workingDir);
         }
-        create.add("Cmd", GSON.toJsonTree(List.of(shell, "-i")));
+        create.add("Cmd", GSON.toJsonTree(List.of(shell, "-c", HUSH + "exec " + shell + " -i")));
         // A login-ish environment. TERM is what makes xterm.js and the shell
         // agree on capabilities; the pagers are because nothing in a browser
         // terminal can drive `less`, and a pager waiting for a key it will never

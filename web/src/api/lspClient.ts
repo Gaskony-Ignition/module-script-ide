@@ -313,6 +313,24 @@ export class LspClient {
   }
 
   /**
+   * Publish diagnostics the CLIENT worked out, into the same store.
+   *
+   * For documents the server does not own — a Web Dev CSS or JavaScript file, a
+   * named query's SQL — whose problems come from that language's own parser
+   * rather than from Jython. The ruler and the Problems panel both read this
+   * store and are keyed by uri, so without a way in, a locally linted document
+   * would be squiggled in the editor and invisible in both, which is the
+   * confusing half of a fix.
+   *
+   * Never call this for a Python document: the server owns those uris and the
+   * two would overwrite each other on every keystroke.
+   */
+  publishLocal(uri: string, diagnostics: LspDiagnostic[]): void {
+    this.lastDiagnostics.set(uri, diagnostics);
+    this.diagnosticListeners.get(uri)?.forEach((listener) => listener(diagnostics));
+  }
+
+  /**
    * Subscribe to diagnostics for one document. Returns an unsubscribe function.
    *
    * The listener fires immediately with the last known set, so an editor that

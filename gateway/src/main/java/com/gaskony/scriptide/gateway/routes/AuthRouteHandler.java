@@ -52,7 +52,10 @@ public final class AuthRouteHandler {
 
         WebUiSession session = sessionOpt.get();
         WebAuthUser user = session.getUserContext().getWebAuthUser().get();
-        boolean admin = SessionSecurity.isAdministrator(user);
+        // What the client uses to enable Save and Run. It must be the SAME
+        // question the routes are gated on, or the UI offers a button whose
+        // request is about to 403 — so it asks the platform, not the role name.
+        boolean admin = SessionSecurity.canWriteGateway(req);
 
         JsonArray roles = new JsonArray();
         user.getRoles().forEach(roles::add);

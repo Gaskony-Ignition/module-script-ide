@@ -87,7 +87,10 @@ public class ScriptIdeRouteRegistrar {
         // full language intelligence; only mutation needs Administrator.
 
         AccessControlStrategy authed = SessionSecurity.requireAuthenticated();
-        AccessControlStrategy admin = SessionSecurity.requireAdministrator();
+        // "If write access is available to the gateway then its authentication is
+        // accepted" (Nigel, 04/09/2026). The platform's own SESSION_WRITE, not a
+        // role named Administrator — see SessionSecurity.canWriteGateway.
+        AccessControlStrategy admin = SessionSecurity.requireGatewayWrite();
 
         routes.newRoute(ScriptIdePaths.ROUTE_PROJECTS)
             .type(RouteGroup.TYPE_JSON)

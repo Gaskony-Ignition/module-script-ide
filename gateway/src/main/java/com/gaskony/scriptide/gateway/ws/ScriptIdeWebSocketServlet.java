@@ -88,7 +88,11 @@ public final class ScriptIdeWebSocketServlet extends JettyWebSocketServlet {
             // more here than in a read-only socket, because this one runs code.
             return new ScriptIdeSocket(
                 user.getUserName(),
-                SessionSecurity.isAdministrator(user),
+                // The execution channel is the highest-privilege surface here, so
+                // it must not answer a DIFFERENT question from the write routes:
+                // a caller who may write and could not execute would be able to
+                // save a script and not run it. `rc` is already built above.
+                SessionSecurity.canWriteGateway(rc),
                 session.get().getCsrfToken(),
                 http.getRemoteAddr());
         });

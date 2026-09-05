@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { lspUri, type LspClient, type LspDiagnostic } from '../api/lspClient';
-import { isPythonDoc, type OpenDoc } from '../workspace/documents';
+import { type OpenDoc } from '../workspace/documents';
 import { copyText } from './clipboard';
 import './ProblemRuler.css';
 
@@ -117,9 +117,11 @@ export default function ProblemRuler({
 
   // Python only. A ruler beside a Web Dev HTML file would carry one mark per
   // line, every one of them the Jython parser objecting to markup.
-  const serverUri = doc && isPythonDoc(doc)
-    ? lspUri(doc.project, doc.path, doc.scriptKey)
-    : null;
+  // Every document, not only the Python ones. From 1.14.0 a Web Dev stylesheet
+  // or a named query's SQL publishes its own parser's diagnostics into the same
+  // store (see syntaxLint), and gating this on Python left the ruler blank
+  // beside a file that had a squiggle in it.
+  const serverUri = doc ? lspUri(doc.project, doc.path, doc.scriptKey) : null;
 
   useEffect(() => {
     setDiagnostics([]);
@@ -174,7 +176,7 @@ export default function ProblemRuler({
     });
   }, []);
 
-  if (!doc || !isPythonDoc(doc)) return null;
+  if (!doc) return null;
 
   return (
     <div

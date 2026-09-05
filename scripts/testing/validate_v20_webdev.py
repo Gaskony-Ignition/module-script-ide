@@ -232,14 +232,23 @@ with sync_playwright() as p:
         and page.locator('.tab:has-text("config.json")').count() == 0,
         page.locator(".tab").first.inner_text().replace("\n", " ")[:60])
 
-    # A Jython parser pointed at HTML publishes an error on every line. The
-    # ruler being absent is the visible half of the language gate.
-    page.wait_for_timeout(2500)
-    rec("OPEN: the Jython language server is NOT run over it",
-        page.locator(".problem-ruler").count() == 0
-        and page.locator(".cm-lintRange-error").count() == 0,
-        f"{page.locator('.problem-ruler').count()} ruler(s), "
-        f"{page.locator('.cm-lintRange-error').count()} lint range(s)")
+    # A Jython parser pointed at HTML publishes an error on every line, so the
+    # language gate is still the thing under test — but what proves it changed
+    # at 1.14.0. This used to assert the ruler was ABSENT, which was a fair
+    # proxy while Python was the only language with diagnostics at all; now a
+    # non-Python document is linted by its OWN parser and the ruler is present
+    # for it, so absence would fail on a correct build.
+    #
+    # The claim is therefore made directly: a real HTML page carries NO error
+    # marks. Jython over 1,559 lines of HTML would carry hundreds.
+    page.wait_for_timeout(3000)
+    errors = page.locator(".cm-lintRange-error").count()
+    rec("OPEN: no Jython is run over it — a real page carries no error marks",
+        errors == 0,
+        f"{errors} error range(s), {page.locator('.problem-ruler-mark').count()} ruler mark(s)")
+    rec("OPEN: it DOES get a ruler now, from its own language's parser",
+        page.locator(".problem-ruler").count() == 1,
+        f"{page.locator('.problem-ruler').count()} ruler(s)")
     # And it IS highlighted — CodeMirror's HTML grammar tags an element name,
     # which a plain-text surface would leave as an untagged run.
     rec("OPEN: it is highlighted as HTML",

@@ -45,6 +45,9 @@ from playwright.sync_api import sync_playwright                 # noqa: E402
 
 SPA = CONFIG.get("spa_path", "/data/scriptide/")
 PROJECT = os.environ.get("SI_EDIT_PROJECT", "Mining_Demo")
+# Where the Web Dev text resource lives — `cell3d` is the fixture Nigel
+# named on 03/09/2026 and the reason the two-shape model exists at all.
+WEBDEV_PROJECT = os.environ.get("SI_WEBDEV_PROJECT", "Machine_HMI_Demo")
 FIXTURE = "ignition/script-python/_si_v22_/code.py"
 FIXTURE_PATH = "ignition/script-python/_si_v22_"
 
@@ -52,6 +55,15 @@ FIXTURE_PATH = "ignition/script-python/_si_v22_"
 # The middle line is the only one that may be marked, and the checks below say
 # so in both directions.
 SOURCE = "defined = 1\nj;sdfj;asdfjk;dksfj\nprint defined\n"
+
+# Every gutter query is scoped to the VISIBLE editor.
+#
+# `CodeEditor` keeps one CodeMirror view per open document, mounted but hidden,
+# so that scroll position and undo history survive a tab switch. An unscoped
+# `.cm-lineNumbers .cm-lint-line` therefore counts the marks of every tab ever
+# opened — which is why this suite reported a mark on line 2 of `cell3d.html`
+# that was really the Python probe's garbage line, in another editor, behind it.
+VISIBLE = ".code-editor-host:not([style*=none])"
 
 res = []
 
@@ -106,6 +118,20 @@ def remove_fixture(page, csrf):
                 f"api/scripts/content/{urllib.parse.quote(path, safe='')}"
                 f"?project={urllib.parse.quote(PROJECT)}",
                 csrf, if_match=found.get("signature"))
+
+
+def settle(page, selector, timeout=15000):
+    """Wait for a selector and say whether it arrived, instead of throwing.
+
+    A check that waits for its own precondition and then asserts is still an
+    assertion — a missing element times out and is RECORDED, rather than ending
+    the run with a traceback and no tally.
+    """
+    try:
+        page.wait_for_selector(selector, timeout=timeout)
+        return True
+    except Exception:
+        return False
 
 
 def alpha_of(colour):
@@ -165,21 +191,21 @@ with sync_playwright() as p:
 
     # Diagnostics arrive over the socket; give the server a beat to parse.
     page.wait_for_timeout(3500)
-    marks = page.locator(".cm-lineNumbers .cm-lint-line").all_inner_texts()
+    marks = page.locator(VISIBLE + " .cm-lineNumbers .cm-lint-line").all_inner_texts()
     rec("NAMES: the garbage line is reported at all",
         len(marks) > 0, f"marked lines: {marks}")
     # THE difference. Line 2 is the garbage; lines 1 and 3 are ordinary code and
     # must not be marked, or the check has simply painted the file red.
     rec("NAMES: the mark is on the GARBAGE line and on no other",
         marks == ["2"], f"marked lines: {marks} (expected exactly ['2'])")
-    warned = page.locator(".cm-lineNumbers .cm-lint-line-warning").count()
+    warned = page.locator(VISIBLE + " .cm-lineNumbers .cm-lint-line-warning").count()
     rec("NAMES: it is a WARNING, not an error — the name may exist at run time",
         warned == 1 and page.locator(".cm-lineNumbers .cm-lint-line-error").count() == 0,
         f"{warned} warning, "
-        f"{page.locator('.cm-lineNumbers .cm-lint-line-error').count()} error")
+        f"{page.locator(VISIBLE + ' .cm-lineNumbers .cm-lint-line-error').count()} error")
 
     # ---------- 1. the mark is beside the line, not only on the ruler --------
-    number = page.locator(".cm-lineNumbers .cm-lint-line").first
+    number = page.locator(VISIBLE + " .cm-lineNumbers .cm-lint-line").first
     box = number.bounding_box()
     line2 = page.locator(".cm-line").nth(1).bounding_box()
     rec("LINE: the marked number sits on the same row as the code it describes",
@@ -189,7 +215,7 @@ with sync_playwright() as p:
     # And it is actually painted differently from an ordinary number — a class
     # that no CSS picked up would pass every check above.
     marked = number.evaluate("n => getComputedStyle(n).color")
-    plain = page.locator(".cm-lineNumbers .cm-gutterElement:not(.cm-lint-line)").nth(2)
+    plain = page.locator(VISIBLE + " .cm-lineNumbers .cm-gutterElement:not(.cm-lint-line)").nth(2)
     ordinary = plain.evaluate("n => getComputedStyle(n).color")
     rec("LINE: a marked number is painted differently from an unmarked one",
         marked != ordinary, f"marked {marked} vs ordinary {ordinary}")
@@ -237,6 +263,130 @@ with sync_playwright() as p:
         rec("TOOLTIP: it does not use --surface, which is 10% on a glass pack",
             alpha_of(tip_bg) >= alpha_of(surface),
             f"tooltip {tip_bg} vs --surface {surface}")
+
+    # ---------- 5. the documents the Jython server does NOT own -------------
+    #
+    # Until 1.14.0 anything that was not a `.py` file had no error signalling at
+    # all — no squiggle, no gutter mark, no line-number mark, no ruler, no
+    # Problems row — because the whole diagnostic path hung off the LSP branch
+    # and a Web Dev stylesheet is not Python. Nothing said so; the editor simply
+    # looked clean however broken the file was.
+    #
+    # Driven on a real Web Dev endpoint, and asserted BOTH ways: broken CSS is
+    # marked, and the same file made valid again is not. A check that only
+    # looked for a mark would pass on a build that marked everything.
+    page.locator('.activity-item[aria-label="Web Dev"]').first.click()
+    page.wait_for_timeout(900)
+    page.select_option(".workspace-project select", WEBDEV_PROJECT)
+    page.wait_for_timeout(2000)
+    for _ in range(4):
+        shut = page.locator('.file-tree[aria-label="Web Dev"] [aria-expanded="false"]')
+        if shut.count() == 0:
+            break
+        for i in range(shut.count()):
+            try:
+                shut.nth(i).click(timeout=1500)
+            except Exception:
+                pass
+        page.wait_for_timeout(200)
+
+    body = page.locator('.file-tree[aria-label="Web Dev"] '
+                        '.file-tree-item:has(.file-tree-name:text-is("cell3d.html"))')
+    if body.count() == 0:
+        for name in ("LINT: a real 1,559-line page is marked NOWHERE",
+                     "LINT: a broken non-Python file is marked",
+                     "LINT: exactly ONE mark was added, not a cascade",
+                     "LINT: the overview ruler carries it too",
+                     "LINT: fixing the file clears the mark it added"):
+            skip(name, f"no editable text resource in {WEBDEV_PROJECT} to drive")
+    else:
+        body.first.click()
+        settle(page, ".code-editor-host:not([style*=none]) .cm-content")
+        page.wait_for_timeout(1500)
+        editor = page.locator(".code-editor-host:not([style*=none]) .cm-content")
+        # What the file scores BEFORE anything is typed. A real page should be
+        # clean, and asserting that is the false-positive half of this check —
+        # `cell3d.html` is 1,559 lines of working WebGL served to real browsers.
+        page.wait_for_timeout(2500)
+        clean_marks = page.locator(VISIBLE + " .cm-lineNumbers .cm-lint-line").all_inner_texts()
+        clean_ruler = page.locator(".problem-ruler-mark").count()
+        rec("LINT: a real 1,559-line page is marked NOWHERE",
+            len(clean_marks) == 0 and clean_ruler == 0,
+            f"{clean_marks} line mark(s), {clean_ruler} ruler mark(s)")
+        editor.click()
+        page.keyboard.press("Control+End")
+        # A close tag that closes nothing: HTML's own parser reports no error
+        # for it, which is why this check exists at all.
+        page.keyboard.type("\n</nosuchtag>")
+        page.wait_for_timeout(2500)
+
+        marks = page.locator(VISIBLE + " .cm-lineNumbers .cm-lint-line").all_inner_texts()
+        rec("LINT: a broken non-Python file is marked",
+            len(marks) > len(clean_marks),
+            f"{len(clean_marks)} mark(s) before, {len(marks)} after: {marks}")
+        # The line NUMBER is asserted as a difference rather than computed. The
+        # editor virtualises: `inner_text()` returns only the rendered lines, so
+        # counting them on a 1,559-line file gave 81 and the first version of
+        # this check compared the mark against that.
+        added = [m for m in marks if m not in clean_marks]
+        # ONE mark for one fault. A checker that cascaded would add dozens, and
+        # a line count taken from the DOM cannot say which line is "last" on a
+        # virtualised editor — so the assertion is the count, which can.
+        rec("LINT: exactly ONE mark was added, not a cascade",
+            len(added) == 1, f"added {added}")
+        rec("LINT: the overview ruler carries it too",
+            page.locator(".problem-ruler-mark").count() > clean_ruler,
+            f"{clean_ruler} ruler mark(s) before, "
+            f"{page.locator('.problem-ruler-mark').count()} after")
+
+        # And the other half. Undo the damage; the added marks must all go.
+        for _ in range(len("</nosuchtag>") + 2):
+            page.keyboard.press("Backspace")
+        # POLLED, and read ONCE per attempt into a variable. The first version
+        # asserted on a fresh query and then formatted its message from ANOTHER
+        # one — and the message's selector was unscoped, so it reported the
+        # Python tab's mark and read "back to 1 line (was 0)" on a check that
+        # had correctly passed. A message that disagrees with its own assertion
+        # is worse than no message.
+        lines = ruler = -1
+        for _ in range(30):
+            lines = page.locator(VISIBLE + " .cm-lineNumbers .cm-lint-line").count()
+            ruler = page.locator(".problem-ruler-mark").count()
+            if lines == len(clean_marks) and ruler == clean_ruler:
+                break
+            page.wait_for_timeout(500)
+        rec("LINT: fixing the file clears the mark it added",
+            lines == len(clean_marks) and ruler == clean_ruler,
+            f"back to {lines} line (was {len(clean_marks)}), "
+            f"{ruler} ruler (was {clean_ruler})")
+
+    # Nothing above was saved, and it must not be: this is a real project's
+    # endpoint. Close the tab, discarding.
+    if page.locator(".tab.is-active .tab-close").count():
+        page.locator(".tab.is-active .tab-close").click()
+        page.wait_for_timeout(500)
+        if page.get_by_role("button", name="Discard changes").count():
+            page.get_by_role("button", name="Discard changes").click()
+            page.wait_for_timeout(500)
+    page.locator('.activity-item[aria-label="Scripting"]').first.click()
+    page.wait_for_timeout(600)
+    page.select_option(".workspace-project select", PROJECT)
+    page.wait_for_timeout(1800)
+    for _ in range(5):
+        shut = page.locator('.file-tree [aria-expanded="false"]')
+        if shut.count() == 0:
+            break
+        for i in range(shut.count()):
+            try:
+                shut.nth(i).click(timeout=1500)
+            except Exception:
+                pass
+        page.wait_for_timeout(200)
+    reopened = page.locator('.file-tree .file-tree-item:has(.file-tree-name:text-is("_si_v22_"))')
+    if reopened.count():
+        reopened.first.click()
+        settle(page, ".code-editor-host:not([style*=none]) .cm-content")
+        page.wait_for_timeout(1500)
 
     # ---------- 4. a lost session says so, and keeps the work ---------------
     # Provoked for real: drop the session cookies, then save. Nothing else in
