@@ -154,3 +154,101 @@
   text-overflow: ellipsis;
   white-space: pre;
 }
+
+/* ---- Replace across the project (1.15.0) ----------------------------------
+   The row sits under the search form and only appears for a text search that
+   found something, so the panel is unchanged for a reader who is only looking.
+   Deliberately NOT the primary `.button`: the destructive control on this
+   screen should not be the brightest thing on it. */
+
+.search-panel-replace {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+/* Its own class, never a second `.search-panel-input` — see the note in the
+   TSX. The treatment is copied from that rule on purpose: the two boxes are a
+   pair and must read as one control. */
+.search-panel-replace-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+}
+
+.search-panel-replace-input:focus-within {
+  border-color: var(--accent-primary);
+}
+
+.search-panel-replace-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control-height);
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+}
+
+.search-panel-replace-input input:focus-visible {
+  outline: none;
+}
+
+.search-panel-replace-button {
+  flex: 0 0 auto;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.search-panel-replace-button:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.search-panel-replace-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.search-panel-confirm,
+.search-panel-report {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* The one place this panel raises its voice: it is about to change files. */
+.search-panel-confirm {
+  color: var(--warning);
+}
+
+.search-panel-report-line {
+  margin: 0 0 var(--space-1, 4px);
+  color: var(--text-primary);
+}
+
+.search-panel-report-skip {
+  margin: 0;
+}
+
+.search-panel-report-file {
+  color: var(--text-secondary);
+}

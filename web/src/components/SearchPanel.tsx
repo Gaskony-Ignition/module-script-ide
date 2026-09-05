@@ -9,6 +9,13 @@
  * `scriptide/searchText` has been answered by the gateway since 1.0.0 and had no
  * caller.
  *
+ * **Replace is offered for a TEXT search and never for references.** The server
+ * matches references by name, not by receiver, so the list can contain two
+ * unrelated members that happen to share a name — replacing across it would
+ * rename the wrong one, which is exactly the trap the label below warns about.
+ * The replace row is hidden in references mode rather than disabled, because a
+ * disabled control invites you to look for the way to enable it.
+ *
  * **References are labelled name-based on screen, every time.** The server
  * matches whole identifiers, not receivers (see `LspClient#references`), so two
  * unrelated `write` methods both appear. A results list that did not say so
@@ -18,6 +25,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LspClient, TextSearchHit } from '../api/lspClient';
 import { labelForLocation } from '../workspace/locations';
+import { summarise as summariseReport, type ReplaceReport } from '../workspace/replaceAll';
 import { IconSearch } from './Icons';
 import './SearchPanel.css';
 
@@ -36,6 +44,17 @@ export interface SearchPanelProps {
    */
   referencesRequest: { name: string; nonce: number } | null;
   onOpenLocation: (uri: string, line: number, character: number) => void;
+  /**
+   * Replace the search term in every file listed, or undefined when the caller
+   * cannot write — a non-administrator gets the search and no replace row at
+   * all, rather than a button that 403s.
+   */
+  onReplaceAll?: (
+    uris: string[],
+    term: string,
+    replacement: string,
+    caseSensitive: boolean
+  ) => Promise<ReplaceReport>;
 }
 
 /** Results grouped by the file they are in, in the order the server sent them. */
@@ -54,7 +73,7 @@ function groupByFile(hits: TextSearchHit[]): Array<{ label: string; hits: TextSe
 }
 
 export default function SearchPanel({
-  project, lsp, referencesRequest, onOpenLocation,
+  project, lsp, referencesRequest, onOpenLocation, onReplaceAll,
 }: SearchPanelProps) {
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -67,6 +86,11 @@ export default function SearchPanel({
   /** Null until a search has actually run, so the empty view is not "no results". */
   const [searched, setSearched] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [replacement, setReplacement] = useState('');
+  /** The confirmation step. Null when no replace has been asked for. */
+  const [confirming, setConfirming] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const [report, setReport] = useState<ReplaceReport | null>(null);
 
   const runText = useCallback(
     async (term: string, matchCase: boolean) => {
@@ -79,6 +103,12 @@ export default function SearchPanel({
       setSubject(term);
       setBusy(true);
       setError('');
+      // A report describes the list it ran against, so a new search retires it.
+      // Cleared HERE rather than in an effect on `hits`: the replace re-runs the
+      // search itself and then posts its report, and an effect would have raced
+      // that and wiped the report the user is meant to read.
+      setReport(null);
+      setConfirming(false);
       try {
         // caseSensitive is passed through the same request the server already
         // reads it from; it is not filtered here, or the result cap would be
@@ -108,6 +138,8 @@ export default function SearchPanel({
     setSubject(name);
     setBusy(true);
     setError('');
+    setReport(null);
+    setConfirming(false);
     lsp
       .references(project, name)
       .then((found) => {
@@ -138,6 +170,34 @@ export default function SearchPanel({
   }, [project]);
 
   const groups = useMemo(() => groupByFile(hits), [hits]);
+
+  /** The files a replace would touch, in the order they are listed. */
+  const fileUris = useMemo(() => [...new Set(hits.map((hit) => hit.uri))], [hits]);
+
+  const canReplace =
+    Boolean(onReplaceAll) && mode === 'text' && searched && hits.length > 0 && subject.length > 0;
+
+  const doReplace = useCallback(async () => {
+    if (!onReplaceAll || subject.length === 0) return;
+    setReplacing(true);
+    setConfirming(false);
+    try {
+      const result = await onReplaceAll(fileUris, subject, replacement, caseSensitive);
+      // Re-run the search so the list shows the world after the write. Without
+      // this the results still name the old text and clicking one jumps to a
+      // line that no longer contains it.
+      //
+      // The report is posted AFTER that search, not before: `runText` retires
+      // any standing report as its first act, so setting it first put the
+      // report on screen and then cleared it a tick later.
+      await runText(subject, caseSensitive);
+      setReport(result);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReplacing(false);
+    }
+  }, [caseSensitive, fileUris, onReplaceAll, replacement, runText, subject]);
 
   return (
     <div className="search-panel">
@@ -175,6 +235,72 @@ export default function SearchPanel({
           Match case
         </label>
       </form>
+
+      {canReplace && (
+        <div className="search-panel-replace">
+          {/* NOT `.search-panel-input`. That class already addresses the search
+              box, and adding a second element under it made every existing
+              `.search-panel-input input` selector ambiguous — which broke
+              validate_v16_nav the moment a search returned hits. */}
+          <div className="search-panel-replace-input">
+            <input
+              type="text"
+              value={replacement}
+              spellCheck={false}
+              placeholder="Replace with"
+              aria-label="Replace with"
+              onChange={(event) => {
+                setReplacement(event.target.value);
+                setConfirming(false);
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            className="search-panel-replace-button"
+            disabled={replacing}
+            onClick={() => (confirming ? void doReplace() : setConfirming(true))}
+          >
+            {replacing
+              ? 'Replacing…'
+              : confirming
+                ? `Replace in ${fileUris.length} ${fileUris.length === 1 ? 'file' : 'files'}`
+                : 'Replace all…'}
+          </button>
+        </div>
+      )}
+
+      {canReplace && confirming && (
+        // A confirmation with the actual numbers in it, not a yes/no. The whole
+        // risk of this feature is doing more than you meant to, and the two
+        // things that say whether it is about to are the count and the exact
+        // text — including an EMPTY replacement, which deletes rather than
+        // replaces and reads like a mistake unless it is spelled out.
+        <p className="search-panel-confirm" role="status">
+          {replacement.length === 0
+            ? `This will DELETE all ${hits.length} occurrences of “${subject}” in `
+            : `This will replace all ${hits.length} occurrences of “${subject}” with `
+              + `“${replacement}” in `}
+          {fileUris.length} {fileUris.length === 1 ? 'file' : 'files'}, on the gateway.
+          {' '}Inherited scripts and files with unsaved changes are skipped.
+          {' '}Press the button again to go ahead.
+        </p>
+      )}
+
+      {report && (
+        <div className="search-panel-report" role="status">
+          <p className="search-panel-report-line">{summariseReport(report)}</p>
+          {report.outcomes
+            .filter((outcome) => outcome.status !== 'changed')
+            .map((outcome) => (
+              <p key={outcome.uri} className="search-panel-report-skip">
+                <span className="search-panel-report-file">{outcome.label}</span>
+                {' — '}
+                {outcome.reason ?? outcome.status}
+              </p>
+            ))}
+        </div>
+      )}
 
       <p className="search-panel-status" role="status">
         {busy

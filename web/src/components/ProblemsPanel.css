@@ -119,3 +119,71 @@
   padding: var(--space-3);
   font-size: 12px;
 }
+
+/* ---- Runtime errors (1.15.0) ---------------------------------------------
+   Visibly a SECOND list, not more rows on the first one: these have no line
+   number, are not clickable, and answer a different question. */
+
+.problems-runtime {
+  border-top: 1px solid var(--border-light);
+  margin-top: var(--space-1, 4px);
+}
+
+.problems-runtime-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.problems-runtime-refresh {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  font-weight: 400;
+  padding: 0 var(--space-2);
+  cursor: pointer;
+}
+
+.problems-runtime-refresh:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Shares the row LAYOUT and nothing else. Not a button — no hover, no pointer,
+   because a log line has no range to jump to — and deliberately NOT carrying
+   `.problems-row`, which the live suites count. */
+.problems-runtime-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--row-height);
+  padding: 0 var(--space-3);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  line-height: 1.55;
+  text-align: left;
+  cursor: default;
+}
+
+.problems-trace {
+  display: block;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.problems-runtime-note {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  font-size: var(--font-size-base);
+}

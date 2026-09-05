@@ -8,6 +8,9 @@ import {
   saveScriptAttributes,
   saveScriptContent,
   scriptRouteUrl,
+  fetchHistory,
+  readHistoryVersion,
+  fetchRuntimeErrors,
 } from './scripts';
 
 const LIBRARY_PATH = 'ignition/script-python/util/helpers';
@@ -266,5 +269,42 @@ describe('script attributes', () => {
       attributes: { enabled: true, threadType: 'Dedicated' },
       baseSignature: 'sig-9',
     });
+  });
+});
+
+describe('the 1.15.0 routes are resolved against the SPA base', () => {
+  // Every one of these shipped to the rig with a bare `/api/...` and 404'd
+  // there while passing 588 unit tests, because a mocked fetch accepts any
+  // string. The SPA is served from `/data/scriptide/` on a gateway and from `/`
+  // in dev, so the base is never hardcoded and never omitted.
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/data/scriptide/');
+  });
+
+  it('history list', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ versions: [], maxVersions: 25 }));
+    await fetchHistory('P', 'ignition/script-python/util', 'code.py');
+    expect(calledUrl()).toContain('/data/scriptide/api/history?');
+    expect(calledUrl()).toContain('key=code.py');
+  });
+
+  it('history content', async () => {
+    fetchMock.mockResolvedValue(new Response('x = 1', { status: 200 }));
+    await readHistoryVersion('P', 'ignition/script-python/util', 'code.py', '1757');
+    expect(calledUrl()).toContain('/data/scriptide/api/history/content?');
+    expect(calledUrl()).toContain('id=1757');
+  });
+
+  it('runtime errors', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ errors: [], windowMinutes: 60, matchedBy: 'x' }));
+    await fetchRuntimeErrors('P', 30);
+    expect(calledUrl()).toContain('/data/scriptide/api/runtime/errors?');
+    expect(calledUrl()).toContain('minutes=30');
+  });
+
+  it('a history call with no data key omits the parameter rather than sending empty', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ versions: [], maxVersions: 25 }));
+    await fetchHistory('P', 'ignition/startup');
+    expect(calledUrl()).not.toContain('key=');
   });
 });

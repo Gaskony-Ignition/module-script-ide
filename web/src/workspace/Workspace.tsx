@@ -62,6 +62,7 @@ import NewScriptDialog from '../components/NewScriptDialog';
 import OutlinePanel from '../components/OutlinePanel';
 import ProblemsPanel from '../components/ProblemsPanel';
 import QuickOpen from '../components/QuickOpen';
+import HistoryDialog from '../components/HistoryDialog';
 import SearchPanel from '../components/SearchPanel';
 import ScriptConsole from '../components/ScriptConsole';
 import type { ActiveSource } from '../components/ScriptConsole';
@@ -86,7 +87,13 @@ import {
   settingsEqual,
   type OpenDoc,
 } from './documents';
-import { entryForLocation, parseLocationUri } from './locations';
+import { entryForLocation, labelForLocation, parseLocationUri } from './locations';
+import {
+  runReplaceAll,
+  summarise as summariseReplace,
+  type ReplaceReport,
+  type ReplaceTarget,
+} from './replaceAll';
 import {
   focusIsRight, forgetInPanes, moveAcross, paneActives, selectInPanes, type PaneState,
 } from './panes';
@@ -487,6 +494,9 @@ export default function Workspace({ session }: WorkspaceProps) {
     };
   }, []);
 
+  /** Bumped to make the watch below look NOW rather than on its next tick. */
+  const [watchNonce, setWatchNonce] = useState(0);
+
   /**
    * Notice that the gateway has moved on, without being asked.
    *
@@ -503,6 +513,11 @@ export default function Workspace({ session }: WorkspaceProps) {
    * On focus as well as on a timer, because the realistic sequence is edit in
    * the Designer, alt-tab back — and that should be immediate, not up to
    * `WATCH_INTERVAL_MS` later.
+   *
+   * `watchNonce` is the third trigger: something in THIS app has written to a
+   * file it may also have open — a project-wide replace, since 1.15.0. Waiting
+   * up to 20 s to notice our own write would show the pull bar long after the
+   * report that explains it.
    */
   useEffect(() => {
     if (!project) return;
@@ -541,13 +556,17 @@ export default function Workspace({ session }: WorkspaceProps) {
     const timer = window.setInterval(look, WATCH_INTERVAL_MS);
     window.addEventListener('focus', look);
     document.addEventListener('visibilitychange', look);
+    // Only on a bump, never on the first run: the initial listing load is its
+    // own effect below, and looking here as well would fetch both listings
+    // twice on every project switch.
+    if (watchNonce > 0) look();
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       window.removeEventListener('focus', look);
       document.removeEventListener('visibilitychange', look);
     };
-  }, [project]);
+  }, [project, watchNonce]);
 
   useEffect(() => {
     if (!project) return;
@@ -1686,6 +1705,75 @@ export default function Workspace({ session }: WorkspaceProps) {
   );
 
   /**
+   * Replace across the project, from the Search view.
+   *
+   * The orchestration lives here rather than in `SearchPanel` because this is
+   * where every other write lives: the CSRF token, the tree that says which
+   * scripts are inherited, and the open documents that say which have unsaved
+   * changes are all state of this component. The panel decides nothing — it
+   * hands over the URIs it is showing and renders the report.
+   *
+   * Each file is written through the ORDINARY save route, with the If-Match
+   * from its own read. Nothing here is a bulk path with its own rules: a
+   * replace obeys inheritance, CSRF, byte fidelity and optimistic concurrency
+   * because it is the same write, done several times.
+   */
+  const replaceAcrossProject = useCallback(
+    async (
+      uris: string[],
+      term: string,
+      replacement: string,
+      caseSensitive: boolean
+    ): Promise<ReplaceReport> => {
+      const targets: ReplaceTarget[] = [];
+      for (const uri of uris) {
+        const location = parseLocationUri(uri);
+        if (!location || location.project !== project) continue;
+        const entry = entryForLocation(tree?.scripts ?? [], location);
+        if (!entry) continue;
+        const key = docUri(project, entry.path, entry.scriptKey);
+        const open = docs.find((doc) => doc.uri === key);
+        const label = labelForLocation({ uri });
+        targets.push({
+          uri,
+          project,
+          path: entry.path,
+          key: entry.scriptKey,
+          label,
+          skip:
+            entry.origin === 'inherited'
+              ? 'read-only'
+              : open && open.text !== open.baseText
+                ? 'unsaved-changes'
+                : undefined,
+        });
+      }
+      const report = await runReplaceAll(targets, term, replacement, caseSensitive, {
+        read: (target) => readScriptContent(target.project, target.path, target.key),
+        write: (target, source, baseSignature) =>
+          saveScriptContent({
+            project: target.project,
+            path: target.path,
+            source,
+            key: target.key,
+            baseSignature,
+            csrfToken: session.csrfToken,
+          }),
+      });
+      if (report.wrote) {
+        // Every open tab of a changed file now holds the OLD text against a
+        // signature that has moved. The 20 s watch would find that on its own
+        // within the minute; nudging it means the pull bar appears while the
+        // user is still looking at the report that caused it.
+        setWatchNonce((n) => n + 1);
+        setNotice({ kind: 'info', text: summariseReplace(report) });
+      }
+      return report;
+    },
+    [docs, project, session.csrfToken, tree]
+  );
+
+  /**
    * A references request, raised from the editor's Shift+F12.
    *
    * The nonce is what makes a second Shift+F12 on the same identifier re-run the
@@ -1696,6 +1784,16 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   /** Ctrl+P / Ctrl+T. Null when closed; the string is the palette's initial query. */
   const [quickOpen, setQuickOpen] = useState<string | null>(null);
+
+  /** True while the local-history dialog is open for the ACTIVE document. */
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  // A history dialog belongs to the document it was opened on. Switching tabs
+  // with it open would leave it showing one file's versions above another
+  // file's editor, and "Load into editor" would then put the wrong text in.
+  useEffect(() => {
+    setHistoryOpen(false);
+  }, [activeUri]);
 
   useEffect(() => {
     function onOpenLocationEvent(event: Event) {
@@ -2021,6 +2119,18 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   return (
     <main className="workspace">
+      {historyOpen && activeDoc && !activeQueryDoc && (
+        <HistoryDialog
+          project={activeDoc.project}
+          path={activeDoc.path}
+          scriptKey={activeDoc.scriptKey}
+          label={activeDoc.label}
+          currentText={activeDoc.text}
+          onClose={() => setHistoryOpen(false)}
+          onLoad={(text) => handleChange(activeDoc.uri, text)}
+        />
+      )}
+
       <div className="workspace-toolbar">
         <label className="workspace-project">
           <span className="config-label">Project</span>
@@ -2047,6 +2157,21 @@ export default function Workspace({ session }: WorkspaceProps) {
         >
           {saving ? 'Saving…' : activeQueryDoc ? 'Save query' : 'Save script'}
         </button>
+
+        {/* Only for a script document. A named query is two halves against one
+            signature and the history store keeps one body per document, so
+            offering it there would restore the SQL and silently leave the
+            settings — the same lost-update shape validate_v17_nq found. */}
+        {activeDoc && !activeQueryDoc && (
+          <button
+            type="button"
+            className="button"
+            onClick={() => setHistoryOpen(true)}
+            title="Versions this IDE has saved of this file"
+          >
+            History
+          </button>
+        )}
 
         {/* Pull is offered ONLY when there is something to pull. A permanently
             visible "Pull" button trains people to press it on a schedule; a
@@ -2136,6 +2261,10 @@ export default function Workspace({ session }: WorkspaceProps) {
                   onOpenLocation={(uri, line, character) =>
                     void openLocation(uri, line, character)
                   }
+                  // Undefined for a reader who cannot write, so the replace row
+                  // is absent rather than a button that 403s. `readOnly` is the
+                  // same gate the save path uses.
+                  onReplaceAll={readOnly ? undefined : replaceAcrossProject}
                 />
               ) : view === 'webdev' ? (
                 <WebDevTree
@@ -2347,6 +2476,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                       <ProblemsPanel
                         docs={scriptDocs}
                         lsp={lsp}
+                        project={project}
                         // Already-open documents only, so this is a reveal in a
                         // view that exists — no location parsing needed.
                         onOpen={(uri, line, character) => {

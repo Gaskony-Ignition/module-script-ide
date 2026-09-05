@@ -568,3 +568,97 @@ const PYTHON_KEYWORDS = new Set([
   'in', 'is', 'lambda', 'not', 'or', 'pass', 'print', 'raise', 'return', 'try',
   'while', 'with', 'yield',
 ]);
+
+// ==================== Local history (1.15.0) ====================
+
+/** One version this IDE saved, from `GET /api/history`. */
+export interface SavedVersion {
+  id: string;
+  /** Epoch millis. */
+  savedAt: number;
+  size: number;
+}
+
+export interface SavedVersions {
+  versions: SavedVersion[];
+  maxVersions: number;
+}
+
+function historyQuery(project: string, path: string, key?: string): string {
+  const params = new URLSearchParams({ project, path });
+  if (key) params.set('key', key);
+  return params.toString();
+}
+
+/**
+ * The versions this user has saved for one document, newest first.
+ *
+ * The user is never a parameter: the gateway resolves it from the session, so
+ * there is no URL to edit into somebody else's history.
+ */
+export async function fetchHistory(
+  project: string,
+  path: string,
+  key?: string
+): Promise<SavedVersions> {
+  // apiUrl, NOT a bare path. The SPA is served from `/data/scriptide/` on a
+  // gateway and from `/` under `npm run dev`, so a hardcoded `/api/...` 404s on
+  // the gateway and works everywhere it is tested with a mocked fetch. That is
+  // exactly how these three routes shipped broken to the rig — caught by
+  // validate_v13's console-error check, not by 588 unit tests.
+  return getJson<SavedVersions>(`${apiUrl('/api/history')}?${historyQuery(project, path, key)}`);
+}
+
+/** One saved version's source. */
+export async function readHistoryVersion(
+  project: string,
+  path: string,
+  key: string | undefined,
+  id: string
+): Promise<string> {
+  const response = await fetch(
+    `${apiUrl('/api/history/content')}?${historyQuery(project, path, key)}`
+      + `&id=${encodeURIComponent(id)}`,
+    { credentials: 'same-origin', headers: { Accept: 'text/plain' } }
+  );
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return response.text();
+}
+
+// ==================== Runtime errors (1.15.0) ====================
+
+/** One distinct problem the gateway has logged about a project. */
+export interface RuntimeError {
+  logger: string;
+  level: string;
+  message: string;
+  /** Epoch millis of the most recent occurrence. */
+  lastSeen: number;
+  count: number;
+  exception?: string;
+}
+
+export interface RuntimeErrors {
+  errors: RuntimeError[];
+  windowMinutes: number;
+  /**
+   * How an event was tied to this project, in the server's own words.
+   *
+   * Rendered verbatim rather than paraphrased: the match is by project NAME in
+   * the message or logger, which is looser than "errors this project caused",
+   * and the panel must not imply the stronger claim.
+   */
+  matchedBy: string;
+}
+
+/** What this project's scripts have actually thrown, from the gateway log. */
+export async function fetchRuntimeErrors(
+  project: string,
+  minutes?: number
+): Promise<RuntimeErrors> {
+  const params = new URLSearchParams({ project });
+  if (minutes) params.set('minutes', String(minutes));
+  return getJson<RuntimeErrors>(`${apiUrl('/api/runtime/errors')}?${params.toString()}`);
+}

@@ -2,11 +2,97 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.14.4 · deployed on `ignition-module-testing` (8.3.8) 05/09/2026 —
-`deploy_gate.py` PASS (6 checks) and every suite green: `v13` 27/27,
-`v15_tree` 18/18, `v16_nav` 25/25, `v17_nq` 45/45, `v18_pull` 20/20,
-`v19_ruler` 16/16, `v20_webdev` 32/32, `v21_split` 21/21, `v22_editing` 20/20,
-theme sweep 10/10 with no illegible element. Java 379 tests, Vitest 545.**
+**Version 1.15.3 · deployed on `ignition-module-testing` (8.3.8) 05/09/2026 —
+`deploy_gate.py` PASS (6 checks). `v13` 27/27, `v15_tree` 18/18, `v16_nav`
+25/25, `v17_nq` 45/45, `v18_pull` 20/20, `v19_ruler` 16/16, `v20_webdev` 32/32, `v21_split` 21/21,
+`v22_editing` 20/20, `v23_insight` 27/27 (the 1.15.0 features), theme sweep
+10/10 with no illegible element (worst 4.56). Java 437 tests, Vitest 588.**
+
+### 1.15.x — five things the IDE knew and never said (05/09/2026)
+
+Nigel, 05/09/2026, having read `docs/PRODUCT-REVIEW.md`: *"Please do all 5."*
+They are one release because they are one idea. The deprecation flag was already
+in the hint index and only ever reached a hover card; the gateway's log already
+knew which scripts were failing and nothing asked it; search could find a string
+across the project and could not change it; and every save went into a running
+gateway with no way back to the version before it.
+
+**1. Local history** (`SaveHistory`, `/api/history`, `HistoryDialog`). Every
+save is kept per user, and **the version that was there BEFORE the first save is
+recorded too** — otherwise the state you started from is the one state the
+history cannot return you to, and the first save is usually the one that broke
+it. Bounded by construction: 25 versions and 2 MB per document, pruned
+oldest-first on every write, 512 KB ceiling on one version. **Restore loads the
+BUFFER, it does not write** — the ordinary Save then applies, with its If-Match,
+its inheritance rule and its byte fidelity. Both path segments are HASHES, never
+names: a username and a resource path are attacker-influenced strings that would
+otherwise become directories, and `../` in either escapes the data dir.
+
+**2. Deprecated calls are a diagnostic now.** `CompletionDescriptor.getDeprecation()`
+had been read into `HintIndex` since 1.0 and used for exactly two things:
+sorting a completion down, and printing "Deprecated." on hover. So the IDE knew
+a script called a deprecated API and would only say so if you happened to hover
+the call.
+
+**3. Scope-aware checks.** `system.gui`/`system.nav` do not exist on a Gateway.
+Three narrowings, each removing a class of FALSE POSITIVE rather than a class of
+bug — and each is a place a wider rule would have been the 1.13.0 mistake again:
+
+- **Only where the scope is CERTAIN** — gateway event scripts and Web Dev
+  handlers. A Project Library module is never checked, whatever its hint scope
+  says, because a Vision client may legitimately import it. That gives up the
+  case people most want (a library function called only from a timer) and
+  answering it needs a call graph across scopes.
+- **Only the PACKAGE, never the function.** `system.gui` absent from the whole
+  index is a fact; `system.tag.readBlokcing` absent from a package that IS
+  present looks like a typo and usually is — but `HintIndex` is built under a
+  time budget with `safe()` wrappers, so a missing leaf can also mean the walk
+  gave up. One is a claim, the other is a guess.
+- **Only under a root the index knows.** If `system` itself does not resolve the
+  index is empty or broken, and every path in the project would be reported.
+
+**4. Replace across the project.** Literal, never a pattern — the server's
+search is a literal substring match, and a regex box would find things the
+results list cannot. Each file goes through the ORDINARY save route with the
+If-Match from its own read, so inheritance, CSRF and byte fidelity all still
+apply: it is the same write, done several times. Inherited scripts and tabs with
+unsaved changes are SKIPPED and named in the report — a write over a dirty
+buffer would be silently undone by that tab's next Ctrl+S.
+
+**5. Runtime errors in the Problems panel.** Everything the panel showed before
+was static analysis of code that has not run. **How a log line is tied to a
+project was measured, not guessed**, off this gateway's own log:
+
+    logger:  com.inductiveautomation.ignition.common.script.ExtensionFunctionTimerScriptTask
+    message: Parse Error in timer script: 'Site_Redgum_Sewer/MyTimerScript @1,000ms '
+
+The project and the script name are in the MESSAGE TEXT — not the logger name,
+not a property. So attribution is by project name in the message or the logger,
+and there is deliberately no allowlist of logger names: the timer task is one of
+many and a list of the ones we have seen would silently hide every other kind of
+script failure. The panel states that rule in the server's own words, because
+"what the gateway logged about this project" is a weaker claim than "errors this
+project caused" and the UI must not imply the stronger one.
+
+**Two defects found by the live gate, both the same shape as each other.**
+
+- **All three new routes 404'd on the rig.** They used a bare `/api/...`; the
+  SPA is served from `/data/scriptide/` on a gateway and `/` in dev, so every
+  call goes through `apiUrl`. A hardcoded path passes every unit test, because a
+  mocked fetch accepts any string. Caught by `validate_v13`'s console-error
+  check with 588 unit tests green either side of it. Four tests now assert the
+  RESOLVED URL rather than the call.
+- **Two new classes collided with selectors the live suites count.** The runtime
+  rows reused `.problems-row` — which is how `validate_v19_ruler` asserts how
+  many static problems there are — and the replace box reused
+  `.search-panel-input`, which made `validate_v16_nav`'s fill ambiguous the
+  moment a search returned hits. **A shared class name is a shared claim.** Both
+  have their own class now.
+
+`validate_v23_insight.py` gates all five. The scope check is asserted as a
+DIFFERENCE — the same `system.gui` line in a message handler and in a library
+module, one marked and one not — because a check that only looked for a mark
+would pass on a build that marked everything.
 
 ### 1.14.x — the last two known gaps, closed (05/09/2026)
 
@@ -831,11 +917,15 @@ testing the 20 s watch interval, not the palette.
 **The review against purpose — DONE, 05/09/2026**, in
 `docs/PRODUCT-REVIEW.md`. The brief is met and the module is past the Designer
 in four places; six recommendations are ranked by leverage per unit of work, and
-four findings are decisions rather than features. The three worth acting on
-first (R1 impact-before-save, R2 event scripts you can see running, R3 run
-history that survives a restart) are built almost entirely from parts that
-already exist and are already gated. **F3 is the cheapest and is not a feature:
-the README's screenshots are from 01/09 and show a UI nine releases old.**
+four findings are decisions rather than features.
+
+**Nigel then asked for five FURTHER ideas and said "do all 5" — that is 1.15.x**,
+at the top of this file: local history, deprecation as a diagnostic, scope-aware
+checks, replace across the project, and runtime errors in the Problems panel.
+The review's own R1–R6 are still open and unchanged.
+
+**F3 remains the cheapest thing on either list and is not a feature: the
+README's screenshots are from 01/09 and now show a UI eleven releases old.**
 
 **Open decisions for Nigel**, parked, none blocking. Four were answered on
 05/09/2026 and are recorded under "1.14.x" at the top of this file:
@@ -1117,14 +1207,20 @@ gutter marker.
   diagnostics for documents this client opened, so a project-wide problem list
   would need every script opened on the server. The empty state names the limit
   rather than reading as "the project is clean".
-- **Diagnostics are syntax plus undefined names, and nothing more.** Unused
-  imports and arity checks are still designed-but-not-shipped, on the same bar
-  that held undefined names back until 1.13.0: zero false positives, because one
-  wrong squiggle on correct code costs more trust than ten missed problems.
-  Undefined names cleared that bar only with `UnknownNamesRealScriptsTest`
-  behind them. Every language now has SOME check (1.14.x) — Python's is the
-  gateway's Jython parser, the other five use their own Lezer parser — but
-  HTML's is structural only, because its parser reports no errors at all.
+- **Diagnostics are syntax, undefined names, deprecated calls and missing
+  packages — and nothing more.** Unused imports and arity checks are still
+  designed-but-not-shipped, on the same bar that held undefined names back until
+  1.13.0: zero false positives, because one wrong squiggle on correct code costs
+  more trust than ten missed problems. Every language has SOME check since
+  1.14.x — Python's is the gateway's Jython parser, the other five use their own
+  Lezer parser, and HTML's is structural only because its parser reports no
+  errors at all. The two API checks added in 1.15.0 answer to the RUNNING
+  gateway's registry rather than to a table, and the scope one runs only where
+  the document is certainly gateway-scoped; see `PlatformApiChecks`.
+- **A library function calling a client-only API is still not reported.** The
+  scope check refuses to judge a Project Library module, because a Vision client
+  may legitimately import the same module. Closing that needs a call graph
+  across scopes, and guessing puts a warning on correct client code.
 - **Perspective/Vision event scripts** are not editable — their code lives inside
   view JSON, not as its own resource.
 - **No git UI**, still. Nigel's decision (01/09/2026): this module is not becoming a git
@@ -1146,6 +1242,33 @@ gutter marker.
   **`v1.14.4` carries the signed `.modl` as a GitHub release asset**, verified
   md5-identical to the file the rig is running; no earlier tag has one, because
   those builds no longer exist.
+
+## The real-script corpus, and how to dump it
+
+`UnknownNamesRealScriptsTest` and `PlatformApiRealScriptsTest` are opt-in behind
+`SI_REAL_SCRIPTS`, and both said "dump it with the snippet in docs/STATE.md"
+when no such snippet existed. It does now. Every `.py` under the gateway's own
+project directories, flattened so the filename carries the project and the
+resource path — which is what `UnknownNamesRealScriptsTest` parses the
+script-library ROOTS out of:
+
+```bash
+OUT=/tmp/si-real-scripts && mkdir -p "$OUT"
+docker exec ignition-module-testing sh -c \
+  'cd /usr/local/bin/ignition/data/projects && find . -name "*.py" -not -path "*/.*"' \
+| while read -r p; do
+    flat=$(echo "${p#./}" | tr '/' '_')
+    docker exec ignition-module-testing cat \
+      "/usr/local/bin/ignition/data/projects/${p#./}" > "$OUT/$flat"
+  done
+SI_REAL_SCRIPTS=$OUT ./gradlew :gateway:test --tests '*RealScripts*'
+```
+
+66 files on this rig on 05/09/2026 — the mining and machine demos, Access
+Manager, Whiteboard, `_wd_scratch_`, and every Web Dev handler. **Check the
+results XML rather than the exit code**: an opt-in test that skips also passes.
+`grep -o 'tests="[0-9]*" skipped="[0-9]*"' gateway/build/test-results/test/TEST-*RealScripts*.xml`
+must show `skipped="0"`.
 
 ## Measured facts worth not rediscovering
 

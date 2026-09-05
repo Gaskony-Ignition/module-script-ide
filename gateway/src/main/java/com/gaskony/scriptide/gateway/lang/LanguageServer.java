@@ -565,7 +565,9 @@ public final class LanguageServer {
     /**
      * Publish diagnostics for one document.
      *
-     * <p>TWO checks, and the reasoning behind each is opposite.</p>
+     * <p>FOUR checks. The first two disagree about severity on purpose; the
+     * last two were added in 1.15.0 and both answer to the RUNNING gateway's own
+     * API registry rather than to a table — see {@link PlatformApiChecks}.</p>
      *
      * <p>The SYNTAX ERROR comes from the real Jython 2.7 parser and nothing
      * else — the client-side grammar is Python 3, so nothing but the
@@ -585,6 +587,12 @@ public final class LanguageServer {
      * <p>Severity 2, not 1. A name this module never binds can still exist at
      * run time through a mechanism the parser cannot see, and an ERROR that
      * turns out to be fine is how a reader learns to stop reading the marks.</p>
+     *
+     * <p>The DEPRECATED CALL and the PACKAGE-NOT-IN-SCOPE checks are both
+     * warnings for the same reason, and both are narrow by construction: the
+     * scope check runs only where the document is CERTAIN to be gateway-scoped
+     * (see {@link #isGatewayScoped}), never on a Project Library module, which
+     * a Vision client may legitimately import.</p>
      */
     private void publishDiagnostics(String uri) {
         TextDocument document = documents.get(uri);
@@ -637,6 +645,33 @@ public final class LanguageServer {
                 "'" + unknown.name() + "' is not defined anywhere in this script, "
                     + "is not a builtin, and is not a name Ignition provides. "
                     + "It will raise NameError if this line runs.");
+            diagnostics.add(diagnostic);
+        }
+
+        for (PlatformApiChecks.Finding finding
+                : PlatformApiChecks.find(symbols.apiCalls(), PlatformApiChecks.of(index()),
+                    isGatewayScoped(uri))) {
+            // Same 1-based-to-0-based line conversion as the unknown names
+            // above, and the mark runs the length of the path as written.
+            int line = Math.max(0, finding.call().line() - 1);
+            int from = finding.call().column();
+            int width = finding.kind() == PlatformApiChecks.Kind.NOT_IN_SCOPE
+                ? finding.call().packagePath().length()
+                : finding.call().path().length();
+            JsonObject start = new JsonObject();
+            start.addProperty("line", line);
+            start.addProperty("character", from);
+            JsonObject end = new JsonObject();
+            end.addProperty("line", line);
+            end.addProperty("character", from + width);
+            JsonObject range = new JsonObject();
+            range.add("start", start);
+            range.add("end", end);
+            JsonObject diagnostic = new JsonObject();
+            diagnostic.add("range", range);
+            diagnostic.addProperty("severity", 2);   // Warning — never an error
+            diagnostic.addProperty("source", "scriptide");
+            diagnostic.addProperty("message", finding.message());
             diagnostics.add(diagnostic);
         }
 
@@ -847,6 +882,49 @@ public final class LanguageServer {
             case PROPERTY -> 10;
         };
     }
+
+    /**
+     * True only where a document is CERTAIN to run on the Gateway.
+     *
+     * <p>The document uri is {@code ignition://<project>/<resource path>}, so
+     * the resource type is readable straight off it. Gateway event scripts and
+     * Web Dev handlers run on the Gateway and nowhere else; a Project Library
+     * module runs wherever it is imported, which includes Vision clients and
+     * Perspective sessions, so it returns FALSE and the scope check never sees
+     * it.</p>
+     *
+     * <p>That deliberately gives up the case people most want — a library
+     * function calling {@code system.gui} that is only ever used from a timer
+     * script. Answering it needs a call graph across scopes, and answering it
+     * wrongly puts a warning on correct client code.</p>
+     */
+    static boolean isGatewayScoped(String uri) {
+        if (uri == null) {
+            return false;
+        }
+        // Web Dev handlers are gateway-scope by definition: they are HTTP
+        // endpoints served BY the gateway.
+        if (uri.contains("/com.inductiveautomation.webdev/")) {
+            return true;
+        }
+        for (String type : GATEWAY_EVENT_TYPES) {
+            if (uri.contains("/ignition/" + type + "/") || uri.endsWith("/ignition/" + type)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The gateway event script resource types, from {@code ScriptResourceTypes}.
+     *
+     * <p>Spelled out here rather than imported so that adding a type to the
+     * common module cannot silently widen a diagnostic's blast radius: a new
+     * type has to be added deliberately, with someone deciding it is
+     * gateway-only.</p>
+     */
+    private static final java.util.List<String> GATEWAY_EVENT_TYPES = java.util.List.of(
+        "timer", "message", "tag-change", "startup", "shutdown", "update", "scheduled");
 
     private static String uriOf(JsonObject params) {
         return params.getAsJsonObject("textDocument").get("uri").getAsString();
