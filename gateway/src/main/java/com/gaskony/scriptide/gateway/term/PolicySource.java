@@ -150,6 +150,38 @@ public final class PolicySource {
         return raw == null || raw.isBlank() ? null : raw.trim();
     }
 
+    /**
+     * Every key under {@code prefix}, with the prefix stripped, in file order.
+     *
+     * <p>{@link #value} answers one known key. A remote-gateway list is the
+     * opposite shape: the operator invents the names, so the module has to be
+     * able to ASK what is in the file rather than look up what it expected. Only
+     * the first segment after the prefix is returned and duplicates collapse, so
+     * {@code remote.prod.url} and {@code remote.prod.token} yield {@code prod}
+     * once.</p>
+     *
+     * <p>Sorted, because a properties file has no order worth preserving —
+     * {@code Properties} is a {@code Hashtable} — and a gateway list that
+     * reshuffles itself between two reads of the same file is a UI bug nobody
+     * would think to look for here.</p>
+     */
+    public static java.util.List<String> childNames(String prefix) {
+        String base = prefix.endsWith(".") ? prefix : prefix + ".";
+        java.util.SortedSet<String> names = new java.util.TreeSet<>();
+        for (String key : current().stringPropertyNames()) {
+            if (!key.startsWith(base)) {
+                continue;
+            }
+            String rest = key.substring(base.length());
+            int dot = rest.indexOf('.');
+            String name = dot < 0 ? rest : rest.substring(0, dot);
+            if (!name.isBlank()) {
+                names.add(name.trim());
+            }
+        }
+        return java.util.List.copyOf(names);
+    }
+
     private static Properties current() {
         long now = System.currentTimeMillis();
         synchronized (LOCK) {

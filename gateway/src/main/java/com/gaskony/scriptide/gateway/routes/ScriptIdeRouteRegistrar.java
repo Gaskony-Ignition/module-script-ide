@@ -43,6 +43,8 @@ public class ScriptIdeRouteRegistrar {
     private final NamedQueryTestRouteHandler namedQueryTestRouteHandler;
     private final HistoryRouteHandler historyRouteHandler;
     private final RuntimeErrorsRouteHandler runtimeErrorsRouteHandler;
+    private final RemoteRouteHandler remoteRouteHandler;
+    private final TestRouteHandler testRouteHandler;
 
     public ScriptIdeRouteRegistrar(GatewayContext context) {
         this.spaAssetRouteHandler = new SpaAssetRouteHandler();
@@ -71,6 +73,19 @@ public class ScriptIdeRouteRegistrar {
         // reference to a dead service after a redeploy — and the null a supplier
         // returns is what the test route turns into a clean 503.
         this.namedQueryTestRouteHandler = new NamedQueryTestRouteHandler(projectManager,
+            com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecutionService,
+            com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecAudit);
+        // ONE index for both features, and for the same reason the language
+        // server keeps one: it caches a module's parse against its resource
+        // signature, so a second instance would re-parse every script the first
+        // one already has. Null-safe on the mount-order test's null context, in
+        // which no handler is ever invoked.
+        var index = projectManager == null
+            ? null
+            : new com.gaskony.scriptide.gateway.lang.ProjectIndex(projectManager);
+        this.remoteRouteHandler = new RemoteRouteHandler(index,
+            new com.gaskony.scriptide.gateway.remote.RemoteClient());
+        this.testRouteHandler = new TestRouteHandler(index,
             com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecutionService,
             com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecAudit);
     }
@@ -103,23 +118,31 @@ public class ScriptIdeRouteRegistrar {
         // accepted" (Nigel, 04/09/2026). The platform's own SESSION_WRITE, not a
         // role named Administrator — see SessionSecurity.canWriteGateway.
         AccessControlStrategy admin = SessionSecurity.requireGatewayWrite();
+        // Authenticated, OR a peer gateway presenting the configured read token.
+        // It goes on the four READ routes a comparison needs and on nothing else
+        // — see SessionSecurity.requireAuthenticatedOrPeer for the four
+        // narrowings that keep this from being an actor fallback under a new
+        // name. Measured on 06/09/2026: with the peer gate on the digest alone,
+        // drift worked and opening a differing row returned a 401 the reader
+        // could do nothing about, because the BODY read is a separate route.
+        AccessControlStrategy authedOrPeer = SessionSecurity.requireAuthenticatedOrPeer();
 
         routes.newRoute(ScriptIdePaths.ROUTE_PROJECTS)
             .type(RouteGroup.TYPE_JSON)
-            .accessControl(authed)
+            .accessControl(authedOrPeer)
             .handler(scriptResourceRouteHandler::projects)
             .mount();
 
         routes.newRoute(ScriptIdePaths.ROUTE_SCRIPTS)
             .type(RouteGroup.TYPE_JSON)
-            .accessControl(authed)
+            .accessControl(authedOrPeer)
             .handler(scriptResourceRouteHandler::tree)
             .mount();
 
         // text/plain: a script body is Python source, not JSON.
         routes.newRoute(ScriptIdePaths.ROUTE_SCRIPT_CONTENT)
             .type(RouteGroup.TYPE_PLAIN_TEXT)
-            .accessControl(authed)
+            .accessControl(authedOrPeer)
             .handler(scriptResourceRouteHandler::read)
             .mount();
 
@@ -280,6 +303,64 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_JSON)
             .accessControl(authed)
             .handler(runtimeErrorsRouteHandler::errors)
+            .mount();
+
+        // ==================== Two gateways, side by side ====================
+        // The digest route takes the PEER-READABLE gate: it is the one route
+        // another gateway calls, and it is a read. Everything else here is
+        // ordinary authenticated access, because the outbound call is made with
+        // the operator's own configured token rather than the caller's identity.
+        //
+        // Nothing in this block writes, and nothing in this block CAN write:
+        // RemoteClient has one verb. See its class Javadoc.
+
+        routes.newRoute(ScriptIdePaths.ROUTE_SCRIPTS_DIGEST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authedOrPeer)
+            .handler(remoteRouteHandler::digest)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_REMOTE_GATEWAYS)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(remoteRouteHandler::gateways)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_REMOTE_PROJECTS)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(remoteRouteHandler::projects)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_REMOTE_DRIFT)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(remoteRouteHandler::drift)
+            .mount();
+
+        // text/plain: a peer's script body is source, like the local read.
+        routes.newRoute(ScriptIdePaths.ROUTE_REMOTE_CONTENT)
+            .type(RouteGroup.TYPE_PLAIN_TEXT)
+            .accessControl(authed)
+            .handler(remoteRouteHandler::content)
+            .mount();
+
+        // ==================== Tests ====================
+        // Discovery is a read. The RUN is arbitrary project code and takes the
+        // same gate and the same ExecutionService as the console — it must not
+        // have a second, softer path than pasting the call in by hand.
+
+        routes.newRoute(ScriptIdePaths.ROUTE_TESTS)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(testRouteHandler::list)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_TESTS_RUN)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(testRouteHandler::run)
             .mount();
 
         // ==================== SPA static assets (catch-all) ====================

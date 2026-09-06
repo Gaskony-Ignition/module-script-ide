@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.16.1 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.17.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -141,6 +141,55 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   of a history path are HASHES of the username and the resource path, never the
   names: both are attacker-influenced strings that would otherwise become
   directories.
+- **The compare feature reads and CANNOT write, and that is structural.**
+  `RemoteClient` exposes one method and it is GET. Do not add a POST "because it
+  would be convenient": the read-only promise is kept by there being no method to
+  call, not by the UI omitting a button. Promoting a change between gateways is a
+  deployment with an approval and a rollback.
+- **A peer is chosen by NAME, never by a URL from the client.** A route taking
+  `?url=` is a server-side request forgery primitive mounted inside a gateway —
+  aimable at `169.254.169.254`, at a database admin port, at anything the gateway
+  can reach and the browser cannot. Peers live in `policy.properties`, the lookup
+  happens in `RemoteGateways`, and redirects are not followed for the same
+  reason. `validate_v24` sends a metadata URL as a gateway name and asserts a 404.
+- **The peer-read token is mounted on READS only.** `requireAuthenticatedOrPeer`
+  belongs on the digest, the tree, the content read and nothing else. It is off
+  unless configured, a token under `MIN_TOKEN_CHARS` is treated as ABSENT rather
+  than accepted, and the comparison is constant-time. This is the escape clause
+  `SessionSecurity`'s own Javadoc wrote — *"add a Gateway API token check, not an
+  actor string"* — taken in the terms it set. Do not widen it to a write.
+- **Test discovery is narrow on purpose, and widening it is a production
+  incident.** `def test_*` anywhere in a project would put
+  `plc.diagnostics.test_connection` under a Run All button — a function whose job
+  is to open a socket to a PLC. A test lives in a module whose last name starts
+  with `test`, or under a `tests` package. The panel states the rule out loud so
+  it reads as a rule rather than as a bug.
+- **Three rules keep a test run's output capturable, and each fails SILENTLY.**
+  Measured on 8.3.8, 06/09/2026, all asserted by `TestHarnessTest`:
+  (1) **import before you print** — writing to `sys.stdout` and then importing a
+  project library module loses the whole execution's output, so the harness runs
+  two passes; (2) **re-assert the private state after the imports** with
+  `Py.setSystemState(sys)` from Jython — an import leaves the THREAD's
+  `PySystemState` on the platform's, so `print` goes to the gateway's console
+  while an explicit `sys.stdout.write` still reaches the capture; (3) **flush
+  from inside the harness** — Jython buffers `sys.stdout` and the runner's
+  tail-flush does not reach that buffer on a batch run. The script console shows
+  none of this, because a socket run has a periodic pump and a batch run does not.
+- **A batch run passes NO output listener.** A listener means STREAMING, and a
+  stream needs a socket to arrive on; one passed from an HTTP request thread was
+  never called once and the output was silently lost. `null` makes the runner
+  accumulate, which is what a batch wants anyway.
+- **The test harness must never catch bare.** `except AssertionError` and
+  `except Exception`, never `except:`. A Stop and the execution timeout arrive as
+  a Java `Error`, which is a `Throwable` and not an `Exception`; a bare handler
+  swallows one and carries calmly on to the next test — a Stop button that appears
+  to work and does nothing. `TestHarnessTest` asserts the absence, and that it
+  parses, and that it defines no `def` (one namespace — see the two-dict trap).
+- **A run's test ids are a SELECTION, not an instruction.** The server looks each
+  one up in its own discovery; an id it did not discover is a 400. Trusting the
+  body would make "run this test" a way to call any function in the project by
+  name, through the write gate but past every rule about what a test is.
+
 - **This module is not becoming a git module** (Nigel, 01/09/2026).
   `Gaskony-Ignition/module-git` exists. git is driven from the terminal's command
   line; anything added later is VS Code-shaped status and diffs on top of the

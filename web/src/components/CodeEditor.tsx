@@ -29,7 +29,7 @@ import { Annotation, EditorState, Compartment, type Extension } from '@codemirro
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
 import type { LspClient } from '../api/lspClient';
-import { isLockedByInheritance, isPythonDoc, type OpenDoc } from '../workspace/documents';
+import { isPythonDoc, isReadOnlyDoc, type OpenDoc } from '../workspace/documents';
 import { lspExtension } from './lspExtension';
 import { attachDiagnostics } from './lspDiagnostics';
 import ProblemRuler, { geometryOffset } from './ProblemRuler';
@@ -162,7 +162,7 @@ export default function CodeEditor({
             onChangeRef,
             onSaveRef,
             readOnlySwitch,
-            readOnly || isLockedByInheritance(doc),
+            readOnly || isReadOnlyDoc(doc),
             lspRef.current
           ),
         }),
@@ -228,7 +228,7 @@ export default function CodeEditor({
       if (!mounted) continue;
       mounted.view.dispatch({
         effects: mounted.readOnlySwitch.reconfigure(
-          readOnlyExtension(readOnly || isLockedByInheritance(doc))
+          readOnlyExtension(readOnly || isReadOnlyDoc(doc))
         ),
       });
     }

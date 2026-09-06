@@ -2,9 +2,89 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.16.1 · deployed on `ignition-module-testing` (8.3.8) 06/09/2026 —
-`deploy_gate.py` PASS (6 checks, 14 routes, none unmounted). Java 450,
-Vitest 619.**
+**Version 1.17.0 · deployed on `ignition-module-testing` (8.3.8) 06/09/2026 —
+`deploy_gate.py` PASS (6 checks, 20 routes, none unmounted). Java 497,
+Vitest 680. Live: `v24` 47/47 (the new features), plus all ten existing suites
+and the theme sweep, none illegible.**
+
+### 1.17.x — the two large ones the review left open (06/09/2026)
+
+Nigel: *"Please finish the unfinished tasks"* — and, asked which of R5 and R6 to
+build given the review recommended AGAINST R6, chose **both**. F1 was decided at
+the same time: **the module stays internal**, now on the record rather than by
+inertia.
+
+**R5 — two gateways side by side.** A Compare view lists every openable body with
+whether it matches on a configured peer, and clicking a differing row opens that
+peer's copy READ-ONLY in the other pane, beside your own. Four things make it
+defensible rather than merely possible:
+
+- **The client sends a NAME, never a URL.** A route taking `?url=` would be an
+  SSRF primitive mounted inside a gateway. Peers live in `policy.properties`; the
+  set of reachable URLs is exactly the set the operator wrote down, redirects are
+  not followed, and `validate_v24` asks the question directly by sending
+  `169.254.169.254` as a gateway name and asserting a 404.
+- **Read-only by CONSTRUCTION.** `RemoteClient` exposes one method and it is GET.
+  No later edit to a handler can turn a comparison into a write to production.
+- **Two requests, not two per script.** `/api/scripts/digest` answers a SHA-256
+  per body over the same corpus search uses, so a 200-script project compares in
+  two round trips.
+- **The inbound gate is off unless configured, mounted on reads only, and
+  constant-time.** A token under 24 characters is treated as ABSENT — a control
+  that reads as security and is guessable is worse than none. This is
+  `SessionSecurity`'s own escape clause being taken in the terms it set.
+
+**R6 — a Jython test runner.** Nothing in Ignition offers one, and the isolated
+execution primitive here is the only correct one in the estate. Three outcomes
+(pass / fail / error — an error never got far enough to have an opinion), per-test
+captured output, `setUp`/`tearDown`, and click-to-open on the `def`.
+
+**Capturing a test's own output cost three findings, and every one of them fails
+silently.** They are the most transferable thing in this release, so they are
+written up in full on `TestHarness` and asserted by `TestHarnessTest`:
+
+1. **Import before you print.** Writing to `sys.stdout` and THEN importing a
+   project library module loses the whole execution's output — not just the
+   buffered write, everything after it. Hence two passes.
+2. **Re-assert the private state after the imports.** An import leaves the
+   THREAD's `PySystemState` pointing at the platform's, so `print` (which goes
+   through `Py.getSystemState()`) writes to the gateway's console from then on
+   while an explicit `sys.stdout.write` still reaches the capture. That asymmetry
+   is what made it findable: a captured write beside a missing print means the
+   two are resolving different objects.
+3. **Flush from inside.** Jython buffers `sys.stdout`, and the runner's own
+   tail-flush does not reach that buffer on a batch run. The script console never
+   showed any of it, because a socket run has a periodic pump.
+
+None of the three was reachable by reasoning about the code; each came from a
+probe against the running gateway that reported its answer back through an
+exception message, because the thing under test was the output path itself.
+
+- **Discovery is narrow deliberately.** `def test_*` anywhere would put
+  `plc.diagnostics.test_connection` under a Run All button. A test lives in a
+  module whose last name starts with `test`, or under a `tests` package — and the
+  panel states the rule, so it reads as a rule rather than as a bug.
+- **The ids in a run request are a SELECTION**, looked up in the server's own
+  discovery. An unknown id is a 400, not a call to any function by name.
+- **The harness never catches bare.** A Stop and the timeout arrive as a Java
+  `Error`; a bare `except:` would swallow one and carry calmly on to the next
+  test. `TestHarnessTest` asserts the absence.
+
+**F2 is still open, and the R5 suite is honest about why.** The peer it
+configures is THIS gateway — the rig has one gateway running this module, and the
+other containers on the workstation belong to a different project that test
+modules must never be installed on. That exercises the config, the token, the
+client, the digest and the comparison, and cannot prove the two ends are
+different machines. Comparing a project with itself must report zero drift and a
+different project must report real drift; both are asserted, so the zero is not
+passing by accident.
+
+**F3 is closed, and made repeatable.** `scripts/testing/capture_readme_shots.py`
+re-takes the README's screenshots against whatever is deployed. It asserts
+nothing on purpose — a screenshot's correctness is a human judgement, and a suite
+comparing PNGs would fail on a font hint.
+
+### Superseded header — 1.16.1 (06/09/2026)
 
 ### 1.16.x — the reach of what was already built (06/09/2026)
 

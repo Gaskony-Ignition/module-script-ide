@@ -136,6 +136,31 @@ else falls back to the platform's write permission alone — which, measured on
 8.3.8, denies. Fine on this rig, and a trap on the first gateway that is not
 this rig. Related to F2.
 
+## What happened to all of it — 06/09/2026, at 1.17.0
+
+The review was written at 1.14.4 and is left as it was written; this section is
+the ledger against it. Nothing above has been edited to agree with what came
+after, because a review that quietly rewrites its own predictions is not evidence
+of anything.
+
+| Item | Outcome |
+| --- | --- |
+| **R1** impact before save | Done, 1.16.0. A line scan rather than the AST — the question compares two versions of a buffer and the server only knows one |
+| **R2** event scripts you can see running | **Half done, and stopped deliberately.** The 8.3.0 SDK exposes no timer-task registry, so last fire, duration and next fire cannot be asked for at all. What ships is which event scripts are FAILING, how often and when, from the gateway's own log — the half that is answerable |
+| **R3** run history that survives a restart | Done, 1.15.0 |
+| **R4** tag event scripts | Done, 1.16.0. The five-release blocker dissolved on reading a real `resource.json` — but the Designer was still needed, because the two disagree: the resource stores `ValueChange`, the checkbox says `Value` |
+| **R5** two gateways side by side | **Done, 1.17.0.** Read-only by construction, peers named in a file the module never writes, one new token gate that is off unless configured and mounted on reads only |
+| **R6** a Jython test runner | **Done, 1.17.0** — built at Nigel's direction, against this review's own recommendation. The recommendation stands as written: it is a product in its own right, and it now needs maintaining |
+| **F1** the audience decision | **Decided, 06/09/2026: internal.** Unchanged in substance and changed entirely in kind — it is a decision on the record instead of fifteen releases of inertia |
+| **F2** it has only ever run on one gateway | **Still open**, and now measured rather than assumed: R5's suite configures a peer pointing at this gateway, which proves everything except that the two ends are different machines |
+| **F3** the README sells a version from nine releases ago | **Closed, and made repeatable.** `scripts/testing/capture_readme_shots.py` re-takes them against whatever is deployed |
+| **F4** `Administrator` is a literal string | Done, 1.16.0. A policy key, resolved live |
+
+The one thing worth saying about R6 in hindsight: it was recommended against, it
+was built anyway on the user's instruction, and the reason for the recommendation
+has not gone away. A test runner competes with the editor for attention every
+time either changes. That is now a cost the module carries on purpose.
+
 ---
 
 *As reviewed: 1.14.4, deployed on `ignition-module-testing` (8.3.8),

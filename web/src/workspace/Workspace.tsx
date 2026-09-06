@@ -47,6 +47,9 @@ import type { SessionInfo } from '../api/session';
 import CodeEditor from '../components/CodeEditor';
 import ConfigStrip from '../components/ConfigStrip';
 import ConflictDialog from '../components/ConflictDialog';
+import { readRemoteContent, type DriftRow, type RemoteGateway } from '../api/remote';
+import RemotePanel from '../components/RemotePanel';
+import TestsPanel from '../components/TestsPanel';
 import ActivityBar, { type PanelId, type ViewId } from '../components/ActivityBar';
 import FileTree from '../components/FileTree';
 import { IconAlert, IconExternal, IconPlus } from '../components/Icons';
@@ -83,6 +86,8 @@ import {
   isDirty,
   isLockedByInheritance,
   isPythonDoc,
+  isReadOnlyDoc,
+  newRemoteDoc,
   isStale,
   newDoc,
   newQueryDoc,
@@ -485,8 +490,8 @@ export default function Workspace({ session }: WorkspaceProps) {
       getSource: () => docsRef.current.find((d) => d.uri === uri)?.text ?? '',
     };
   }, [activeDoc, project]);
-  /** Writes are refused for either reason. */
-  const activeWritable = !readOnly && !activeLocked;
+  /** Writes are refused for any of the three reasons. */
+  const activeWritable = !readOnly && !activeLocked && !activeDoc?.remote;
 
   useEffect(() => {
     let cancelled = false;
@@ -786,6 +791,73 @@ export default function Workspace({ session }: WorkspaceProps) {
     [project]
   );
 
+  /**
+   * Put a peer's copy of one body in the OTHER pane, beside your own.
+   *
+   * This is R5's whole gesture, and it deliberately opens BOTH: a remote buffer
+   * on its own is just a file from somewhere else, and the thing that answers
+   * "what is different over there" is the two of them side by side. The local
+   * one is opened first and keeps its pane; the remote one is then moved
+   * across, so the focus lands where a reader expects to start — in the copy
+   * they can actually edit.
+   *
+   * A body that exists on only one gateway never reaches here: the Compare view
+   * disables those rows, because there is nothing to put in the second pane.
+   */
+  const openRemoteComparison = useCallback(
+    async (gateway: RemoteGateway, remoteProject: string, row: DriftRow) => {
+      const entry = tree?.scripts.find((c) => c.path === row.path);
+      if (entry) {
+        await openScript({ ...entry, scriptKey: row.key });
+      }
+      let text: string;
+      try {
+        text = await readRemoteContent(gateway.name, remoteProject, row.path, row.key);
+      } catch (e: unknown) {
+        setNotice({
+          kind: 'error',
+          text: `Could not read ${row.label} from ${gateway.label}: ${describe(e)}`,
+        });
+        return;
+      }
+      const doc = newRemoteDoc({
+        gateway: gateway.name,
+        gatewayLabel: gateway.label,
+        remoteProject,
+        localProject: project,
+        path: row.path,
+        scriptKey: row.key,
+        label: row.label,
+        typeLabel: entry?.typeLabel ?? 'Remote',
+        text,
+      });
+      setDocs((current) =>
+        current.some((d) => d.uri === doc.uri) ? current : [...current, doc]
+      );
+      // Two pane rules in sequence, not one bespoke transition: select it, then
+      // move it across if it is not already there. `moveAcross` needs the tab
+      // ORDER, so the source pane lands on a neighbour rather than on whatever
+      // the set happened to iterate first.
+      const order = [...docsRef.current.map((d) => d.uri), doc.uri];
+      let next = selectInPanes(paneStateRef.current, doc.uri);
+      if (!next.split.has(doc.uri)) {
+        next = moveAcross(next, doc.uri, order);
+      }
+      // Then park the LEFT pane on the local copy, overriding the neighbour
+      // `moveAcross` chose. Its rule is right in general — a document leaving a
+      // pane should hand that pane to a sibling — and wrong here: the gesture is
+      // "put these two side by side", so the other pane has to show the OTHER
+      // ONE. With any tab already open the general rule left an unrelated script
+      // beside the peer's copy, which is a comparison of nothing.
+      if (entry) {
+        next = { ...next, otherActive: docUri(project, row.path, row.key) };
+      }
+      applyPanes(next);
+      setNotice(null);
+    },
+    [project, tree, openScript, applyPanes]
+  );
+
   const handleChange = useCallback((uri: string, text: string) => {
     setDocs((current) => current.map((d) => (d.uri === uri ? { ...d, text } : d)));
     setDocRevision((n) => n + 1);
@@ -1007,7 +1079,7 @@ export default function Workspace({ session }: WorkspaceProps) {
    */
   const pullDoc = useCallback(async (uri: string) => {
     const doc = docsRef.current.find((d) => d.uri === uri);
-    if (!doc || doc.origin === 'new') return;
+    if (!doc || doc.origin === 'new' || doc.remote) return;
     if (isDirty(doc)) {
       await raiseConflict(doc);
       return;
@@ -1062,7 +1134,7 @@ export default function Workspace({ session }: WorkspaceProps) {
       if (verifiedRef.current.has(uri)) continue;
       verifiedRef.current.add(uri);
       const doc = docsRef.current.find((d) => d.uri === uri);
-      if (!doc || doc.origin === 'new') continue;
+      if (!doc || doc.origin === 'new' || doc.remote) continue;
       void readCurrent(doc)
         .then((current) => {
           if (current.text !== doc.baseText) return;   // a real change
@@ -1183,7 +1255,9 @@ export default function Workspace({ session }: WorkspaceProps) {
       // Locked as well as read-only: without this, Ctrl+S on an inherited tab
       // would fork the parent's script even though the buffer refused to be
       // typed into — the keybinding does not go through the disabled button.
-      if (!doc || readOnly || isLockedByInheritance(doc)) return;
+      // Since 1.17.0 the same check covers a remote buffer, where there is no
+      // write path at all to fork anything with.
+      if (!doc || readOnly || isReadOnlyDoc(doc)) return;
 
       // Code that does not PARSE gets one question before it reaches a running
       // gateway. Not a refusal: saving broken code deliberately is legitimate —
@@ -1363,7 +1437,7 @@ export default function Workspace({ session }: WorkspaceProps) {
       // resource outright ("cannot write attributes on an inherited resource
       // without first overriding it"), so sending one is a guaranteed 4xx the
       // user reads as a bug in this IDE.
-      if (!doc || !state || readOnly || isLockedByInheritance(doc)) return;
+      if (!doc || !state || readOnly || isReadOnlyDoc(doc)) return;
       setSavingAttrs(true);
       setNotice(null);
       try {
@@ -2623,6 +2697,13 @@ export default function Workspace({ session }: WorkspaceProps) {
                   pendingReplace={pendingReplace}
                   onPendingReplaceHandled={() => setPendingReplace(null)}
                 />
+              ) : view === 'remote' ? (
+                <RemotePanel
+                  project={project}
+                  onCompare={(gateway, remoteProject, row) =>
+                    void openRemoteComparison(gateway, remoteProject, row)
+                  }
+                />
               ) : view === 'webdev' ? (
                 <WebDevTree
                   endpoints={webDevEndpoints}
@@ -2904,6 +2985,32 @@ export default function Workspace({ session }: WorkspaceProps) {
                       />
                     ) : (
                       <p className="terminal-notice">Starting a shell…</p>
+                    ),
+                  },
+                  {
+                    id: 'tests',
+                    label: 'Tests',
+                    content: (
+                      /* Keyed on the project, like the console: a listing and a
+                         set of results both belong to one project, and carrying
+                         either across a switch shows the old project's answer
+                         under the new project's name. */
+                      <TestsPanel
+                        key={project}
+                        project={project}
+                        csrfToken={session.csrfToken}
+                        // The same gate the console uses. A Run button that
+                        // always 403s teaches people the tool is broken rather
+                        // than that they lack a role.
+                        canRun={session.canExecute !== false && !readOnly}
+                        onOpenTest={(moduleName, line) => {
+                          const path = `ignition/script-python/${moduleName.replace(/\./g, '/')}`;
+                          const entry = tree?.scripts.find((c) => c.path === path);
+                          if (entry) {
+                            void openScript(entry).then(() => jumpToLine(line, 0));
+                          }
+                        }}
+                      />
                     ),
                   },
                 ]}
@@ -3240,6 +3347,7 @@ const RAIL_TITLES: Record<ViewId, string> = {
   search: 'Search',
   webdev: 'Web Dev',
   'named-queries': 'Named Queries',
+  remote: 'Compare Gateways',
 };
 
 const SINGLETON_KEYS: Record<string, string> = {
