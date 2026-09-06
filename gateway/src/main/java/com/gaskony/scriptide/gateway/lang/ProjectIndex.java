@@ -343,45 +343,6 @@ public final class ProjectIndex {
     }
 
     /**
-     * One openable body, identified by WHAT IS IN IT rather than by where it is.
-     *
-     * @param sha256 lowercase hex of the UTF-8 bytes. A gateway's own resource
-     *               signature is not usable for this: it identifies a resource
-     *               within one gateway's collection, and two gateways holding
-     *               byte-identical code are under no obligation to agree on it.
-     */
-    public record BodyDigest(String label, String resourcePath, String dataKey, String sha256,
-                             int chars) {
-    }
-
-    /**
-     * A content fingerprint for every body in a project.
-     *
-     * <p>Exists so two gateways can be compared in two requests instead of two
-     * per script. The corpus is {@link #searchableBodies} — the same definition
-     * of "everything this IDE can open" that search and replace use — which is
-     * the coupling worth having: a resource type that becomes editable becomes
-     * comparable in the same commit, rather than in the one after somebody
-     * notices.</p>
-     */
-    public List<BodyDigest> digest(String project) {
-        List<BodyDigest> out = new ArrayList<>();
-        java.security.MessageDigest sha;
-        try {
-            sha = java.security.MessageDigest.getInstance("SHA-256");
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required by the JLS", e);
-        }
-        for (Searchable body : searchableBodies(project)) {
-            sha.reset();
-            byte[] hash = sha.digest(body.text().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            out.add(new BodyDigest(body.label(), body.resourcePath(), body.dataKey(),
-                java.util.HexFormat.of().formatHex(hash), body.text().length()));
-        }
-        return List.copyOf(out);
-    }
-
-    /**
      * Every body in a project that a user can open in this IDE, with its text.
      *
      * <p>Bodies are read on demand rather than held in the index, for the reason

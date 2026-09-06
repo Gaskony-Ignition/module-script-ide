@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.17.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.18.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -37,10 +37,9 @@ actually has installed. No static stub file can know that.*
 *Errors are checked by the gateway's own Jython 2.7 parser, so Python-2 code —
 `print "x"`, `except E, e:`, `10L` — is never wrongly flagged.*
 
-![The Compare view listing every script with whether it matches the other gateway, and a differing script open in two panes side by side](docs/images/compare.png)
-*Development against production, in one window. The right-hand pane is the other
-gateway's copy, read-only — there is no code path from here to a write on another
-gateway, and that is a property of the client rather than of the buttons.*
+![Two scripts open side by side in a split editor, each with its own tab strip, and a draggable divider between them](docs/images/split.png)
+*Two scripts at once, in one window. Either pane can hold any open document, the
+divider is draggable, and Ctrl+\\ splits and collapses it.*
 
 ![The Tests panel showing three discovered tests — two passed, one failed — with the failure expanded to show its assertion message and traceback](docs/images/tests.png)
 *Jython tests, discovered and run on the gateway. A failure and an error are kept
@@ -98,12 +97,9 @@ apart: an error never got far enough to have an opinion.*
 - **Guards on the way out.** A save that does not parse asks once first. A save
   that removes or re-declares a function names its call sites before the write.
   Neither refuses — both make it deliberate.
-- **Compare two gateways.** Point the Compare view at another gateway running
-  this module and every script, handler and named query is listed with whether it
-  matches over there; open a differing one and the two sit side by side. It reads
-  and cannot write — the client that talks to the other gateway has a single verb
-  and it is GET. Peers are named in the gateway's own policy file and chosen by
-  that name, never by a URL from the browser.
+- **Two scripts side by side.** Split the editor and read one script while
+  editing another — the thing the Designer cannot do at all. Either pane takes
+  any open document, the divider is draggable and its width is remembered.
 - **Run your Jython tests.** A `def test_*` in a module named for tests is
   discovered, run on the gateway in an isolated interpreter, and reported as
   passed, failed or errored — with how long it took, the traceback, and whatever
@@ -129,11 +125,6 @@ makes every subsequent `git diff` useless.
 - A Gateway account with the **Administrator** role to edit or run scripts.
   Any authenticated user gets the full language intelligence without the Run
   button.
-- To compare gateways: this module on both, and four lines in
-  `policy.properties` — the peer's URL and token here, and an
-  `inboundToken` there. Nothing is reachable until an operator writes them.
-  Proved between two separate gateways, in both directions, by
-  `scripts/testing/validate_v25_two_gateways.py`.
 
 ## Security
 
@@ -161,16 +152,6 @@ creates that file; absent means no overrides. A system property still states the
 fleet default at boot, and the file wins over it. Because the file can also turn
 the Administrator requirement off, its permissions belong to the Gateway's own
 user and nobody else, exactly like `ignition.conf`.
-
-Comparing gateways adds the module's only non-session authentication, and it is
-deliberately small. A peer gateway presents a token from that same file
-(`com.gaskony.scriptide.remote.inboundToken`), compared in constant time; it is
-**absent by default**, a value under 24 characters is refused rather than
-accepted, and it is mounted on **reads only** — never a write, an execution, an
-attribute save or the terminal. The worst a leaked one does is disclose source
-that every authenticated user of that gateway can already read. In the other
-direction the browser sends a configured NAME and never a URL, so the set of
-hosts this gateway will call is exactly the set its operator wrote down.
 
 ## Build
 

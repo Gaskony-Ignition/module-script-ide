@@ -22,8 +22,8 @@ from pathlib import Path
 
 # Which gateway these scripts talk to. `SI_GATEWAY_CONFIG` points the whole
 # toolchain at a chosen config without editing (or risking) `config.local.json`
-# — that is how a disposable gateway from `dockers/` is targeted, with
-# throwaway credentials, and the real one is never opened.
+# — that is how a disposable gateway is targeted, with throwaway credentials,
+# and the real one is never opened.
 #
 # There is deliberately NO silent fallback to `config.local.json` — the SHARED
 # gateway — when the variable is unset. Before 20/08/2026 there was one, and it
@@ -90,8 +90,8 @@ def dismiss_quick_start(page) -> None:
     page beneath — including the login link itself. Playwright then reports a
     perfectly correct selector timing out on an actionability check, and names
     the backdrop rather than the modal, so the cause does not read as "a dialog
-    is open". Discovered 14/08/2026 on the first install onto a disposable
-    gateway from `dockers/`.
+    is open". Discovered 14/08/2026 on the first install onto a freshly
+    commissioned gateway.
 
     A no-op on any gateway that has already been through it once.
     """

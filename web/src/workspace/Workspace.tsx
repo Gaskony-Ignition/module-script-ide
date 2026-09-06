@@ -47,8 +47,6 @@ import type { SessionInfo } from '../api/session';
 import CodeEditor from '../components/CodeEditor';
 import ConfigStrip from '../components/ConfigStrip';
 import ConflictDialog from '../components/ConflictDialog';
-import { readRemoteContent, type DriftRow, type RemoteGateway } from '../api/remote';
-import RemotePanel from '../components/RemotePanel';
 import TestsPanel from '../components/TestsPanel';
 import ActivityBar, { type PanelId, type ViewId } from '../components/ActivityBar';
 import FileTree from '../components/FileTree';
@@ -87,7 +85,6 @@ import {
   isLockedByInheritance,
   isPythonDoc,
   isReadOnlyDoc,
-  newRemoteDoc,
   isStale,
   newDoc,
   newQueryDoc,
@@ -490,8 +487,8 @@ export default function Workspace({ session }: WorkspaceProps) {
       getSource: () => docsRef.current.find((d) => d.uri === uri)?.text ?? '',
     };
   }, [activeDoc, project]);
-  /** Writes are refused for any of the three reasons. */
-  const activeWritable = !readOnly && !activeLocked && !activeDoc?.remote;
+  /** Writes are refused for either reason. */
+  const activeWritable = !readOnly && !activeLocked;
 
   useEffect(() => {
     let cancelled = false;
@@ -791,73 +788,6 @@ export default function Workspace({ session }: WorkspaceProps) {
     [project]
   );
 
-  /**
-   * Put a peer's copy of one body in the OTHER pane, beside your own.
-   *
-   * This is R5's whole gesture, and it deliberately opens BOTH: a remote buffer
-   * on its own is just a file from somewhere else, and the thing that answers
-   * "what is different over there" is the two of them side by side. The local
-   * one is opened first and keeps its pane; the remote one is then moved
-   * across, so the focus lands where a reader expects to start — in the copy
-   * they can actually edit.
-   *
-   * A body that exists on only one gateway never reaches here: the Compare view
-   * disables those rows, because there is nothing to put in the second pane.
-   */
-  const openRemoteComparison = useCallback(
-    async (gateway: RemoteGateway, remoteProject: string, row: DriftRow) => {
-      const entry = tree?.scripts.find((c) => c.path === row.path);
-      if (entry) {
-        await openScript({ ...entry, scriptKey: row.key });
-      }
-      let text: string;
-      try {
-        text = await readRemoteContent(gateway.name, remoteProject, row.path, row.key);
-      } catch (e: unknown) {
-        setNotice({
-          kind: 'error',
-          text: `Could not read ${row.label} from ${gateway.label}: ${describe(e)}`,
-        });
-        return;
-      }
-      const doc = newRemoteDoc({
-        gateway: gateway.name,
-        gatewayLabel: gateway.label,
-        remoteProject,
-        localProject: project,
-        path: row.path,
-        scriptKey: row.key,
-        label: row.label,
-        typeLabel: entry?.typeLabel ?? 'Remote',
-        text,
-      });
-      setDocs((current) =>
-        current.some((d) => d.uri === doc.uri) ? current : [...current, doc]
-      );
-      // Two pane rules in sequence, not one bespoke transition: select it, then
-      // move it across if it is not already there. `moveAcross` needs the tab
-      // ORDER, so the source pane lands on a neighbour rather than on whatever
-      // the set happened to iterate first.
-      const order = [...docsRef.current.map((d) => d.uri), doc.uri];
-      let next = selectInPanes(paneStateRef.current, doc.uri);
-      if (!next.split.has(doc.uri)) {
-        next = moveAcross(next, doc.uri, order);
-      }
-      // Then park the LEFT pane on the local copy, overriding the neighbour
-      // `moveAcross` chose. Its rule is right in general — a document leaving a
-      // pane should hand that pane to a sibling — and wrong here: the gesture is
-      // "put these two side by side", so the other pane has to show the OTHER
-      // ONE. With any tab already open the general rule left an unrelated script
-      // beside the peer's copy, which is a comparison of nothing.
-      if (entry) {
-        next = { ...next, otherActive: docUri(project, row.path, row.key) };
-      }
-      applyPanes(next);
-      setNotice(null);
-    },
-    [project, tree, openScript, applyPanes]
-  );
-
   const handleChange = useCallback((uri: string, text: string) => {
     setDocs((current) => current.map((d) => (d.uri === uri ? { ...d, text } : d)));
     setDocRevision((n) => n + 1);
@@ -1079,7 +1009,7 @@ export default function Workspace({ session }: WorkspaceProps) {
    */
   const pullDoc = useCallback(async (uri: string) => {
     const doc = docsRef.current.find((d) => d.uri === uri);
-    if (!doc || doc.origin === 'new' || doc.remote) return;
+    if (!doc || doc.origin === 'new') return;
     if (isDirty(doc)) {
       await raiseConflict(doc);
       return;
@@ -1134,7 +1064,7 @@ export default function Workspace({ session }: WorkspaceProps) {
       if (verifiedRef.current.has(uri)) continue;
       verifiedRef.current.add(uri);
       const doc = docsRef.current.find((d) => d.uri === uri);
-      if (!doc || doc.origin === 'new' || doc.remote) continue;
+      if (!doc || doc.origin === 'new') continue;
       void readCurrent(doc)
         .then((current) => {
           if (current.text !== doc.baseText) return;   // a real change
@@ -1255,8 +1185,6 @@ export default function Workspace({ session }: WorkspaceProps) {
       // Locked as well as read-only: without this, Ctrl+S on an inherited tab
       // would fork the parent's script even though the buffer refused to be
       // typed into — the keybinding does not go through the disabled button.
-      // Since 1.17.0 the same check covers a remote buffer, where there is no
-      // write path at all to fork anything with.
       if (!doc || readOnly || isReadOnlyDoc(doc)) return;
 
       // Code that does not PARSE gets one question before it reaches a running
@@ -2697,13 +2625,6 @@ export default function Workspace({ session }: WorkspaceProps) {
                   pendingReplace={pendingReplace}
                   onPendingReplaceHandled={() => setPendingReplace(null)}
                 />
-              ) : view === 'remote' ? (
-                <RemotePanel
-                  project={project}
-                  onCompare={(gateway, remoteProject, row) =>
-                    void openRemoteComparison(gateway, remoteProject, row)
-                  }
-                />
               ) : view === 'webdev' ? (
                 <WebDevTree
                   endpoints={webDevEndpoints}
@@ -2801,6 +2722,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                   splitLabel={splitUris.size > 0
                     ? 'Move this document to the right-hand editor'
                     : 'Open this document in a second editor beside this one'}
+                  splitText={splitUris.size > 0 ? 'Move right' : 'Split'}
                 />
                 {!focusedPaneIsRight && paneChrome}
                 {docs.length === 0 && (
@@ -2857,6 +2779,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                     onPull={(uri) => void pullDoc(uri)}
                     onSplit={moveToOtherPane}
                     splitLabel="Move this document back to the left-hand editor"
+                    splitText="Move left"
                   />
                   {focusedPaneIsRight && paneChrome}
                   <CodeEditor
@@ -3347,7 +3270,6 @@ const RAIL_TITLES: Record<ViewId, string> = {
   search: 'Search',
   webdev: 'Web Dev',
   'named-queries': 'Named Queries',
-  remote: 'Compare Gateways',
 };
 
 const SINGLETON_KEYS: Record<string, string> = {

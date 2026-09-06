@@ -136,7 +136,7 @@ else falls back to the platform's write permission alone — which, measured on
 8.3.8, denies. Fine on this rig, and a trap on the first gateway that is not
 this rig. Related to F2.
 
-## What happened to all of it — 06/09/2026, at 1.17.0
+## What happened to all of it — 06/09/2026 at 1.17.0, amended 07/09/2026
 
 The review was written at 1.14.4 and is left as it was written; this section is
 the ledger against it. Nothing above has been edited to agree with what came
@@ -149,10 +149,10 @@ of anything.
 | **R2** event scripts you can see running | **Half done, and stopped deliberately.** The 8.3.0 SDK exposes no timer-task registry, so last fire, duration and next fire cannot be asked for at all. What ships is which event scripts are FAILING, how often and when, from the gateway's own log — the half that is answerable |
 | **R3** run history that survives a restart | Done, 1.15.0 |
 | **R4** tag event scripts | Done, 1.16.0. The five-release blocker dissolved on reading a real `resource.json` — but the Designer was still needed, because the two disagree: the resource stores `ValueChange`, the checkbox says `Value` |
-| **R5** two gateways side by side | **Done, 1.17.0.** Read-only by construction, peers named in a file the module never writes, one new token gate that is off unless configured and mounted on reads only |
+| **R5** two gateways side by side | **Built at 1.17.0 and REMOVED at 1.18.0.** Nigel, 07/09/2026: *"The comparison to other gateways is not required. You can remove that. I didn't realise that was something you were trying to do."* The whole surface went with it — the view, the peer config, the outbound client, the digest route and the one non-session auth gate |
 | **R6** a Jython test runner | **Done, 1.17.0** — built at Nigel's direction, against this review's own recommendation. The recommendation stands as written: it is a product in its own right, and it now needs maintaining |
 | **F1** the audience decision | **Decided, 06/09/2026: internal.** Unchanged in substance and changed entirely in kind — it is a decision on the record instead of fifteen releases of inertia |
-| **F2** it has only ever run on one gateway | **Closed, 06/09/2026.** `dockers/peer.sh` brings up a disposable second Ignition and `validate_v25_two_gateways.py` proves the compare feature across it, 24/24 — identical content on two machines sharing no filesystem hashes the same, differing content does not, and the statuses invert when compared from the other side |
+| **F2** it has only ever run on one gateway | **Closed 06/09/2026, then MOOT at 1.18.0.** It was closed by a disposable second gateway and a 24/24 suite proving the compare feature across it; that feature is gone, and the suite and the rig went with it. The finding it was really making — that a second gateway is cheap — is recorded below and still stands |
 | **F3** the README sells a version from nine releases ago | **Closed, and made repeatable.** `scripts/testing/capture_readme_shots.py` re-takes them against whatever is deployed |
 | — | Every item in this review is now either done, decided, or refused with a reason. R2 is the one that stays half-finished, and the SDK is why |
 | **F4** `Administrator` is a literal string | Done, 1.16.0. A policy key, resolved live |
@@ -164,6 +164,14 @@ as "cannot be done". A disposable gateway was always available; nobody had asked
 for one. The lesson is not about Docker: a blocker that has been restated
 unchanged across three releases deserves one attempt at knocking it over before
 it is written down a fourth time.
+
+The feature F2 was about lasted one day: R5 was removed at 1.18.0 because it was
+not wanted. That does not undo the lesson — the blocker really was soft — but it
+does put a second one beside it. The review offered R5 with *"worth doing last,
+or when someone asks for it"*, and nobody had asked. Asked which of R5 and R6 to
+build, Nigel picked from a list this review wrote; that is not the same as
+wanting either, and the largest item on a review is exactly the one to confirm
+before it is built rather than after.
 
 The one thing worth saying about R6 in hindsight: it was recommended against, it
 was built anyway on the user's instruction, and the reason for the recommendation

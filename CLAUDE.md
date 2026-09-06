@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.17.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.18.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -141,31 +141,6 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   of a history path are HASHES of the username and the resource path, never the
   names: both are attacker-influenced strings that would otherwise become
   directories.
-- **A disposable second gateway is one command, and cleaning it up is part of
-  the task.** `dockers/peer.sh up` / `down` — the STOCK image, its own compose
-  PROJECT NAME, and `down` takes the volume with it. **The project name is
-  load-bearing**: Compose defaults it to the directory name, web-designer's
-  contributor gateway also lives in a `dockers/` directory, and the first run of
-  this file adopted that project and deleted `webdesigner-dev-gateway` as an
-  orphan with no warning. Never run `docker compose` from a generically-named
-  directory without `name:` set.
-- **The compare feature reads and CANNOT write, and that is structural.**
-  `RemoteClient` exposes one method and it is GET. Do not add a POST "because it
-  would be convenient": the read-only promise is kept by there being no method to
-  call, not by the UI omitting a button. Promoting a change between gateways is a
-  deployment with an approval and a rollback.
-- **A peer is chosen by NAME, never by a URL from the client.** A route taking
-  `?url=` is a server-side request forgery primitive mounted inside a gateway —
-  aimable at `169.254.169.254`, at a database admin port, at anything the gateway
-  can reach and the browser cannot. Peers live in `policy.properties`, the lookup
-  happens in `RemoteGateways`, and redirects are not followed for the same
-  reason. `validate_v24` sends a metadata URL as a gateway name and asserts a 404.
-- **The peer-read token is mounted on READS only.** `requireAuthenticatedOrPeer`
-  belongs on the digest, the tree, the content read and nothing else. It is off
-  unless configured, a token under `MIN_TOKEN_CHARS` is treated as ABSENT rather
-  than accepted, and the comparison is constant-time. This is the escape clause
-  `SessionSecurity`'s own Javadoc wrote — *"add a Gateway API token check, not an
-  actor string"* — taken in the terms it set. Do not widen it to a write.
 - **Test discovery is narrow on purpose, and widening it is a production
   incident.** `def test_*` anywhere in a project would put
   `plc.diagnostics.test_connection` under a Run All button — a function whose job

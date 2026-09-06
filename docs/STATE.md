@@ -2,10 +2,39 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.17.0 · deployed on `ignition-module-testing` (8.3.8) 06/09/2026 —
-`deploy_gate.py` PASS (6 checks, 20 routes, none unmounted). Java 497,
-Vitest 680. Live: `v24` 47/47 (the new features), plus all ten existing suites
-and the theme sweep, none illegible.**
+**Version 1.18.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+
+### 1.18.0 — the compare feature is gone (07/09/2026)
+
+Nigel: *"The comparison to other gateways is not required. You can remove that.
+I didn't realise that was something you were trying to do."*
+
+R5 was built at 1.17.0 and is **withdrawn**, in full — the Compare view, the peer
+configuration, the outbound client, the `/api/remote/*` routes, the
+`/api/scripts/digest` route, `ProjectIndex.digest`, `dockers/peer.sh` and the
+`v25` suite. What matters beyond the deletion:
+
+- **The module has no non-session authentication again.** The peer token gate
+  (`requireAuthenticatedOrPeer`) went with it, so every route is back to an
+  authenticated session, and the four reads it covered take the ordinary
+  authenticated gate. There is now nothing in this module a caller without a
+  browser session can reach.
+- **The module makes no outbound HTTP calls.** `RemoteClient` was the only one.
+- **`policy.properties` is back to the two switches it had before** — execution
+  and the terminal. `PolicySource.childNames`, which existed only to let an
+  operator invent peer names, is gone with its only caller.
+- **`validate_v24_gateways_tests.py` is now `validate_v24_tests.py`** and covers
+  the test runner alone. F2 in the review — "it has only ever run on one gateway"
+  — was a question about the compare feature and goes with it.
+
+R6 (the test runner) is untouched: it was the other half of 1.17.0 and it stays.
+
+**The split-editor button is a labelled control now**, not a `⇹` in muted grey at
+the end of the tab strip. Nigel found it only by going looking for it — *"the
+button is so small I didn't even notice it"* — which is the same defect as an
+absent feature. It carries an icon, the word (`Split`, `Move right`, `Move left`)
+and a border, and the README has a picture of the split for the first time,
+in the slot the compare screenshot used to hold.
 
 ### 1.17.x — the two large ones the review left open (06/09/2026)
 
@@ -14,25 +43,8 @@ build given the review recommended AGAINST R6, chose **both**. F1 was decided at
 the same time: **the module stays internal**, now on the record rather than by
 inertia.
 
-**R5 — two gateways side by side.** A Compare view lists every openable body with
-whether it matches on a configured peer, and clicking a differing row opens that
-peer's copy READ-ONLY in the other pane, beside your own. Four things make it
-defensible rather than merely possible:
-
-- **The client sends a NAME, never a URL.** A route taking `?url=` would be an
-  SSRF primitive mounted inside a gateway. Peers live in `policy.properties`; the
-  set of reachable URLs is exactly the set the operator wrote down, redirects are
-  not followed, and `validate_v24` asks the question directly by sending
-  `169.254.169.254` as a gateway name and asserting a 404.
-- **Read-only by CONSTRUCTION.** `RemoteClient` exposes one method and it is GET.
-  No later edit to a handler can turn a comparison into a write to production.
-- **Two requests, not two per script.** `/api/scripts/digest` answers a SHA-256
-  per body over the same corpus search uses, so a 200-script project compares in
-  two round trips.
-- **The inbound gate is off unless configured, mounted on reads only, and
-  constant-time.** A token under 24 characters is treated as ABSENT — a control
-  that reads as security and is guessable is worse than none. This is
-  `SessionSecurity`'s own escape clause being taken in the terms it set.
+**R5 — two gateways side by side.** Built here and **removed at 1.18.0** at
+Nigel's request; see above. The rest of this section is the release as it stood.
 
 **R6 — a Jython test runner.** Nothing in Ignition offers one, and the isolated
 execution primitive here is the only correct one in the estate. Three outcomes
@@ -69,25 +81,6 @@ exception message, because the thing under test was the output path itself.
 - **The harness never catches bare.** A Stop and the timeout arrive as a Java
   `Error`; a bare `except:` would swallow one and carry calmly on to the next
   test. `TestHarnessTest` asserts the absence.
-
-**F2 is CLOSED — 06/09/2026, and it took a second gateway rather than an
-argument.** Nigel: *"I get Claude agents to spin up test docker containers with
-Ignition all the time. just make sure you clean up."* `dockers/peer.sh up`
-creates a disposable second Ignition on port 8099 — its own container, volume,
-admin account and module install — and `validate_v25_two_gateways.py` proves the
-compare feature across it, **24/24**.
-
-What makes it a proof rather than a second run of v24: the two gateways share no
-filesystem, so an identical hash is identical CONTENT; the peer's project was put
-there by importing a zip, so the module had no hand in it; all four statuses are
-produced deliberately rather than found; and the comparison is asserted in BOTH
-directions, where `only here` and `only there` swap over. The peer token was also
-exercised as a peer really uses it — a server-side call with no session and no
-origin: it reads (200), it cannot write (401), and without it the far gateway
-refuses (401).
-
-`validate_v24` remains, and remains honest about being a loopback. It is the one
-that runs on a single-gateway machine.
 
 **F3 is closed, and made repeatable.** `scripts/testing/capture_readme_shots.py`
 re-takes the README's screenshots against whatever is deployed. It asserts

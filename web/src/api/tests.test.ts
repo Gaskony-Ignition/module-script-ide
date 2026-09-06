@@ -30,7 +30,7 @@ function calledInit(index = 0): RequestInit {
 }
 
 describe('test client urls', () => {
-  // The resolved url, not merely that fetch was called — see remote.test.ts and
+  // The resolved url, not merely that fetch was called — see
   // the 1.15.0 note in CLAUDE.md.
   it('resolves the listing route through apiUrl', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ total: 0, modules: [] }));

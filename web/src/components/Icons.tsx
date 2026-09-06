@@ -304,21 +304,6 @@ export function iconForType(typeId: string, props: IconProps = {}) {
   }
 }
 
-/**
- * Activity bar: comparing this gateway with another.
- *
- * Two offset panels rather than a second globe — the Web Dev view already owns
- * the globe, and two views sharing a glyph is worse than an unfamiliar one.
- */
-export const IconCompare = (p: IconProps) =>
-  svg(
-    <>
-      <rect x="1.6" y="3" width="6" height="10" rx="1" />
-      <rect x="8.4" y="3" width="6" height="10" rx="1" />
-      <path d="M8 1.6v12.8" />
-    </>,
-    p
-  );
 
 /** Bottom panel: the test runner. A flask, which is what every runner uses. */
 export const IconFlask = (p: IconProps) =>
