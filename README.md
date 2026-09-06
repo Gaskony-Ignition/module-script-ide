@@ -132,6 +132,8 @@ makes every subsequent `git diff` useless.
 - To compare gateways: this module on both, and four lines in
   `policy.properties` — the peer's URL and token here, and an
   `inboundToken` there. Nothing is reachable until an operator writes them.
+  Proved between two separate gateways, in both directions, by
+  `scripts/testing/validate_v25_two_gateways.py`.
 
 ## Security
 
