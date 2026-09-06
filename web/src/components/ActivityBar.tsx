@@ -26,13 +26,13 @@
  */
 import type { ReactNode } from 'react';
 import {
-  IconAlert, IconCompare, IconDatabase, IconFiles, IconFlask, IconGlobe, IconPlay, IconSearch,
+  IconAlert, IconDatabase, IconFiles, IconFlask, IconGlobe, IconPlay, IconSearch,
   IconTerminal,
 } from './Icons';
 import './ActivityBar.css';
 
 /** Side-bar views. */
-export type ViewId = 'scripts' | 'search' | 'webdev' | 'named-queries' | 'remote';
+export type ViewId = 'scripts' | 'search' | 'webdev' | 'named-queries';
 
 /** Bottom-panel views. */
 export type PanelId = 'console' | 'problems' | 'terminal' | 'tests';
@@ -53,10 +53,6 @@ const VIEWS: Array<{ id: ViewId; label: string; icon: ReactNode }> = [
   { id: 'search', label: 'Search', icon: <IconSearch size={20} /> },
   { id: 'webdev', label: 'Web Dev', icon: <IconGlobe size={22} /> },
   { id: 'named-queries', label: 'Named Queries', icon: <IconDatabase size={20} /> },
-  // Last, and deliberately: it is the only view that asks about a machine other
-  // than this one, and on a gateway with no peer configured it is the only view
-  // that can be empty for a reason the user cannot fix from here.
-  { id: 'remote', label: 'Compare Gateways', icon: <IconCompare size={20} /> },
 ];
 
 const PANELS: Array<{ id: PanelId; label: string; icon: ReactNode }> = [

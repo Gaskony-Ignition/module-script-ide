@@ -12,8 +12,8 @@ It does NOT decide whether the install worked. `deploy_gate.py` does that, and
 this script ends by saying so rather than implying success.
 
 Target gateway comes from `config.local.json`, or from whatever
-`SI_GATEWAY_CONFIG` points at — use that to install onto a disposable gateway
-from `dockers/` instead of a shared one.
+`SI_GATEWAY_CONFIG` points at — use that to install onto a different gateway
+instead of the usual one.
 
 Usage:
     SI_GATEWAY_CONFIG=/path/to/config.json \
@@ -131,7 +131,7 @@ def restart_if_pending(page) -> bool:
 
     NOTE: only ever call this against a gateway you own. On a shared one a
     restart interrupts whoever else is using it, which is why the module's house
-    rules forbid it there — use a disposable gateway from `dockers/`.
+    rules forbid it there — use a disposable gateway of your own.
     """
     expander = page.locator("button#expand-restart-required-banner")
     if expander.count():

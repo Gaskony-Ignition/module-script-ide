@@ -6,6 +6,7 @@
  * shows up is a tab that says "saved" over unsaved work.
  */
 import type { ReactNode } from 'react';
+import { IconSplit } from './Icons';
 import { isDirty, readOnlyReason, type OpenDoc } from '../workspace/documents';
 import './TabStrip.css';
 
@@ -32,12 +33,22 @@ export interface TabStripProps {
   onSplit?: (uri: string) => void;
   /** What the split button will do — it moves BOTH ways, so it must say which. */
   splitLabel?: string;
+  /**
+   * The word ON the button, as distinct from the sentence in its tooltip.
+   *
+   * It carries a visible label rather than a glyph alone because it did not:
+   * until 1.18.0 this was a bare `⇹` in muted grey at the far end of the strip,
+   * and Nigel found it only by going looking for it (07/09/2026). An action
+   * nobody can see is not discoverable by being present.
+   */
+  splitText?: string;
   /** Rendered when this pane has no documents, in place of nothing at all. */
   empty?: ReactNode;
 }
 
 export default function TabStrip({
-  docs, activeUri, staleUris, onSelect, onClose, onPull, onSplit, splitLabel, empty,
+  docs, activeUri, staleUris, onSelect, onClose, onPull, onSplit, splitLabel, splitText,
+  empty,
 }: TabStripProps) {
   if (docs.length === 0) return empty ? <>{empty}</> : null;
 
@@ -52,9 +63,6 @@ export default function TabStrip({
         // editor already refuses every keystroke — see CodeEditor — but until
         // now nothing on the TAB said so, and a tab strip with six scripts
         // open gave no way to tell which one that was without clicking each.
-        // Since 1.17.0 this also covers a remote buffer, whose suffix names the
-        // gateway instead: "read-only" alone sends the reader looking for an
-        // override button, and for another gateway's copy there is none.
         const locked = readOnlyReason(doc);
         return (
           <div key={doc.uri} className={`tab${active ? ' is-active' : ''}`}>
@@ -118,7 +126,8 @@ export default function TabStrip({
           title={splitLabel ?? 'Move to the other editor'}
           onClick={() => onSplit(activeUri)}
         >
-          ⇹
+          <IconSplit size={14} />
+          <span className="tab-strip-action-text">{splitText ?? 'Split'}</span>
         </button>
       )}
     </div>

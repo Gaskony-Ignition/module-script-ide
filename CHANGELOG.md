@@ -2,6 +2,66 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.18.0] — 2026-09-07
+
+refactor: the compare-two-gateways feature is removed, and the split button is one you can see.
+
+Nigel, 07/09/2026: *"The comparison to other gateways is not required. You can
+remove that. I didn't realise that was something you were trying to do."*
+
+R5 shipped yesterday, at 1.17.0, and it is gone today. It was offered by the
+product review as *"worth doing last, or when someone asks for it"*, and nobody
+had asked — being picked off a list of two is not the same as being wanted.
+
+### Removed — R5, two gateways side by side
+
+- **The Compare view**, its activity-bar entry and its panel, `RemotePanel` and
+  `api/remote.ts` with them.
+- **The peer configuration and the client.** `RemoteGateways`, `RemoteClient` and
+  `RemoteRouteHandler` are deleted, and with them the four `/api/remote/*` routes
+  and `/api/scripts/digest`. `ProjectIndex.digest` and its `BodyDigest` record go
+  too — nothing else asked a project for content hashes.
+- **The module's only non-session authentication surface.**
+  `SessionSecurity.requireAuthenticatedOrPeer` is gone, so every route is back to
+  requiring a browser session, and the four reads it covered (projects, the
+  script tree, a script body, the digest) take the ordinary authenticated gate.
+  There is no longer any way into this module without a session.
+- **The module's only outbound HTTP call.** `RemoteClient` was it.
+- **`PolicySource.childNames`**, which existed so an operator could invent peer
+  names in `policy.properties`. That file is back to the two switches it had
+  before: execution and the terminal.
+- **A remote buffer as a document kind.** `OpenDoc.remote`, `RemoteRef` and
+  `newRemoteDoc` are gone; `isReadOnlyDoc` and `readOnlyReason` remain, with
+  inheritance as their one reason again.
+- **`dockers/peer.sh` and its compose file**, and `validate_v25_two_gateways.py`.
+  The disposable second gateway existed to prove this feature across two
+  machines. The container, its volume and its generated credentials were already
+  destroyed at the end of that run.
+- **`validate_v24_gateways_tests.py` is now `validate_v24_tests.py`** and covers
+  the test runner alone — 21 checks. The R5 half of it, the loopback peer and the
+  policy file it wrote all went.
+
+The **test runner (R6) is untouched.** It was the other half of 1.17.0 and it
+stays, including the three silent-failure rules on `TestHarness`.
+
+### Changed — the split button is a control, not a glyph
+
+Nigel, 07/09/2026: *"the button is so small I didn't even notice it until I went
+deliberately searching."*
+
+- **It has a word on it.** `Split` when there is one pane, `Move right` and
+  `Move left` once there are two, so the button says what it will do rather than
+  leaving `⇹` to imply it. The full sentence stays in the tooltip and the
+  `aria-label`.
+- **It reads as a button.** A border, `--text-secondary` instead of
+  `--text-muted`, and an icon at the same weight as the label. It was previously
+  the quietest thing on the tab strip while being the only action on it.
+- **The README shows the split**, in the slot the compare screenshot held.
+  `capture_readme_shots.py` takes it — the split had never been pictured.
+
+`validate_v21_split.py` finds the button by `.tab-strip-action`, which is
+unchanged, so the existing suite covers the new one without editing.
+
 ## [1.17.0] — 2026-09-06
 
 feat: the two large items the product review left open — one gateway reading another, and a Jython test runner.

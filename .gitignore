@@ -46,8 +46,3 @@ dependency-check-report.*
 __pycache__/
 *.pyc
 
-# Disposable peer gateway: a generated throwaway admin password, and the test
-# config that points at it. Both are created by dockers/peer.sh and destroyed
-# by `peer.sh down`.
-dockers/.env
-scripts/testing/config.peer.json

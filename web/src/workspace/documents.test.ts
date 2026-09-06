@@ -7,7 +7,6 @@ import {
   isPythonDoc,
   isReadOnlyDoc,
   isStale,
-  newRemoteDoc,
   readOnlyReason,
   sameSignature,
   newQueryDoc,
@@ -275,61 +274,24 @@ describe('isStale', () => {
   });
 });
 
-describe('remote documents', () => {
-  const remote = () => newRemoteDoc({
-    gateway: 'prod',
-    gatewayLabel: 'Production',
-    remoteProject: 'Prod',
-    localProject: 'Dev',
-    path: 'ignition/script-python/util/helpers',
-    scriptKey: 'code.py',
-    label: 'helpers',
-    typeLabel: 'Project Library',
-    text: 'print 1',
+describe('isPythonDoc', () => {
+  it('is true for a script with no language recorded', () => {
+    // Language absent means Python: every document was that before 1.9.0, and
+    // a construction site that forgets the field must not silently lose its
+    // language server.
+    expect(isPythonDoc(scriptDoc())).toBe(true);
+    expect(isPythonDoc(scriptDoc({ language: 'python' }))).toBe(true);
   });
 
-  // The two copies have to be able to sit side by side. A uri that collided
-  // with the local one would make the second open find the first one's tab and
-  // show the wrong gateway's code under the right gateway's name.
-  it('takes a uri that cannot collide with the local copy', () => {
-    expect(remote().uri).not.toBe(docUri('Dev', 'ignition/script-python/util/helpers', 'code.py'));
-    expect(remote().uri).toContain('prod');
-    expect(remote().uri).toContain('Prod');
+  it('is false for a Web Dev body that is not Python', () => {
+    // The server is a JYTHON one. Pointed at HTML it parses the markup as
+    // Python and publishes a syntax error on every line, which is a worse
+    // answer than none.
+    expect(isPythonDoc(scriptDoc({ language: 'html' }))).toBe(false);
   });
 
-  it('is read-only, and says which gateway rather than "Read-Only"', () => {
-    expect(isReadOnlyDoc(remote())).toBe(true);
-    expect(readOnlyReason(remote())).toBe('Production');
-  });
-
-  // Its names resolve in the OTHER project's namespace, so every unknown-name
-  // diagnostic this gateway's server produced about it would be wrong.
-  it('is never given to the language server', () => {
-    expect(isPythonDoc(remote())).toBe(false);
-  });
-
-  it('can never become dirty, because the buffer cannot be typed into', () => {
-    expect(isDirty(remote())).toBe(false);
-    expect(remote().text).toBe(remote().baseText);
-  });
-
-  // An entity tag is a precondition for a write, and there is no write. A
-  // borrowed one would look usable to a caller that forgot the gate.
-  it('carries no etag', () => {
-    expect(remote().etag).toBe('');
-  });
-
-  // Staleness compares against THIS gateway's tree. A remote document has no
-  // etag and belongs to another machine, so the comparison is not just useless,
-  // it offers to overwrite the peer's copy with the local one.
-  it('is never stale, whatever the local tree says', () => {
-    expect(isStale(remote(), 'some-other-signature')).toBe(false);
-    expect(isStale(remote(), '')).toBe(false);
-  });
-
-  it('keeps the LOCAL project in `project` and the remote one inside `remote`', () => {
-    expect(remote().project).toBe('Dev');
-    expect(remote().remote?.project).toBe('Prod');
+  it('is false for anything that is not a script', () => {
+    expect(isPythonDoc(scriptDoc({ kind: 'named-query' }))).toBe(false);
   });
 });
 

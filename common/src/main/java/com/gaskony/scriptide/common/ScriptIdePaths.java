@@ -197,46 +197,6 @@ public final class ScriptIdePaths {
     public static final String ROUTE_RUNS = "/api/runs";
 
     /**
-     * A content hash for every openable body in one project.
-     *
-     * <p>{@code GET /api/scripts/digest?project=X}. The one route in this module
-     * a PEER GATEWAY calls: it is what makes a two-gateway comparison two
-     * requests instead of two per script. Mounted on the peer-readable gate, and
-     * a read — see {@code SessionSecurity.requireAuthenticatedOrPeer}.</p>
-     */
-    public static final String ROUTE_SCRIPTS_DIGEST = "/api/scripts/digest";
-
-    /**
-     * {@code GET /api/remote/gateways} — the peers this gateway may read.
-     *
-     * <p>Never returns a token. The list comes from {@code policy.properties},
-     * which is the only place a URL for a peer can come from.</p>
-     */
-    public static final String ROUTE_REMOTE_GATEWAYS = "/api/remote/gateways";
-
-    /** {@code GET /api/remote/projects?gateway=X} — a peer's project list. */
-    public static final String ROUTE_REMOTE_PROJECTS = "/api/remote/projects";
-
-    /**
-     * {@code GET /api/remote/drift?gateway=X&project=Y} — what differs.
-     *
-     * <p>Its own route rather than a flag on the digest one: the digest is one
-     * gateway's fingerprint and this is a comparison of two, and answering both
-     * from one URL would make the response shape depend on a parameter.</p>
-     */
-    public static final String ROUTE_REMOTE_DRIFT = "/api/remote/drift";
-
-    /**
-     * {@code GET /api/remote/content?gateway=X&project=Y&path=Z} — one body from
-     * a peer, as {@code text/plain}, exactly like the local content read.
-     *
-     * <p>Query parameters rather than a {@code :path} segment because this route
-     * takes four things, and packing them into one encoded segment is how the
-     * tab-aliasing bug of 1.2.0 happened.</p>
-     */
-    public static final String ROUTE_REMOTE_CONTENT = "/api/remote/content";
-
-    /**
      * {@code GET /api/tests?project=X} — the tests this project declares.
      *
      * <p>Discovery only; it runs nothing, so it takes the authenticated gate.

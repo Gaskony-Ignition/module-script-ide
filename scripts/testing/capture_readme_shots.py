@@ -20,7 +20,6 @@ Run:
 """
 import json
 import os
-import subprocess
 import sys
 import urllib.parse
 
@@ -30,17 +29,9 @@ from playwright.sync_api import sync_playwright                 # noqa: E402
 
 SPA = CONFIG.get("spa_path", "/data/scriptide/")
 PROJECT = os.environ.get("SI_EDIT_PROJECT", "Mining_Demo")
-OTHER_PROJECT = os.environ.get("SI_OTHER_PROJECT", "Machine_HMI_Demo")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMAGES = os.path.abspath(os.path.join(HERE, "..", "..", "docs", "images"))
-
-CONTAINER = os.environ.get("SI_CONTAINER", "ignition-module-testing")
-POLICY_DIR = "/usr/local/bin/ignition/data/modules/scriptide"
-POLICY_FILE = POLICY_DIR + "/policy.properties"
-PEER_NAME = "prod"
-PEER_LABEL = "Production"
-TOKEN = "siShotsLoopbackTokenForDocsOnly"
 
 SHOT_MODULE = "ignition/script-python/metallurgy/shift_totals"
 TEST_MODULE = "ignition/script-python/metallurgy/test_totals"
@@ -152,24 +143,6 @@ def remove_fixtures(page, csrf):
                }""",
             [SPA, f"api/scripts/content/{urllib.parse.quote(path, safe='')}?project={q(PROJECT)}",
              csrf, found.get("signature") or ""])
-
-
-def docker(*args):
-    return subprocess.run(["docker", "exec", CONTAINER, *args],
-                          capture_output=True, text=True, timeout=60)
-
-
-def write_policy():
-    body = "\n".join([
-        f"com.gaskony.scriptide.remote.inboundToken={TOKEN}",
-        f"com.gaskony.scriptide.remote.{PEER_NAME}.url={GATEWAY_URL}",
-        f"com.gaskony.scriptide.remote.{PEER_NAME}.label={PEER_LABEL}",
-        f"com.gaskony.scriptide.remote.{PEER_NAME}.token={TOKEN}",
-        "",
-    ])
-    docker("mkdir", "-p", POLICY_DIR)
-    docker("sh", "-c", f"cat > {POLICY_FILE}.tmp <<'SISHOTEOF'\n{body}SISHOTEOF")
-    docker("sh", "-c", f"mv {POLICY_FILE}.tmp {POLICY_FILE}")
 
 
 def expand_tree(page):
@@ -330,38 +303,22 @@ with sync_playwright() as p:
             page.wait_for_timeout(800)
     shot(page, "tests.png")
 
-    # ---------- the Compare view ----------
-    write_policy()
-    page.wait_for_timeout(4500)
-    # A fresh page, so the split holds exactly the two copies being compared.
-    # With the earlier shots' tabs still open, the left pane parked on whichever
-    # of them came first in tab order and the picture showed an unrelated script
-    # beside the peer's copy — a comparison of nothing.
+    # ---------- two scripts side by side ----------
+    # The split is the answer to "I want to see two of these at once", and until
+    # 1.18.0 the README had no picture of it — the compare view's shot occupied
+    # the slot instead. A fresh page, so the two panes hold exactly the two
+    # scripts being shown and not whatever the earlier shots left open.
     page.reload(wait_until="load", timeout=30000)
     page.wait_for_selector(".file-tree-header", timeout=20000)
     page.select_option(".workspace-project select", PROJECT)
     page.wait_for_timeout(2000)
-    page.locator('.activity-item[aria-label="Compare Gateways"]').click()
-    page.wait_for_timeout(1500)
-    # Against a DIFFERENT project, so the shot shows a real report rather than a
-    # column of "same" — the picture has to show what the feature is for.
-    box = page.locator('input[aria-label="Project name on the other gateway"]')
-    if box.count():
-        box.fill(OTHER_PROJECT)
-    page.locator(".remote-panel-go").click()
-    try:
-        page.wait_for_selector(".remote-panel-row", timeout=60000)
-    except Exception:
-        pass
-    page.wait_for_timeout(1500)
-    differing = page.locator(".remote-panel-row.is-differs")
-    if differing.count():
-        differing.first.click()
-        page.wait_for_timeout(3500)
-    shot(page, "compare.png")
+    open_row(page, "shift_totals")
+    open_row(page, "test_totals")
+    page.locator(".tab-strip-action").first.click()
+    page.wait_for_timeout(2500)
+    shot(page, "split.png")
 
     # ---------- clean up ----------
-    docker("rm", "-f", POLICY_FILE)
     page.reload(wait_until="load", timeout=30000)
     page.wait_for_selector(".file-tree-header", timeout=20000)
     page.select_option(".workspace-project select", PROJECT)

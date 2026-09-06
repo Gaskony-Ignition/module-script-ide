@@ -1,6 +1,5 @@
 package com.gaskony.scriptide.gateway.security;
 
-import com.gaskony.scriptide.gateway.remote.RemoteGateways;
 import com.gaskony.scriptide.gateway.term.PolicySource;
 import com.inductiveautomation.ignition.common.auth.web.WebAuthUser;
 import com.inductiveautomation.ignition.gateway.dataroutes.AccessControlStrategy;
@@ -258,65 +257,6 @@ public final class SessionSecurity {
         };
     }
 
-    /**
-     * Grants an authenticated user OR a peer gateway presenting the inbound
-     * remote-read token.
-     *
-     * <p>This is the class Javadoc's own escape clause being taken, in the terms
-     * it set: <em>"If a scripted caller is ever genuinely needed, add a Gateway
-     * API token check, not an actor string."</em> R5 needs one gateway to read
-     * another's scripts, and no browser session exists on the far side to carry
-     * it.</p>
-     *
-     * <p>Four narrowings, and each is what keeps this from being the actor
-     * fallback under a new name:</p>
-     * <ol>
-     *   <li><b>It is off unless configured.</b> No {@code inboundToken} in
-     *       {@code policy.properties} means this strategy behaves exactly like
-     *       {@link #requireAuthenticated}, which is what every existing gateway
-     *       gets on upgrade.</li>
-     *   <li><b>It is mounted on READS only.</b> Never on a write, an execution,
-     *       an attribute save or the terminal — see the registrar. A peer can
-     *       see this gateway's code and can change nothing.</li>
-     *   <li><b>The comparison is constant-time</b>, and a token shorter than
-     *       {@link RemoteGateways#MIN_TOKEN_CHARS} is treated as absent rather
-     *       than accepted.</li>
-     *   <li><b>It is a secret, not a claim.</b> There is no name, role or origin
-     *       to spoof — presenting the token IS the whole assertion, and it grants
-     *       precisely the read a token holder is trusted with.</li>
-     * </ol>
-     */
-    public static AccessControlStrategy requireAuthenticatedOrPeer() {
-        return new AccessControlStrategy() {
-            @Override
-            public RouteAccess canAccess(RequestContext requestContext) {
-                if (authenticatedUser(requestContext).isPresent()) {
-                    return RouteAccess.GRANTED;
-                }
-                String presented = null;
-                try {
-                    presented = requestContext.getRequest()
-                        .getHeader(RemoteGateways.TOKEN_HEADER);
-                } catch (Exception e) {
-                    logger.debug("Peer token lookup failed: {}", e.getMessage());
-                }
-                if (RemoteGateways.acceptsInbound(presented)) {
-                    return RouteAccess.GRANTED;
-                }
-                return RouteAccess.UNAUTHORIZED;
-            }
-
-            @Override
-            public Optional<String> getWwwAuthenticateHeader(RequestContext requestContext) {
-                return Optional.of("Bearer realm=\"Ignition Gateway\"");
-            }
-
-            @Override
-            public void validate(RouteMounterContext routeMounterContext) {
-                // nothing to validate at mount time
-            }
-        };
-    }
 
     /**
      * Explicit "no auth" strategy, named for intent. Used only by the session
