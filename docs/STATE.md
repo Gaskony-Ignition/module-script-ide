@@ -70,14 +70,24 @@ exception message, because the thing under test was the output path itself.
   `Error`; a bare `except:` would swallow one and carry calmly on to the next
   test. `TestHarnessTest` asserts the absence.
 
-**F2 is still open, and the R5 suite is honest about why.** The peer it
-configures is THIS gateway — the rig has one gateway running this module, and the
-other containers on the workstation belong to a different project that test
-modules must never be installed on. That exercises the config, the token, the
-client, the digest and the comparison, and cannot prove the two ends are
-different machines. Comparing a project with itself must report zero drift and a
-different project must report real drift; both are asserted, so the zero is not
-passing by accident.
+**F2 is CLOSED — 06/09/2026, and it took a second gateway rather than an
+argument.** Nigel: *"I get Claude agents to spin up test docker containers with
+Ignition all the time. just make sure you clean up."* `dockers/peer.sh up`
+creates a disposable second Ignition on port 8099 — its own container, volume,
+admin account and module install — and `validate_v25_two_gateways.py` proves the
+compare feature across it, **24/24**.
+
+What makes it a proof rather than a second run of v24: the two gateways share no
+filesystem, so an identical hash is identical CONTENT; the peer's project was put
+there by importing a zip, so the module had no hand in it; all four statuses are
+produced deliberately rather than found; and the comparison is asserted in BOTH
+directions, where `only here` and `only there` swap over. The peer token was also
+exercised as a peer really uses it — a server-side call with no session and no
+origin: it reads (200), it cannot write (401), and without it the far gateway
+refuses (401).
+
+`validate_v24` remains, and remains honest about being a loopback. It is the one
+that runs on a single-gateway machine.
 
 **F3 is closed, and made repeatable.** `scripts/testing/capture_readme_shots.py`
 re-takes the README's screenshots against whatever is deployed. It asserts

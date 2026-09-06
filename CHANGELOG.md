@@ -145,12 +145,39 @@ argument for F3 being a script rather than a chore.
   plausible code rather than `_si_*`, because the Tests panel puts a module name
   on screen and the previous pass advertised a test fixture in the README.
 
-### Not done, and why
-- **F2 — it has still only ever run on one gateway.** The R5 suite configures a
-  peer whose URL is this gateway's own, which exercises the config, the token, the
-  client, the digest and the comparison, and cannot prove the two ends are
-  different machines. Every other gateway on this workstation belongs to a
-  different project that test modules must never be installed on.
+### F2 — closed, on two real gateways
+
+Recorded as "not done" an hour earlier in this same release, on the grounds that
+the only other Ignition containers here belong to another project. That was true
+and it was not the same thing as impossible; Nigel pointed out that a disposable
+gateway is a normal thing to spin up. It was open for want of asking.
+
+- **`dockers/peer.sh up`** brings up a second Ignition 8.3.8 on port 8099 — the
+  STOCK image, its own container, volume, admin account and module install — and
+  `peer.sh down` destroys it with its volume. The admin password is generated
+  from the kernel's CSPRNG into a gitignored 0600 file and is never printed,
+  never passed on a command line and never leaves that file.
+- **`validate_v25_two_gateways.py` — 24/24.** What makes it a proof rather than a
+  second run of `v24`: the two gateways share no filesystem, so an identical hash
+  is identical CONTENT; the peer's project got there by importing a zip, so the
+  module had no hand in it; all four statuses are produced deliberately rather
+  than found; and the comparison is asserted in BOTH directions, where `only
+  here` and `only there` swap over.
+- The peer token was exercised the way a peer really uses it — a server-side call
+  with **no session and no origin**: it reads (200), it cannot write (401), and
+  without it the far gateway refuses (401). Asked from Python rather than from a
+  page, because a cross-origin fetch is refused by the browser before it reaches
+  the far gateway and the answer would have been about CORS.
+- `validate_v24` stays, and stays honest about being a loopback. It is the one
+  that runs on a single-gateway machine.
+
+**One thing went wrong doing this and is worth recording.** The first
+`docker compose up` deleted `webdesigner-dev-gateway`. Compose defaults its
+project name to the DIRECTORY name, both projects keep their compose file in a
+directory called `dockers`, so it adopted that project and removed the container
+it did not recognise. The volume survived and the container was recreated on its
+original ports, but nothing warned first. `name: scriptide-peer` is now pinned in
+the compose file.
 
 ## [1.16.1] — 2026-09-06
 

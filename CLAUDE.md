@@ -141,6 +141,14 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   of a history path are HASHES of the username and the resource path, never the
   names: both are attacker-influenced strings that would otherwise become
   directories.
+- **A disposable second gateway is one command, and cleaning it up is part of
+  the task.** `dockers/peer.sh up` / `down` — the STOCK image, its own compose
+  PROJECT NAME, and `down` takes the volume with it. **The project name is
+  load-bearing**: Compose defaults it to the directory name, web-designer's
+  contributor gateway also lives in a `dockers/` directory, and the first run of
+  this file adopted that project and deleted `webdesigner-dev-gateway` as an
+  orphan with no warning. Never run `docker compose` from a generically-named
+  directory without `name:` set.
 - **The compare feature reads and CANNOT write, and that is structural.**
   `RemoteClient` exposes one method and it is GET. Do not add a POST "because it
   would be convenient": the read-only promise is kept by there being no method to

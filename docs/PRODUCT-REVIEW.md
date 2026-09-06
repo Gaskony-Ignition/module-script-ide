@@ -152,9 +152,18 @@ of anything.
 | **R5** two gateways side by side | **Done, 1.17.0.** Read-only by construction, peers named in a file the module never writes, one new token gate that is off unless configured and mounted on reads only |
 | **R6** a Jython test runner | **Done, 1.17.0** — built at Nigel's direction, against this review's own recommendation. The recommendation stands as written: it is a product in its own right, and it now needs maintaining |
 | **F1** the audience decision | **Decided, 06/09/2026: internal.** Unchanged in substance and changed entirely in kind — it is a decision on the record instead of fifteen releases of inertia |
-| **F2** it has only ever run on one gateway | **Still open**, and now measured rather than assumed: R5's suite configures a peer pointing at this gateway, which proves everything except that the two ends are different machines |
+| **F2** it has only ever run on one gateway | **Closed, 06/09/2026.** `dockers/peer.sh` brings up a disposable second Ignition and `validate_v25_two_gateways.py` proves the compare feature across it, 24/24 — identical content on two machines sharing no filesystem hashes the same, differing content does not, and the statuses invert when compared from the other side |
 | **F3** the README sells a version from nine releases ago | **Closed, and made repeatable.** `scripts/testing/capture_readme_shots.py` re-takes them against whatever is deployed |
+| — | Every item in this review is now either done, decided, or refused with a reason. R2 is the one that stays half-finished, and the SDK is why |
 | **F4** `Administrator` is a literal string | Done, 1.16.0. A policy key, resolved live |
+
+F2 is worth a line of its own, because it was open for the wrong reason. It sat
+there recorded as "needs a second gateway, and the other containers on this
+machine belong to another project" — which was true, and was not the same thing
+as "cannot be done". A disposable gateway was always available; nobody had asked
+for one. The lesson is not about Docker: a blocker that has been restated
+unchanged across three releases deserves one attempt at knocking it over before
+it is written down a fourth time.
 
 The one thing worth saying about R6 in hindsight: it was recommended against, it
 was built anyway on the user's instruction, and the reason for the recommendation
