@@ -59,7 +59,12 @@ TOKEN = "siV24LoopbackTokenForTestingOnly"
 TEST_MODULE = "ignition/script-python/_si_v24/test_probe"
 ORDINARY_MODULE = "ignition/script-python/_si_v24/plain"
 DRIFT_MODULE = "ignition/script-python/_si_v24/drift"
-FIXTURES = (TEST_MODULE, ORDINARY_MODULE, DRIFT_MODULE)
+# The PACKAGE is a resource in its own right, and deleting the three scripts
+# inside it leaves it behind — an empty folder that accumulates one per run and
+# shows up in the next release's README screenshot. It is removed LAST, because
+# the platform will not delete a folder that still has children.
+FIXTURE_FOLDER = "ignition/script-python/_si_v24"
+FIXTURES = (TEST_MODULE, ORDINARY_MODULE, DRIFT_MODULE, FIXTURE_FOLDER)
 
 # One of each outcome, plus a setUp that a passing test can observe. Tabs, per
 # the estate's Jython standard.

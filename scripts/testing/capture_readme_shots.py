@@ -44,7 +44,10 @@ TOKEN = "siShotsLoopbackTokenForDocsOnly"
 
 SHOT_MODULE = "ignition/script-python/metallurgy/shift_totals"
 TEST_MODULE = "ignition/script-python/metallurgy/test_totals"
-FIXTURES = (SHOT_MODULE, TEST_MODULE)
+# The package resource too — deleting the scripts inside leaves the folder, and
+# an empty folder per run is exactly the debris these screenshots must not show.
+FIXTURE_FOLDER = "ignition/script-python/metallurgy"
+FIXTURES = (SHOT_MODULE, TEST_MODULE, FIXTURE_FOLDER)
 
 # The fixture names are deliberately PLAUSIBLE rather than obviously ours. An
 # earlier pass used `_si_shots`, and the Tests panel puts the module name on
