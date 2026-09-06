@@ -2,6 +2,156 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.17.0] — 2026-09-06
+
+feat: the two large items the product review left open — one gateway reading another, and a Jython test runner.
+
+Nigel, 06/09/2026: *"Please finish the unfinished tasks"*, choosing **R5 and R6**
+after being told R6 was the one the review recommended AGAINST. Both were
+described in that review as days rather than hours, and neither is a small
+feature. F1 was decided at the same time: the module **stays internal**, now by
+decision rather than by inertia.
+
+### Added — R5, two gateways side by side
+
+- **A Compare view.** Choose a configured peer and every body this IDE can open
+  is listed with whether it matches over there: `same`, `differs`, `only here`,
+  `only there`. Clicking a differing row opens the peer's copy in the OTHER pane,
+  read-only, beside your own. That is the differentiator no Designer can copy —
+  the Designer cannot open two gateways at once at all.
+- **Read-only by construction, not by restraint.** `RemoteClient` exposes ONE
+  method and it is GET. There is no code path from the compare view to a write on
+  another gateway, so no later edit can turn a comparison into a deployment by
+  passing a different string. Promoting a change between gateways is a deployment
+  with an approval and a rollback; a button in an editor would be pretending
+  otherwise.
+- **The client sends a NAME, never a URL**, and that is the whole security model.
+  A route taking `?url=` would be a server-side request forgery primitive mounted
+  inside a gateway — any authenticated user could aim it at `169.254.169.254`, at
+  a database admin port, at anything the gateway can reach and the browser
+  cannot. Peers are named in `policy.properties`; the set of reachable URLs is
+  exactly the set the operator wrote down. Redirects are not followed, for the
+  same reason.
+- **The peer gate covers the four reads a comparison needs**, not just the
+  digest. Mounted on the digest alone, drift worked and opening a differing row
+  answered 401 — the body read is a separate route, and the reader could do
+  nothing about it. Caught by the live suite, which asserts a peer's copy of a
+  body arrives byte for byte rather than merely that a request was made.
+- **Two requests, not two per script.** `GET /api/scripts/digest` answers a
+  SHA-256 per body, so a 200-script project is compared in two round trips rather
+  than four hundred. The corpus is the same "everything this IDE can open" that
+  search uses, so a resource type becomes comparable in the same commit it
+  becomes editable.
+- **The one new authentication surface, and what bounds it.** A peer presents
+  `X-ScriptIDE-Remote-Token`, matched constant-time against
+  `com.gaskony.scriptide.remote.inboundToken`. It is **off unless configured**,
+  it is **mounted on reads only** — never a write, an execution, an attribute
+  save or the terminal — and a token under 24 characters is treated as ABSENT
+  rather than accepted, because a control that reads as security and is guessable
+  is worse than none. `SessionSecurity`'s own Javadoc predicted this: *"If a
+  scripted caller is ever genuinely needed, add a Gateway API token check, not an
+  actor string."* That is what this is.
+- It is a shared secret rather than anything cleverer, and the cost is stated in
+  the code: symmetric, non-expiring, rotated by editing two files. What it buys is
+  that the credential lives in the one 0600 file the operator already owns
+  instead of in a project resource, a database table or a UI this module would
+  then have to protect.
+
+### Added — R6, a Jython test runner
+
+- **Nothing in Ignition offers one**, and the isolated execution primitive here is
+  the only correct one in the estate. A Tests panel beside the console lists what
+  the project declares and runs some or all of it: pass, fail, error, elapsed,
+  the traceback, and what each test PRINTED before it stopped.
+- **Three outcomes, never two.** A `fail` is an assertion that is not true; an
+  `error` is a test that never got far enough to have an opinion. Collapsing them
+  sends you to read an assertion that never executed.
+- **Discovery is narrow on purpose.** A test is a top-level `def test_*` (or a
+  `test_*` method on a `Test*` class) in a module whose last name starts with
+  `test` or that sits under a `tests` package. Finding `def test_*` anywhere would
+  put `plc.diagnostics.test_connection` under a Run All button — a function whose
+  job is to open a socket to a PLC. The rule is stated in the panel, so it reads
+  as a rule rather than as a bug.
+- **Running a test is running arbitrary code, and is gated as such**: the
+  gateway-write gate, a live `ExecPolicy` re-check per request, the same
+  `ExecutionService` as the console, and an audit line before it starts. The ids
+  in the request are a SELECTION — the server looks each one up in its own
+  discovery, so an unknown id is a 400 and not a call to any function by name.
+- **A Stop is not swallowed.** The harness catches `AssertionError` and
+  `Exception` and never bare, so the Java `Error` a Stop and the timeout arrive as
+  passes straight through — instead of being caught while the run calmly continues
+  to the next test.
+- **One execution for the whole run**, so the tests share an interpreter, as they
+  do under any other runner. The panel says so: it is the one thing here that will
+  surprise someone who knows pytest, and reading it beats discovering it from a
+  flaky test.
+- **Capturing what a test printed took three separate findings**, each of which
+  fails silently — the run reports success and the output is simply gone. All
+  three are asserted by `TestHarnessTest`, because the obvious edit to any one of
+  them puts the bug straight back:
+  1. **Every import happens before any output.** Writing to `sys.stdout` and then
+     importing a project library module loses the WHOLE execution's output, not
+     just the buffered write. So the harness runs in two passes: import and
+     resolve first, print and run second.
+  2. **The private system state is re-asserted after the imports.** Importing a
+     project library module leaves the THREAD's `PySystemState` pointing at the
+     platform's, so `print` — which resolves stdout through `Py.getSystemState()`
+     — writes to the gateway's own console from then on. Explicit
+     `sys.stdout.write` kept working the whole time, and that asymmetry is what
+     made it visible: a captured write beside a missing print means the two are
+     resolving different objects.
+  3. **The harness flushes its own streams.** Jython buffers `sys.stdout` and the
+     runner's tail-flush does not reach that buffer on a batch run. The script
+     console never showed any of this, because a socket run has a periodic pump
+     and a batch run does not.
+
+### Changed
+- A tab's read-only suffix now names the reason. An inherited script still reads
+  `(Read-Only)`, measured off the Designer; a remote buffer says which gateway,
+  because "read-only" alone sends a reader looking for the override button that
+  would fix it, and for another gateway's copy there is none.
+
+### Decided
+- **F1 — the module stays INTERNAL.** Private at
+  `Gaskony-Ignition/module-script-ide`, absent from `release.sh`, `test-all.sh`
+  and the public portal, exactly as before. The difference is that it is now a
+  decision on the record rather than fifteen releases of inertia.
+
+### Fixed — three defects, none of which a unit test could have found
+- **A peer could read the drift digest and not the script bodies.** With the
+  peer gate on the digest route alone, a comparison worked and opening a
+  differing row answered 401 — the body read is a separate route, and the reader
+  could do nothing about it. Caught because the live suite asserts a peer's copy
+  arrives BYTE FOR BYTE rather than merely that a request was made.
+- **A remote buffer was offering to overwrite the peer's file.** Staleness
+  compares a document's etag against the signature in THIS gateway's tree, and a
+  remote document has neither — so the compare view opened a peer's copy and
+  immediately offered to "pull the current copy" over it, which is the one thing
+  the whole feature promises never to do.
+- **The compare gesture parked the left pane on an unrelated script.** The pane
+  rule that hands a vacated pane to a sibling is right in general and wrong here:
+  "put these two side by side" has to show the OTHER ONE. With any tab already
+  open the picture was a comparison of nothing.
+
+The last two were found by LOOKING at the README screenshot, which is the whole
+argument for F3 being a script rather than a chore.
+
+### Documentation
+- **F3 — the README screenshots are current, and now repeatable.**
+  `scripts/testing/capture_readme_shots.py` re-takes all six against whatever is
+  deployed. It asserts nothing on purpose: a screenshot's correctness is a human
+  judgement and a suite comparing PNGs would fail on a font hint. Two are new —
+  the compare view and the Tests panel. The fixtures it creates are named as
+  plausible code rather than `_si_*`, because the Tests panel puts a module name
+  on screen and the previous pass advertised a test fixture in the README.
+
+### Not done, and why
+- **F2 — it has still only ever run on one gateway.** The R5 suite configures a
+  peer whose URL is this gateway's own, which exercises the config, the token, the
+  client, the digest and the comparison, and cannot prove the two ends are
+  different machines. Every other gateway on this workstation belongs to a
+  different project that test modules must never be installed on.
+
 ## [1.16.1] — 2026-09-06
 
 feat: search that covers what the IDE actually edits, guards on the way out, and most of the product review's own backlog.

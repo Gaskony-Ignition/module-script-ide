@@ -6,7 +6,7 @@
  * shows up is a tab that says "saved" over unsaved work.
  */
 import type { ReactNode } from 'react';
-import { isDirty, isLockedByInheritance, type OpenDoc } from '../workspace/documents';
+import { isDirty, readOnlyReason, type OpenDoc } from '../workspace/documents';
 import './TabStrip.css';
 
 export interface TabStripProps {
@@ -52,7 +52,10 @@ export default function TabStrip({
         // editor already refuses every keystroke — see CodeEditor — but until
         // now nothing on the TAB said so, and a tab strip with six scripts
         // open gave no way to tell which one that was without clicking each.
-        const locked = isLockedByInheritance(doc);
+        // Since 1.17.0 this also covers a remote buffer, whose suffix names the
+        // gateway instead: "read-only" alone sends the reader looking for an
+        // override button, and for another gateway's copy there is none.
+        const locked = readOnlyReason(doc);
         return (
           <div key={doc.uri} className={`tab${active ? ' is-active' : ''}`}>
             <button
@@ -65,7 +68,7 @@ export default function TabStrip({
             >
               <span className="tab-name">
                 {doc.label}
-                {locked && <span className="tab-readonly"> (Read-Only)</span>}
+                {locked && <span className="tab-readonly"> ({locked})</span>}
               </span>
               {/* Rendered as a marker with a text alternative: a bare bullet is
                   invisible to a screen reader and to a test query alike. */}

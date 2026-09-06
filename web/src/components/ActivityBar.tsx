@@ -26,15 +26,16 @@
  */
 import type { ReactNode } from 'react';
 import {
-  IconAlert, IconDatabase, IconFiles, IconGlobe, IconPlay, IconSearch, IconTerminal,
+  IconAlert, IconCompare, IconDatabase, IconFiles, IconFlask, IconGlobe, IconPlay, IconSearch,
+  IconTerminal,
 } from './Icons';
 import './ActivityBar.css';
 
 /** Side-bar views. */
-export type ViewId = 'scripts' | 'search' | 'webdev' | 'named-queries';
+export type ViewId = 'scripts' | 'search' | 'webdev' | 'named-queries' | 'remote';
 
 /** Bottom-panel views. */
-export type PanelId = 'console' | 'problems' | 'terminal';
+export type PanelId = 'console' | 'problems' | 'terminal' | 'tests';
 
 export interface ActivityBarProps {
   /** The side-bar view, whether or not the side bar is showing. */
@@ -52,12 +53,19 @@ const VIEWS: Array<{ id: ViewId; label: string; icon: ReactNode }> = [
   { id: 'search', label: 'Search', icon: <IconSearch size={20} /> },
   { id: 'webdev', label: 'Web Dev', icon: <IconGlobe size={22} /> },
   { id: 'named-queries', label: 'Named Queries', icon: <IconDatabase size={20} /> },
+  // Last, and deliberately: it is the only view that asks about a machine other
+  // than this one, and on a gateway with no peer configured it is the only view
+  // that can be empty for a reason the user cannot fix from here.
+  { id: 'remote', label: 'Compare Gateways', icon: <IconCompare size={20} /> },
 ];
 
 const PANELS: Array<{ id: PanelId; label: string; icon: ReactNode }> = [
   { id: 'problems', label: 'Problems', icon: <IconAlert size={19} /> },
   { id: 'console', label: 'Script Console', icon: <IconPlay size={18} /> },
   { id: 'terminal', label: 'Terminal', icon: <IconTerminal size={22} /> },
+  // Next to the console rather than in the side bar: a test result is OUTPUT,
+  // read after asking for something, with the editor still on screen.
+  { id: 'tests', label: 'Tests', icon: <IconFlask size={20} /> },
 ];
 
 export default function ActivityBar({

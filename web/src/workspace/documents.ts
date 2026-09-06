@@ -100,6 +100,16 @@ export interface OpenDoc {
    * `toResource`, which stamps version 2.
    */
   legacy?: boolean;
+  /**
+   * Set when this buffer is another gateway's copy, opened for comparison.
+   *
+   * Absent on every local document, which is what makes the check a presence
+   * test rather than a flag. A remote document is read-only, is never saved, is
+   * never given to the language server — its names resolve in the OTHER
+   * project's namespace, so every unknown-name diagnostic would be wrong — and
+   * has no history, no attributes and no rename.
+   */
+  remote?: RemoteRef;
 }
 
 /**
@@ -115,7 +125,14 @@ export interface OpenDoc {
  * language server.
  */
 export function isPythonDoc(doc: OpenDoc): boolean {
-  return doc.kind === 'script' && (doc.language ?? 'python') === 'python';
+  // A remote buffer is excluded here rather than at each call site. The server
+  // answers about THIS gateway's project, so every name a remote script imports
+  // would come back undefined, every go-to-definition would land in the local
+  // copy, and the Problems panel would fill with findings about a file nobody
+  // here can edit. Syntax highlighting is unaffected: that comes from the
+  // language, not from this gate.
+  return doc.kind === 'script' && doc.remote === undefined
+    && (doc.language ?? 'python') === 'python';
 }
 
 /**
@@ -137,6 +154,48 @@ export function isPythonDoc(doc: OpenDoc): boolean {
  */
 export function isLockedByInheritance(doc: OpenDoc): boolean {
   return doc.origin === 'inherited' && !doc.overridden;
+}
+
+/**
+ * Where a document came from, when it did not come from this gateway.
+ *
+ * Its presence is what makes a buffer remote — there is no `isRemote` flag to
+ * fall out of step with it, the same reasoning `panes.ts` gives for having no
+ * `isSplit`.
+ */
+export interface RemoteRef {
+  /** The peer's configured name, as `policy.properties` spells it. */
+  gateway: string;
+  /** What to show a reader. */
+  gatewayLabel: string;
+  /** The project on the PEER, which need not be named the same as this one. */
+  project: string;
+}
+
+/**
+ * Every reason a buffer refuses keystrokes.
+ *
+ * Two now, and they must be asked as one question or a new one gets added to
+ * the editor and forgotten in the tab strip. A remote document is read-only for
+ * a harder reason than an inherited one: there is no write path to another
+ * gateway at all — `RemoteClient` has a single verb and it is GET — so an
+ * editable remote buffer would be a promise nothing behind it could keep.
+ */
+export function isReadOnlyDoc(doc: OpenDoc): boolean {
+  return doc.remote !== undefined || isLockedByInheritance(doc);
+}
+
+/**
+ * Why this buffer is read-only, in the words the tab shows.
+ *
+ * The Designer's own suffix for an inherited script is `(Read-Only)`, measured
+ * — see above — so that one is not ours to reword. A remote document says which
+ * gateway instead, because "read-only" alone leaves a reader looking for the
+ * override button that would fix it, and no button can.
+ */
+export function readOnlyReason(doc: OpenDoc): string | null {
+  if (doc.remote) return doc.remote.gatewayLabel;
+  return isLockedByInheritance(doc) ? 'Read-Only' : null;
 }
 
 /**
@@ -186,7 +245,15 @@ export function sameSignature(a: string | undefined, b: string | undefined): boo
  * `'new'` document has no gateway copy to be stale against.
  */
 export function isStale(doc: OpenDoc, signature: string | undefined): boolean {
-  if (doc.origin === 'new' || signature === undefined) return false;
+  // A REMOTE buffer is never stale, and the check is not merely unnecessary —
+  // it is wrong. Staleness compares this document's etag against the signature
+  // in THIS gateway's tree, and a remote document has neither: it carries no
+  // etag by design and the tree it would be compared against describes a
+  // different machine. Without this line the compare view opened a peer's copy
+  // and immediately offered to "pull the current copy" over it, which is the
+  // one thing the whole feature promises never to do. Caught by looking at the
+  // README screenshot, 06/09/2026.
+  if (doc.remote || doc.origin === 'new' || signature === undefined) return false;
   return !sameSignature(doc.etag, signature);
 }
 
@@ -331,6 +398,58 @@ export function newDoc(entry: ScriptEntry, project: string, text: string, etag: 
  * resource does not already exist, base signature or none). Closing the tab
  * without saving discards it; nothing was ever written.
  */
+/**
+ * A peer gateway's copy of one body, as a read-only document.
+ *
+ * Its uri carries the gateway and the remote project as well as the path, so it
+ * can sit beside the local copy without either one finding the other's tab —
+ * the same reasoning {@link docUri} gives for including the data key.
+ *
+ * `project` is the LOCAL project, not the remote one. Nothing that uses it can
+ * run on a remote document (save, attributes, history, rename and the language
+ * server are all gated on `remote` being absent), and pointing it at a project
+ * this gateway does not have would make any future caller that forgot the gate
+ * fail confusingly rather than obviously. The remote project is inside
+ * {@link RemoteRef}, where it can only be read on purpose.
+ */
+export function newRemoteDoc(params: {
+  gateway: string;
+  gatewayLabel: string;
+  remoteProject: string;
+  localProject: string;
+  path: string;
+  scriptKey: string;
+  label: string;
+  typeLabel: string;
+  text: string;
+}): OpenDoc {
+  return {
+    uri: `remote::${params.gateway}::${params.remoteProject}::${params.path}::${params.scriptKey}`,
+    kind: 'script',
+    project: params.localProject,
+    path: params.path,
+    scriptKey: params.scriptKey,
+    typeLabel: params.typeLabel,
+    label: params.label,
+    language: languageFor({ dataKey: params.scriptKey }),
+    origin: 'local',
+    // No ETag, and none is wanted: an entity tag is a precondition for a write,
+    // and there is no write. An empty string is the honest value rather than a
+    // borrowed one that would look usable.
+    etag: '',
+    baseText: params.text,
+    // Equal to baseText for ever: the buffer refuses keystrokes, so `isDirty`
+    // can never become true and no close prompt can ever fire on one.
+    text: params.text,
+    overridden: false,
+    remote: {
+      gateway: params.gateway,
+      gatewayLabel: params.gatewayLabel,
+      project: params.remoteProject,
+    },
+  };
+}
+
 export function newUnsavedDoc(params: {
   project: string;
   path: string;
