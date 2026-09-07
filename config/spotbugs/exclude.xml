@@ -91,4 +91,23 @@
         <Bug pattern="NP_UNWRITTEN_FIELD,UWF_UNWRITTEN_FIELD,URF_UNREAD_FIELD" />
     </Match>
 
+    <!--
+        EQ_DOESNT_OVERRIDE_EQUALS on the import hook — inheriting PyObject.equals
+        is the CORRECT behaviour, not an oversight. It is Python's `==`, and this
+        object is a function: two references are equal when they are the same
+        function, which is what the base class already answers. The two fields it
+        adds (the delegate and the system state to restore) are identity, not
+        value — an equals that compared them would make two hooks for two
+        different runs compare equal, which is the only way this could ever
+        matter and is exactly backwards.
+
+        Asked before excluded, per the rule at the top of this file. The other two
+        findings on this class were FIXED: the `transient` on a field nothing
+        deserialises was removed, and a serialVersionUID declared.
+    -->
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.exec.PrivateStateRunner$RestoringImport" />
+        <Bug pattern="EQ_DOESNT_OVERRIDE_EQUALS" />
+    </Match>
+
 </FindBugsFilter>

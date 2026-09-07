@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.18.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.19.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -60,7 +60,10 @@ apart: an error never got far enough to have an opinion.*
   as a real traceback, `File "…", line N, in f`, and a frame inside a project
   library script opens that script at the line. Stop is read while the script is
   still running, and Reset drops the console's variables the way the Designer's
-  does. Concurrent users never see each other's output.
+  does. Concurrent users never see each other's output. The editor and the output
+  sit either above one another or side by side, whichever you choose, with a
+  divider you can drag — and it opens in its own browser tab if you want the
+  whole window.
 - **Autocomplete and signature help** from the running gateway's script registry.
 - **Live error checking** against the real Jython 2.7 parser — plus a name that
   is defined nowhere, a deprecated platform call, and `system.gui` in a script

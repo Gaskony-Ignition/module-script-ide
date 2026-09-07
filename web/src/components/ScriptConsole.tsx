@@ -26,10 +26,18 @@
  * blocked in Java runs its full ten. The button changes its own label rather
  * than pretending the script died.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import RunHistoryDialog from './RunHistoryDialog';
+import Resizer from './Resizer';
+import { IconColumns, IconRows } from './Icons';
+import {
+  rememberChoice,
+  rememberWidth,
+  storedChoice,
+  storedWidth,
+} from '../workspace/layoutStore';
 import { byteFidelity, editorTheme, findAndReplace, pythonKeymap, pythonSurface } from './editorCore';
 import {
   sharedExecClient,
@@ -88,6 +96,44 @@ const STARTER = '# Runs on the Gateway. Ctrl+Enter to run, Ctrl+Shift+Enter for 
 /** Where the platform keeps project-library modules. */
 const LIBRARY_ROOT = 'ignition/script-python/';
 
+/**
+ * How the editor and the output sit relative to each other.
+ *
+ * `rows` is the original layout and stays the default — it is what the
+ * Designer's console does, and a wide short output block is worse for a
+ * traceback than a tall narrow one. `columns` exists because a wide monitor
+ * running a stacked console wastes most of its width, which is Nigel's
+ * complaint (07/09/2026): the two were "fixed at 50/50" and could not be put
+ * side by side.
+ */
+export const ORIENTATIONS = ['rows', 'columns'] as const;
+export type ConsoleOrientation = (typeof ORIENTATIONS)[number];
+
+/**
+ * The editor's share of the console body, as a percentage.
+ *
+ * A SHARE, not a pixel count, and that is the whole reason this is not three
+ * lines shorter. The popped-out console is a browser tab people resize, and a
+ * remembered 620px editor is two thirds of one window and the entire height of
+ * the next. A share survives the resize, and it also carries between the docked
+ * console and the popped-out one, which are different sizes by construction.
+ *
+ * Kept per orientation: a split that reads well stacked is not the one that
+ * reads well side by side, and sharing one number made switching orientation
+ * feel like it had lost the setting.
+ */
+const SHARE_KEY: Record<ConsoleOrientation, string> = {
+  rows: 'console-share-rows',
+  columns: 'console-share-columns',
+};
+
+/** Today's stacked split, so an existing user sees no change until they drag. */
+const DEFAULT_SHARE: Record<ConsoleOrientation, number> = { rows: 45, columns: 55 };
+
+/** Neither pane may be driven to nothing: a zero-height editor cannot be typed in. */
+const MIN_SHARE = 15;
+const MAX_SHARE = 85;
+
 /** 24-hour local time, for the divider that separates one run from the next. */
 function clockTime(): string {
   return new Date().toLocaleTimeString('en-AU', { hour12: false });
@@ -135,6 +181,25 @@ export default function ScriptConsole({
   const [running, setRunning] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const outputRef = useRef<HTMLDivElement | null>(null);
+  /** The flex box holding editor + divider + output, measured along the split. */
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  const [orientation, setOrientation] = useState<ConsoleOrientation>(
+    () => storedChoice('console.orientation', ORIENTATIONS, 'rows')
+  );
+  const [share, setShare] = useState(
+    () => storedWidth(SHARE_KEY[orientation], DEFAULT_SHARE[orientation])
+  );
+  /**
+   * The body's size along the split axis, in px, or 0 when it is not known.
+   *
+   * Zero is a real state, not a loading one: jsdom measures everything as zero,
+   * and so does any environment without `ResizeObserver`. The layout falls back
+   * to the CSS shares in that case and the divider is not rendered — a divider
+   * that cannot convert a drag into a share would move nothing while looking
+   * like it should.
+   */
+  const [bodySize, setBodySize] = useState(0);
 
   /** Monotonic, so two entries appended in the same millisecond differ. */
   const nextId = useRef(0);
@@ -446,10 +511,63 @@ export default function ScriptConsole({
     };
   }, []);
 
+  // ---- the split ---------------------------------------------------------
+
+  /**
+   * Keep `bodySize` equal to the body's extent along the CURRENT split axis.
+   *
+   * Measured rather than derived from the window: the docked console sits
+   * inside a panel the user is also resizing, so the window tells you nothing
+   * about how much room the console actually has. `useLayoutEffect` takes the
+   * first reading before the browser paints, so the divider is present on the
+   * first frame instead of appearing a tick later.
+   */
+  useLayoutEffect(() => {
+    const node = bodyRef.current;
+    if (!node) return undefined;
+    const measure = () => {
+      const box = node.getBoundingClientRect();
+      setBodySize(orientation === 'rows' ? box.height : box.width);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [orientation]);
+
+  const applyShare = useCallback(
+    (next: number, mode: ConsoleOrientation) => {
+      const clamped = Math.min(MAX_SHARE, Math.max(MIN_SHARE, Math.round(next)));
+      setShare(clamped);
+      rememberWidth(SHARE_KEY[mode], clamped);
+    },
+    []
+  );
+
+  const chooseOrientation = useCallback((next: ConsoleOrientation) => {
+    setOrientation(next);
+    rememberChoice('console.orientation', next);
+    // Each orientation carries its OWN remembered share, so switching restores
+    // what you last chose there rather than reinterpreting a height as a width.
+    setShare(storedWidth(SHARE_KEY[next], DEFAULT_SHARE[next]));
+  }, []);
+
+  /**
+   * `flex` for the editor pane.
+   *
+   * A fixed basis in px once the body has been measured, and nothing at all
+   * before that — the stylesheet's own `1 1 45%` is the fallback, so a console
+   * that has never been measured looks exactly like it did before 1.19.0.
+   */
+  const editorFlex = bodySize > 0
+    ? { flex: `0 0 ${(bodySize * share) / 100}px` }
+    : undefined;
+
   const busy = running !== null;
 
   return (
-    <section className="console" aria-label="Script Console">
+    <section className={`console console-${orientation}`} aria-label="Script Console">
       {historyOpen && (
         <RunHistoryDialog
           onClose={() => setHistoryOpen(false)}
@@ -504,6 +622,26 @@ export default function ScriptConsole({
         <span className="console-project muted" title="Scripts run in this project's scope">
           {project}
         </span>
+        <div className="console-layout-toggle" role="group" aria-label="Console layout">
+          <button
+            type="button"
+            className={orientation === 'rows' ? 'is-active' : ''}
+            aria-pressed={orientation === 'rows'}
+            onClick={() => chooseOrientation('rows')}
+            title="Output below the editor"
+          >
+            <IconRows size={16} />
+          </button>
+          <button
+            type="button"
+            className={orientation === 'columns' ? 'is-active' : ''}
+            aria-pressed={orientation === 'columns'}
+            onClick={() => chooseOrientation('columns')}
+            title="Output beside the editor"
+          >
+            <IconColumns size={16} />
+          </button>
+        </div>
         <button type="button" onClick={() => setHistoryOpen(true)}>
           History
         </button>
@@ -527,7 +665,28 @@ export default function ScriptConsole({
         </p>
       )}
 
-      <div className="console-editor" ref={hostRef} />
+      {/* Editor, divider and output as ONE flex box, so the divider's arithmetic
+          is over a container it can measure. Before 1.19.0 the two panes were
+          direct children of `.console`, sharing the box with the toolbar and the
+          denied notice — a share computed against that would have counted chrome
+          the user cannot drag into. */}
+      <div className="console-body" ref={bodyRef}>
+        <div className="console-editor" ref={hostRef} style={editorFlex} />
+
+        {bodySize > 0 && (
+          <Resizer
+            value={(bodySize * share) / 100}
+            min={(bodySize * MIN_SHARE) / 100}
+            max={(bodySize * MAX_SHARE) / 100}
+            // The editor is the pane being sized and it is first, so dragging
+            // towards it grows it in either orientation.
+            side={orientation === 'rows' ? 'above' : 'left'}
+            label={orientation === 'rows'
+              ? 'Resize the editor and the output'
+              : 'Resize the editor and the output, side by side'}
+            onChange={(px) => applyShare((px / bodySize) * 100, orientation)}
+          />
+        )}
 
       {/* The output is its own titled panel, not a region below the editor.
           Without the header and the rule it read as more editor, and people
@@ -553,6 +712,7 @@ export default function ScriptConsole({
           )}
         </div>
       </section>
+      </div>
     </section>
   );
 }

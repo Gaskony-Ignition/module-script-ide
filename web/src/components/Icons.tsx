@@ -315,3 +315,30 @@ export const IconFlask = (p: IconProps) =>
     </>,
     p
   );
+
+/**
+ * The console laid out in ROWS — editor above, output below.
+ *
+ * A pair beside {@link IconColumns}, and the two must read as a pair at 14px:
+ * one box divided the short way, one divided the long way. Distinct from
+ * {@link IconSplit}, which is about moving a document between editor panes
+ * rather than about an orientation.
+ */
+export const IconRows = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="1.6" y="2.6" width="12.8" height="10.8" rx="1" />
+      <path d="M1.6 8h12.8" />
+    </>,
+    p
+  );
+
+/** The console laid out in COLUMNS — editor left, output right. */
+export const IconColumns = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="1.6" y="2.6" width="12.8" height="10.8" rx="1" />
+      <path d="M8 2.6v10.8" />
+    </>,
+    p
+  );
