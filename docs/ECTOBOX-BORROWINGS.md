@@ -32,9 +32,9 @@ Also not portable, and not worth chasing:
 | Group | State |
 | --- | --- |
 | 1. Test framework | **Done, 1.21.0** (07/09/2026) — see `docs/TEST-FRAMEWORK.md` |
-| 2. Snippets, templates, organise imports | in progress |
-| 3. Tag-path and DB-schema autocomplete | not started |
-| 4. Console and buffer polish | not started |
+| 2. Snippets, templates, organise imports | **Snippets + organise/suggest imports done, 1.22.0.** Templates not started |
+| 3. Tag-path and DB-schema autocomplete | **Done, 1.22.0** (07/09/2026) — `TagBrowser`/`DbSchema` in `gateway/.../lang/`, backed by `SdkTagBrowser`/`SdkDbSchema` |
+| 4. Console and buffer polish | **Style lints + cprint/jsonPrint + ANSI done, 1.22.0.** History UI, autosave and output export not started |
 
 **The one thing group 1 changed about the brief.** Their mocking mechanism —
 swapping `globals()['system']` in the module under test — is **not safe on a

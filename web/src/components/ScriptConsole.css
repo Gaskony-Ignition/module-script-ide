@@ -320,3 +320,12 @@
   background: var(--accent-primary-bg);
   color: var(--text-primary);
 }
+
+/* A run of output that carried its own colour. The span exists only when an
+   escape was found, so unstyled output is still one text node in the <pre>. */
+.console-ansi {
+  /* Nothing of its own: every property it needs is set inline from the escape,
+     and anything set here would fight a script that asked for the opposite. The
+     class is here so a suite can select these and a theme can reach them. */
+  white-space: inherit;
+}

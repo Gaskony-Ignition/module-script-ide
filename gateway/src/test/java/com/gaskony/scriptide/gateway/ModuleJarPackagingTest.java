@@ -169,6 +169,7 @@ class ModuleJarPackagingTest {
         Path tmp = Files.createTempDirectory("scriptide-modl-testharness");
         boolean foundScriptide = false;
         boolean foundRunner = false;
+        boolean foundConsole = false;
         try (ZipFile outer = new ZipFile(modl.toFile())) {
             for (String jarName : jars) {
                 Path extracted = tmp.resolve(jarName.replace('/', '_'));
@@ -183,6 +184,11 @@ class ModuleJarPackagingTest {
                         if ("com/gaskony/scriptide/gateway/testing/runner.py".equals(e.getName())) {
                             foundRunner = true;
                         }
+                        // ConsoleHelpers reads this one the same way, and it is
+                        // seeded into every execution namespace.
+                        if ("com/gaskony/scriptide/gateway/exec/console.py".equals(e.getName())) {
+                            foundConsole = true;
+                        }
                     }
                 }
             }
@@ -190,5 +196,6 @@ class ModuleJarPackagingTest {
 
         assertThat(foundScriptide).as("scriptide.py missing from the .modl").isTrue();
         assertThat(foundRunner).as("runner.py missing from the .modl").isTrue();
+        assertThat(foundConsole).as("console.py missing from the .modl").isTrue();
     }
 }

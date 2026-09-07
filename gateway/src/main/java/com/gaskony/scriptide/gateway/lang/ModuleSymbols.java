@@ -187,7 +187,8 @@ public final class ModuleSymbols {
         List<ImportBinding> imports = new ArrayList<>();
         try {
             mod parsed = ParserFacade.parseExpressionOrModule(
-                new StringReader(source == null ? "" : source), moduleName, new CompilerFlags());
+                new StringReader(neutraliseCodingDeclaration(source == null ? "" : source)),
+                moduleName, new CompilerFlags());
             if (parsed instanceof Module module) {
                 collect(module.getInternalBody(), null, symbols, imports);
             }
@@ -209,6 +210,65 @@ public final class ModuleSymbols {
             return new ModuleSymbols(moduleName, symbols, imports,
                 "Could not parse: " + e.getMessage(), 0, 0, List.of());
         }
+    }
+
+
+    /**
+     * A PEP 263 coding declaration, which is only legal in the first two lines.
+     *
+     * <p>Deliberately not anchored to the start of the line: the declaration may
+     * follow a shebang's {@code #!} or sit after whitespace, and Python's own
+     * regex is equally forgiving.</p>
+     */
+    private static final java.util.regex.Pattern CODING_DECLARATION =
+        java.util.regex.Pattern.compile("^[ \\t\\f]*#.*?coding[:=][ \\t]*[-_.a-zA-Z0-9]+");
+
+    /**
+     * Blunt a {@code # -*- coding: utf-8 -*-} line so the parse succeeds.
+     *
+     * <h3>Why this is needed at all</h3>
+     *
+     * <p>Everything here parses from a {@code StringReader}, which is Unicode
+     * text — and CPython and Jython both REFUSE a coding declaration in a Unicode
+     * source: {@code encoding declaration in Unicode string}. The declaration has
+     * already done its job by the time the bytes reached us as a String, so it is
+     * meaningless here; but without this the whole file reports as a syntax
+     * error.</p>
+     *
+     * <p>Measured 07/09/2026. It is not a small failure: a module with a coding
+     * line got a red mark on line 1 that said nothing about its actual code, was
+     * skipped entirely by test discovery, contributed nothing to the outline or
+     * to go-to-definition, and could not be organised. A coding line is ordinary
+     * in any file that has ever held a non-ASCII character.</p>
+     *
+     * <h3>Why it edits rather than deletes</h3>
+     *
+     * <p>Only the word {@code coding} is changed, to a word of the SAME LENGTH
+     * that the pattern no longer matches. Every line number and every column in
+     * the file is therefore identical to the original — which matters because
+     * every position this class reports is fed back to the editor as a range.
+     * Deleting the line, or blanking it, would shift everything below it by one
+     * line or change one line's columns, and the marks would land in the wrong
+     * place.</p>
+     *
+     * <p>Only the first two lines are examined, because that is the only place
+     * Python looks for one.</p>
+     */
+    public static String neutraliseCodingDeclaration(String source) {
+        if (source.isEmpty() || !source.contains("coding")) {
+            return source;
+        }
+        String[] lines = source.split("\n", -1);
+        boolean changed = false;
+        for (int i = 0; i < Math.min(2, lines.length); i++) {
+            if (CODING_DECLARATION.matcher(lines[i]).find()) {
+                // Same length, same columns: `coding` becomes `codxng`.
+                lines[i] = lines[i].replaceFirst("coding", "codxng");
+                changed = true;
+                break;      // Python honours only the first.
+            }
+        }
+        return changed ? String.join("\n", lines) : source;
     }
 
     /**

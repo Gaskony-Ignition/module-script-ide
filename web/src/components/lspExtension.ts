@@ -19,6 +19,7 @@
  */
 import {
   autocompletion,
+  snippetCompletion,
   type Completion,
   type CompletionContext,
   type CompletionResult,
@@ -64,9 +65,9 @@ export interface LspDocumentRef {
  *
  * The type string is what picks the icon and its colour class
  * (`cm-completionIcon-<type>`), so an unmapped kind is not cosmetic: it renders
- * a blank gutter beside the label. The three this server emits today are 9, 3
- * and 10; the rest are mapped anyway because the kind is the server's to widen
- * and this is the file that would otherwise need finding again.
+ * a blank gutter beside the label. The four this server emits today are 9, 3,
+ * 10 and 15; the rest are mapped anyway because the kind is the server's to
+ * widen and this is the file that would otherwise need finding again.
  */
 const COMPLETION_TYPES: Record<number, string> = {
   1: 'text',
@@ -83,6 +84,7 @@ const COMPLETION_TYPES: Record<number, string> = {
   12: 'constant', // Value
   13: 'enum',
   14: 'keyword',
+  15: 'text', // Snippet — CodeMirror has no dedicated icon style for one
   21: 'constant',
   22: 'type', // Struct
   25: 'type', // TypeParameter
@@ -127,6 +129,57 @@ export function documentationText(documentation: Documentation | undefined): str
 }
 
 /**
+ * A numbered LSP tab stop, with or without default text: `${1:name}`, `${1}`,
+ * `$1`, and the final-cursor form `$0`.
+ *
+ * The `text` group is `undefined` for the bare forms so the caller can tell
+ * "no default text" apart from an intentionally empty one (`${1:}`, which this
+ * server uses for an empty dict literal like `runNamedQuery(path, {${2:}})`).
+ */
+const LSP_TAB_STOP = /\$\{(\d+)(?::([^{}]*))?\}|\$(\d+)/g;
+
+/**
+ * LSP snippet syntax → CodeMirror's.
+ *
+ * The two look alike and are not: LSP writes a NUMBERED stop, braced or bare —
+ * `${1:name}`, `${1}`, `$1`, and `$0` for where the cursor ends up last.
+ * CodeMirror's own `snippet()` (`@codemirror/autocomplete`) only ever
+ * recognises the braced form, groups stops by NAME rather than number, and has
+ * no bare `$1` syntax at all — passed through unconverted, a bare stop is just
+ * literal text in the inserted code, and `$0` fares no better since `0` is not
+ * a name.
+ *
+ * Every stop here becomes a plain `${text}` (or `${}` for one with no text),
+ * so the field's identity becomes its default text rather than its number.
+ * That is deliberately safe for every snippet this module ships: each one's
+ * numbered stops appear in ascending textual order already, which is exactly
+ * the order CodeMirror gives unnumbered fields, and two default stops sharing
+ * the same text is how this module writes a MIRRORED field on purpose (`tx`
+ * repeats `${1:datasource}` so typing the datasource once fills both). A
+ * snippet whose numbering runs out of textual order, or reuses text between
+ * two stops that are not meant to mirror, would need a real numbered
+ * conversion instead of this one.
+ *
+ * The one character LSP treats specially that this must still respect is a
+ * literal `$` the author escaped with a backslash — CodeMirror has no escape
+ * syntax for `$` at all (only `\{` and `\}`), so left alone the backslash
+ * would show up in the inserted text. It is stripped last, once every real
+ * tab stop has already been matched, so it can never be mistaken for one.
+ */
+export function lspSnippetToCodeMirror(body: string): string {
+  const converted = body.replace(
+    LSP_TAB_STOP,
+    (match: string, _bracedNumber: string, bracedText: string | undefined, _bareNumber: string, offset: number) => {
+      // An escaped `$` (`\$`) is not a tab stop at all — leave it untouched here
+      // and let the final pass below turn it into a literal `$`.
+      if (offset > 0 && body[offset - 1] === '\\') return match;
+      return `\${${bracedText ?? ''}}`;
+    }
+  );
+  return converted.replace(/\\\$/g, '$');
+}
+
+/**
  * Map server completion items to CodeMirror completions.
  *
  * `info` is a function, not a string: documentation is deliberately absent from
@@ -149,6 +202,12 @@ export function toCompletions(
       boost: deprecated ? -50 : 0,
       info: () => infoDom(item, resolve, deprecated),
     };
+    // insertTextFormat 2 = Snippet. A snippet's `info` panel still works exactly
+    // as an API entry's does above — only `apply` changes, to expand the body
+    // with real tab stops instead of dropping the label in verbatim.
+    if (item.insertTextFormat === 2 && item.insertText) {
+      return snippetCompletion(lspSnippetToCodeMirror(item.insertText), completion);
+    }
     return completion;
   });
 }

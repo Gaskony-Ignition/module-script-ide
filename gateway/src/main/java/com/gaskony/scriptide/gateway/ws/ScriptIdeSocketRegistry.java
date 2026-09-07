@@ -2,6 +2,10 @@ package com.gaskony.scriptide.gateway.ws;
 
 import com.gaskony.scriptide.gateway.exec.ExecAudit;
 import com.gaskony.scriptide.gateway.exec.ExecutionService;
+import com.gaskony.scriptide.gateway.lang.DbSchema;
+import com.gaskony.scriptide.gateway.lang.SdkDbSchema;
+import com.gaskony.scriptide.gateway.lang.SdkTagBrowser;
+import com.gaskony.scriptide.gateway.lang.TagBrowser;
 import com.gaskony.scriptide.gateway.term.TerminalService;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import org.slf4j.Logger;
@@ -9,6 +13,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Static holder for the Gateway context and the set of live sockets.
@@ -32,6 +39,18 @@ public final class ScriptIdeSocketRegistry {
     private static volatile ExecAudit execAudit;
     private static volatile TerminalService terminalService;
     private static volatile com.gaskony.scriptide.gateway.history.RunHistory runHistory;
+    private static volatile TagBrowser tagBrowser;
+    private static volatile DbSchema dbSchema;
+
+    /**
+     * Background pool for {@link SdkTagBrowser} and {@link SdkDbSchema}'s
+     * cache refreshes (Group 3, docs/ECTOBOX-BORROWINGS.md §3) — a dedicated,
+     * bounded, own pool, same reasoning as {@link ExecutionService}'s: never
+     * {@code ctx.getExecutorService()}, because a tag browse or a JDBC schema
+     * read wedged against a dead provider must not cost the Gateway's own
+     * pool a thread.
+     */
+    private static volatile ExecutorService completionRefreshPool;
 
     private static final Set<ScriptIdeSocket> OPEN_SOCKETS = ConcurrentHashMap.newKeySet();
 
@@ -45,6 +64,14 @@ public final class ScriptIdeSocketRegistry {
         terminalService = new TerminalService(ctx);
         runHistory = new com.gaskony.scriptide.gateway.history.RunHistory(
             ctx.getSystemManager().getDataDir().toPath());
+        ExecutorService pool = Executors.newFixedThreadPool(2, r -> {
+            Thread t = new Thread(r, "scriptide-completion-refresh");
+            t.setDaemon(true);
+            return t;
+        });
+        completionRefreshPool = pool;
+        tagBrowser = new SdkTagBrowser(ctx.getTagManager(), pool);
+        dbSchema = new SdkDbSchema(ctx.getDatasourceManager(), pool);
         logger.debug("Script IDE socket registry initialised");
     }
 
@@ -73,6 +100,16 @@ public final class ScriptIdeSocketRegistry {
     /** The audit recorder, or null when the module is not started. */
     public static ExecAudit getExecAudit() {
         return execAudit;
+    }
+
+    /** Live tag-path completion, or null when the module is not started. */
+    public static TagBrowser getTagBrowser() {
+        return tagBrowser;
+    }
+
+    /** Live database-schema completion, or null when the module is not started. */
+    public static DbSchema getDbSchema() {
+        return dbSchema;
     }
 
     /**
@@ -125,6 +162,18 @@ public final class ScriptIdeSocketRegistry {
         terminalService = null;
         executionService = null;
         execAudit = null;
+        tagBrowser = null;
+        dbSchema = null;
+        ExecutorService pool = completionRefreshPool;
+        if (pool != null) {
+            pool.shutdownNow();
+            try {
+                pool.awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        completionRefreshPool = null;
         context = null;
         if (count > 0) {
             logger.info("Closed {} Script IDE socket(s) during shutdown", count);

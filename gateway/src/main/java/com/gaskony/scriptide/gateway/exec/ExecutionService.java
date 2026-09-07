@@ -398,9 +398,18 @@ public final class ExecutionService {
                 () -> context.getProjectManager().getProjectScriptManager(p), watchdog));
     }
 
-    /** A fresh locals map for the given project — the REPL state of one console. */
+    /**
+     * A fresh locals map for the given project — the REPL state of one console.
+     *
+     * <p>{@code cprint} and {@code jsonPrint} are defined in it before it is
+     * handed out. They live only in a namespace this module made, which is what
+     * keeps them out of ordinary gateway code — see {@link ConsoleHelpers}.</p>
+     */
     public PyObject newLocals(String project) {
-        return context.getProjectManager().getProjectScriptManager(project).createLocalsMap();
+        PyObject locals =
+            context.getProjectManager().getProjectScriptManager(project).createLocalsMap();
+        ConsoleHelpers.install(locals);
+        return locals;
     }
 
     /** Shut the pool down, without waiting forever on a script that will not stop. */

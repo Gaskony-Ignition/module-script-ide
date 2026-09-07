@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.21.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.22.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -171,6 +171,47 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   `ZipInputStream` does NOT throw on data that is not a zip — it yields no
   entries — so check the `PK` magic, or a `.py` uploaded by mistake is reported
   as "holds no resource.json" and sends the reader after the wrong problem.
+- **A PEP 263 coding declaration breaks the parse, and the fix must not move a
+  single column.** Everything here parses from a `StringReader`, which is Unicode
+  text, and Python 2 refuses `# -*- coding: utf-8 -*-` in one. Measured
+  07/09/2026: a file carrying one reported a syntax error on line 1 about nothing
+  in its own code, gave no outline, no go-to-definition and no style findings, and
+  **was skipped entirely by test discovery** — a header that is ordinary in any
+  file that has ever held a non-ASCII character. `ModuleSymbols
+  .neutraliseCodingDeclaration` changes only the word `coding` to one of the SAME
+  LENGTH, because every position this module reports becomes a range in the
+  editor: delete the line and every mark below it lands one line out.
+- **It has two halves, in different places, and only one of them is the parse.**
+  Repairing the parse made such a module visible and it still would not RUN: the
+  test runner compiles the module's source itself and seeds it through
+  `Py.java2py`, which hands Jython a UNICODE string, where the declaration is
+  refused. The script console never had the problem — it passes a Java String,
+  which compiles as a byte str. So the neutralisation is applied in
+  `TestRouteHandler` as well, and the console path is deliberately left alone.
+  `validate_v29_authoring.py` asserts all three, the last one so nobody "fixes" a
+  path that was never broken.
+- **A style lint goes over the AST, never over the text.** Ectobox ships the same
+  seven checks as regular expressions because they have no parser; this module
+  runs the interpreter's own. A regex for `== None` fires inside a docstring
+  explaining why not to write `== None`, and one for a bare `except:` fires on the
+  string `"except:"` in a log message. The bar for a diagnostic here is ZERO false
+  positives — a lint that cries wolf gets every lint switched off — so half of
+  `StyleChecksTest` is the negative cases. Style findings are WARNINGS and are
+  published LAST, after the syntax error and the undefined names, which are
+  statements that the code will not work rather than opinions about correct code.
+- **Completion never waits on a database or a tag browse.** Both are cached with
+  a TTL, and a miss answers nothing for that keystroke while a background refresh
+  fills the cache. Reading JDBC metadata on the completion thread makes typing
+  wait on a database, and the refresh runs on the module's own pool, never the
+  gateway's.
+- **Organise imports must treat a module docstring as prose, not as code.** The
+  first implementation read it as code, so the imports below it counted as "below
+  code" and the whole feature was a silent no-op on nearly every module in this
+  estate. It also refuses rather than guessing: a syntax error, a backslash
+  continuation or an unbalanced bracket leaves the file byte-identical, and a
+  module using `exec`, `eval`, `globals` or a star import keeps every import it
+  has. Removing a line of somebody's code is the one thing here that cannot be
+  undone by reading it again.
 - **An imported project-library module object is the GATEWAY's, not the run's,
   so never write into one.** Measured 07/09/2026 on 8.3.8: `__import__` of a
   library module returns the manager's own object — the same `id()` from two

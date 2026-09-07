@@ -8,7 +8,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -55,6 +57,20 @@ public final class LanguageServer {
     private final ProjectIndex projectIndex;
     private final String project;
 
+    /**
+     * Live tag-path completion inside a {@code [...]} string literal.
+     * Group 3 (docs/ECTOBOX-BORROWINGS.md §3). Null offers none — a fake in a
+     * unit test, or a gateway with no context yet, both take this path.
+     */
+    private final TagBrowser tagBrowser;
+
+    /**
+     * Live database-schema completion inside a SQL string literal.
+     * Group 3 (docs/ECTOBOX-BORROWINGS.md §3). Null offers none, same as
+     * {@link #tagBrowser}.
+     */
+    private final DbSchema dbSchema;
+
     /** Where server-initiated notifications (diagnostics) go. */
     private volatile Consumer<JsonObject> notifier = m -> { };
 
@@ -72,14 +88,29 @@ public final class LanguageServer {
     private final Map<String, ModuleSymbols> lastGoodSymbols = new ConcurrentHashMap<>();
 
     public LanguageServer(Supplier<ScriptManager> scriptManagerSupplier) {
-        this(scriptManagerSupplier, null, null);
+        this(scriptManagerSupplier, null, null, null, null);
     }
 
     public LanguageServer(Supplier<ScriptManager> scriptManagerSupplier,
                           ProjectIndex projectIndex, String project) {
+        this(scriptManagerSupplier, projectIndex, project, null, null);
+    }
+
+    /**
+     * @param tagBrowser live tag-path completion inside {@code [...]} string
+     *                   literals (Group 3, docs/ECTOBOX-BORROWINGS.md §3);
+     *                   {@code null} offers none
+     * @param dbSchema   live database-schema completion inside SQL string
+     *                   literals (same group); {@code null} offers none
+     */
+    public LanguageServer(Supplier<ScriptManager> scriptManagerSupplier,
+                          ProjectIndex projectIndex, String project,
+                          TagBrowser tagBrowser, DbSchema dbSchema) {
         this.scriptManagerSupplier = scriptManagerSupplier;
         this.projectIndex = projectIndex;
         this.project = project;
+        this.tagBrowser = tagBrowser;
+        this.dbSchema = dbSchema;
     }
 
     /** Install the sink for server-initiated notifications. */
@@ -187,6 +218,12 @@ public final class LanguageServer {
         JsonObject completionProvider = new JsonObject();
         JsonArray triggers = new JsonArray();
         triggers.add(".");
+        // "[" opens a tag-path string; "/" descends one more level once inside
+        // one. Neither is a word character, so without an explicit trigger
+        // the client would only offer a completion here on an explicit
+        // Ctrl+Space (Group 3, docs/ECTOBOX-BORROWINGS.md §3).
+        triggers.add("[");
+        triggers.add("/");
         completionProvider.add("triggerCharacters", triggers);
         completionProvider.addProperty("resolveProvider", true);
 
@@ -266,6 +303,22 @@ public final class LanguageServer {
         int line = position.get("line").getAsInt();
         int character = position.get("character").getAsInt();
 
+        // Group 3 (docs/ECTOBOX-BORROWINGS.md §3): a tag path and a piece of
+        // SQL both live INSIDE a string literal, which is a different
+        // question from the dotted-name walk below and takes over completion
+        // entirely when it answers - offering `system.tag.read` as a
+        // completion of a half-typed tag path would be nonsense, and the two
+        // features are mutually exclusive by construction (one string cannot
+        // be both).
+        Optional<TextDocument.StringLiteral> literal = document.stringLiteralAt(line, character);
+        if (literal.isPresent()) {
+            String content = literal.get().content();
+            if (content.startsWith("[")) {
+                return tagPathCompletion(line, character, content);
+            }
+            return databaseCompletion(line, character, content);
+        }
+
         String prefix = document.dottedPrefixAt(line, character);
         // A prefix that STARTS with a dot means the thing before it is an expression
         // we cannot resolve statically - a string literal, a call result, a
@@ -288,12 +341,259 @@ public final class LanguageServer {
             items.add(completionItem(entry));
         }
 
+        // Snippets are never a member of anything — `system.tag.logger` is not a
+        // thing — so they only ever appear for the bare (no-dot) prefix, appended
+        // after the API entries.
+        if (base.isEmpty()) {
+            for (Snippets.Snippet snippet : Snippets.ALL) {
+                if (!partial.isEmpty()
+                    && !snippet.prefix().regionMatches(true, 0, partial, 0, partial.length())) {
+                    continue;
+                }
+                items.add(snippetCompletionItem(snippet));
+            }
+        }
+
         JsonObject list = new JsonObject();
         // isIncomplete=false: the whole candidate set for this prefix is here, so the
         // client may filter locally as the user keeps typing instead of round-tripping.
         list.addProperty("isIncomplete", false);
         list.add("items", items);
         return list;
+    }
+
+    // ==================== Group 3: tag-path / DB-schema completion ====================
+    // docs/ECTOBOX-BORROWINGS.md §3. Both fire only inside a string literal
+    // (see the branch in completion() above) and both answer nothing when
+    // their provider is null - a fake in a unit test, or a gateway with no
+    // context wired up yet.
+
+    /** LSP CompletionItemKind values these two sources use. */
+    private static final int KIND_FOLDER = 19;
+    private static final int KIND_VALUE = 12;
+    private static final int KIND_CLASS = 7;
+    private static final int KIND_FIELD = 5;
+    private static final int KIND_KEYWORD = 14;
+
+    /** Bound on how many items ONE tag-path or database completion answers. */
+    private static final int MAX_LIVE_COMPLETION_ITEMS = 500;
+
+    /**
+     * Tag-path completion inside a string literal that starts with {@code [}.
+     *
+     * <p>Two stages, split on whether the provider bracket has closed yet.
+     * Before {@code ]}, the candidates are PROVIDER names, each completing to
+     * {@code provider]} - the opening bracket is already typed, so only the
+     * closing one and the name are ever inserted. After {@code ]}, the
+     * candidates are the children of whatever has been typed of the path so
+     * far, split on {@code /}: a folder (or a UDT instance/definition, which
+     * browses the same way) completes with a trailing {@code /} so the very
+     * next keystroke can descend again; a tag completes bare, with its data
+     * type in {@code detail}.</p>
+     *
+     * <p>Both stages replace only the last segment via a {@code textEdit}
+     * rather than an {@code insertText} - {@code /} and {@code [} are not
+     * word characters, so the client's own default replacement range would
+     * insert alongside what is already typed instead of over it, duplicating
+     * the path.</p>
+     */
+    private JsonElement tagPathCompletion(int line, int character, String content) {
+        JsonArray items = new JsonArray();
+        if (tagBrowser != null) {
+            int close = content.indexOf(']');
+            if (close < 0) {
+                String partial = content.substring(1);
+                int from = character - partial.length();
+                for (String provider : tagBrowser.providers()) {
+                    if (items.size() >= MAX_LIVE_COMPLETION_ITEMS) {
+                        break;
+                    }
+                    if (!partial.isEmpty()
+                        && !provider.regionMatches(true, 0, partial, 0, partial.length())) {
+                        continue;
+                    }
+                    items.add(replacingCompletionItem(
+                        provider, KIND_FOLDER, null, provider + "]", line, from, character));
+                }
+            } else {
+                String provider = content.substring(1, close);
+                String rest = content.substring(close + 1);
+                int lastSlash = rest.lastIndexOf('/');
+                String parentPath = lastSlash < 0 ? "" : rest.substring(0, lastSlash);
+                String partial = lastSlash < 0 ? rest : rest.substring(lastSlash + 1);
+                int from = character - partial.length();
+                for (TagBrowser.Child child : tagBrowser.children(provider, parentPath)) {
+                    if (items.size() >= MAX_LIVE_COMPLETION_ITEMS) {
+                        break;
+                    }
+                    if (!partial.isEmpty()
+                        && !child.name().regionMatches(true, 0, partial, 0, partial.length())) {
+                        continue;
+                    }
+                    String newText = child.folder() ? child.name() + "/" : child.name();
+                    items.add(replacingCompletionItem(newText,
+                        child.folder() ? KIND_FOLDER : KIND_VALUE,
+                        child.folder() ? null : child.dataType(),
+                        newText, line, from, character));
+                }
+            }
+        }
+        return completionListOf(items);
+    }
+
+    /** The SQL that puts the cursor squarely after a table-naming keyword. */
+    private static final List<String> SQL_TABLE_KEYWORDS = List.of("FROM", "JOIN", "INTO", "UPDATE");
+
+    /** What "fire at all" means for the database source — see its Javadoc. */
+    private static final List<String> SQL_TRIGGERS =
+        List.of(" FROM ", " JOIN ", " INTO ", "UPDATE ", "SELECT ");
+
+    /** A small, fixed vocabulary offered alongside columns — not exhaustive. */
+    private static final List<String> SQL_KEYWORDS = List.of(
+        "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "INSERT", "INTO", "VALUES",
+        "UPDATE", "SET", "DELETE", "JOIN", "INNER", "LEFT", "RIGHT", "OUTER", "ON",
+        "GROUP", "BY", "ORDER", "HAVING", "LIMIT", "AS", "DISTINCT", "NULL", "IN",
+        "LIKE", "BETWEEN", "IS", "COUNT", "SUM", "AVG", "MIN", "MAX");
+
+    /**
+     * Database-schema completion inside a SQL string literal.
+     *
+     * <p>Fires when the string content, upper-cased, contains one of
+     * {@link #SQL_TRIGGERS} - loosely, "this looks like it is going to be a
+     * SQL statement" rather than a strict parse, because the string is
+     * usually still being typed. Which of the two candidate sets comes back
+     * depends on the KEYWORD immediately before whatever identifier is
+     * currently being typed: {@code FROM}/{@code JOIN}/{@code INTO}/
+     * {@code UPDATE} want a table name, so every configured datasource's
+     * tables are offered with the datasource in {@code detail} - the query
+     * call's own datasource argument is not knowable at completion time (it
+     * is usually typed AFTER the SQL string, as a later argument), so this
+     * says which connection each table came from rather than guessing one.
+     * Anywhere else, columns from every table are offered (detail
+     * {@code datasource.table}) plus a small fixed list of SQL keywords.</p>
+     */
+    private JsonElement databaseCompletion(int line, int character, String content) {
+        JsonArray items = new JsonArray();
+        if (dbSchema != null) {
+            String upper = content.toUpperCase(Locale.ROOT);
+            boolean sqlContext = false;
+            for (String trigger : SQL_TRIGGERS) {
+                if (upper.contains(trigger)) {
+                    sqlContext = true;
+                    break;
+                }
+            }
+            if (sqlContext) {
+                int i = content.length();
+                while (i > 0 && isSqlIdentifierChar(content.charAt(i - 1))) {
+                    i--;
+                }
+                String partial = content.substring(i);
+                int from = character - partial.length();
+                String beforeUpper = content.substring(0, i).stripTrailing().toUpperCase(Locale.ROOT);
+                int lastSpace = beforeUpper.lastIndexOf(' ');
+                String lastWord = lastSpace < 0 ? beforeUpper : beforeUpper.substring(lastSpace + 1);
+
+                if (SQL_TABLE_KEYWORDS.contains(lastWord)) {
+                    addTableItems(items, partial, line, from, character);
+                } else {
+                    addColumnItems(items, partial, line, from, character);
+                    addKeywordItems(items, partial, line, from, character);
+                }
+            }
+        }
+        return completionListOf(items);
+    }
+
+    private void addTableItems(JsonArray items, String partial, int line, int from, int character) {
+        for (String datasource : dbSchema.datasources()) {
+            for (String table : dbSchema.tables(datasource)) {
+                if (items.size() >= MAX_LIVE_COMPLETION_ITEMS) {
+                    return;
+                }
+                if (!partial.isEmpty() && !table.regionMatches(true, 0, partial, 0, partial.length())) {
+                    continue;
+                }
+                items.add(replacingCompletionItem(table, KIND_CLASS, datasource, table, line, from, character));
+            }
+        }
+    }
+
+    private void addColumnItems(JsonArray items, String partial, int line, int from, int character) {
+        for (String datasource : dbSchema.datasources()) {
+            for (String table : dbSchema.tables(datasource)) {
+                for (String column : dbSchema.columns(datasource, table)) {
+                    if (items.size() >= MAX_LIVE_COMPLETION_ITEMS) {
+                        return;
+                    }
+                    if (!partial.isEmpty()
+                        && !column.regionMatches(true, 0, partial, 0, partial.length())) {
+                        continue;
+                    }
+                    items.add(replacingCompletionItem(column, KIND_FIELD,
+                        datasource + "." + table, column, line, from, character));
+                }
+            }
+        }
+    }
+
+    private void addKeywordItems(JsonArray items, String partial, int line, int from, int character) {
+        for (String keyword : SQL_KEYWORDS) {
+            if (items.size() >= MAX_LIVE_COMPLETION_ITEMS) {
+                return;
+            }
+            if (!partial.isEmpty() && !keyword.regionMatches(true, 0, partial, 0, partial.length())) {
+                continue;
+            }
+            items.add(replacingCompletionItem(keyword, KIND_KEYWORD, null, keyword, line, from, character));
+        }
+    }
+
+    private static boolean isSqlIdentifierChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
+    }
+
+    private static JsonObject completionListOf(JsonArray items) {
+        JsonObject list = new JsonObject();
+        list.addProperty("isIncomplete", false);
+        list.add("items", items);
+        return list;
+    }
+
+    /**
+     * One completion item that replaces {@code [fromChar, toChar)} on
+     * {@code line} with {@code newText}, via a {@code textEdit} rather than
+     * {@code insertText}.
+     *
+     * <p>Both {@link #tagPathCompletion} and {@link #databaseCompletion} need
+     * this: the character just typed to trigger completion — {@code [},
+     * {@code /}, a space after a keyword — is not a word character, so a
+     * client's default "replace the current word" behaviour would leave the
+     * already-typed partial sitting next to the inserted text instead of
+     * being replaced by it.</p>
+     */
+    private static JsonObject replacingCompletionItem(String label, int kind, String detail,
+            String newText, int line, int fromChar, int toChar) {
+        JsonObject item = new JsonObject();
+        item.addProperty("label", label);
+        item.addProperty("kind", kind);
+        if (detail != null) {
+            item.addProperty("detail", detail);
+        }
+        JsonObject start = new JsonObject();
+        start.addProperty("line", line);
+        start.addProperty("character", fromChar);
+        JsonObject end = new JsonObject();
+        end.addProperty("line", line);
+        end.addProperty("character", toChar);
+        JsonObject range = new JsonObject();
+        range.add("start", start);
+        range.add("end", end);
+        JsonObject textEdit = new JsonObject();
+        textEdit.add("range", range);
+        textEdit.addProperty("newText", newText);
+        item.add("textEdit", textEdit);
+        return item;
     }
 
     private JsonObject completionItem(HintIndex.Entry entry) {
@@ -313,6 +613,30 @@ public final class LanguageServer {
         JsonObject data = new JsonObject();
         data.addProperty("dottedPath", entry.dottedPath());
         item.add("data", data);
+        return item;
+    }
+
+    /**
+     * A built-in snippet as an LSP completion item.
+     *
+     * <p>No {@code data.dottedPath} is attached — unlike an API entry, a snippet
+     * has no gateway API to look up — so a snippet item handed back through
+     * {@link #resolveCompletion} takes the early-return path there and comes back
+     * unchanged rather than the resolver crashing on a lookup that does not
+     * apply. The documentation is filled in here, up front, for the same
+     * reason: there is nothing to defer to a resolve round trip.</p>
+     */
+    private JsonObject snippetCompletionItem(Snippets.Snippet snippet) {
+        JsonObject item = new JsonObject();
+        item.addProperty("label", snippet.prefix());
+        item.addProperty("kind", 15);   // LSP CompletionItemKind.Snippet
+        item.addProperty("insertTextFormat", 2);   // LSP InsertTextFormat.Snippet
+        item.addProperty("insertText", snippet.body());
+        item.addProperty("detail", snippet.detail());
+        JsonObject documentation = new JsonObject();
+        documentation.addProperty("kind", "markdown");
+        documentation.addProperty("value", snippet.documentation());
+        item.add("documentation", documentation);
         return item;
     }
 
@@ -673,6 +997,30 @@ public final class LanguageServer {
             diagnostic.add("range", range);
             diagnostic.addProperty("severity", 2);   // Warning — never an error
             diagnostic.addProperty("source", "scriptide");
+            diagnostic.addProperty("message", finding.message());
+            diagnostics.add(diagnostic);
+        }
+
+        // Style findings, LAST, so a real error or an undefined name is at the
+        // top of the Problems list. These are opinions about correct code; the
+        // ones above are statements that it will not work.
+        for (StyleChecks.Finding finding : StyleChecks.find(document.text())) {
+            JsonObject start = new JsonObject();
+            start.addProperty("line", finding.line());
+            start.addProperty("character", finding.column());
+            JsonObject end = new JsonObject();
+            end.addProperty("line", finding.line());
+            // Never zero width: a squiggle with no width is invisible, and the
+            // Problems row then points at a place with nothing marked.
+            end.addProperty("character", Math.max(finding.endColumn(), finding.column() + 1));
+            JsonObject range = new JsonObject();
+            range.add("start", start);
+            range.add("end", end);
+            JsonObject diagnostic = new JsonObject();
+            diagnostic.add("range", range);
+            diagnostic.addProperty("severity", 2);   // Warning — never an error
+            diagnostic.addProperty("source", "scriptide");
+            diagnostic.addProperty("code", finding.code());
             diagnostic.addProperty("message", finding.message());
             diagnostics.add(diagnostic);
         }

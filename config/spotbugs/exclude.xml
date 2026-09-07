@@ -57,6 +57,14 @@
         <Class name="com.gaskony.scriptide.gateway.routes.TransferRouteHandler" />
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.lang.SdkTagBrowser" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.lang.SdkDbSchema" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
 
     <!--
         EI_EXPOSE_REP / EI_EXPOSE_REP2 on Outcome.failure — the record carries the

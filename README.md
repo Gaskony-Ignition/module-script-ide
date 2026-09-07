@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.21.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.22.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -119,6 +119,24 @@ apart: an error never got far enough to have an opinion.*
   what the code under test wrote. Each module is executed into a namespace
   private to the run, so module state does not carry from one run to the next.
   See [docs/TEST-FRAMEWORK.md](docs/TEST-FRAMEWORK.md).
+- **Snippets with tab-stops.** Eighteen starting points for the things you write
+  over and over — a logger, a prepared query, a transaction, a Web Dev handler, a
+  tag-change body — in the completion popup; tab through the placeholders.
+- **Completion that knows your gateway.** Type `"[` in a string and it offers the
+  real tag providers, then browses each level as you type `/`. In a string that
+  looks like SQL it offers tables and columns from every configured datasource,
+  each labelled with the connection it came from.
+- **Organise imports**, and suggested imports for a name the file does not
+  define — from your own project's modules first. It loads the result into the
+  editor as an ordinary edit, so Ctrl+Z undoes it and nothing is written until
+  you save.
+- **Seven style checks** beside the real parser's errors: a bare `except:`, a
+  mutable default argument, `== None`, `is` against a literal, an assert on a
+  tuple, a duplicate dict key, and a file that mixes tabs and spaces. They are
+  read off the syntax tree, so none of them fires on the same words inside a
+  string or a comment.
+- **Colour in the console.** `cprint` and `jsonPrint` are there in every run, and
+  output that carries ANSI is rendered rather than shown as escape bytes.
 - **A VS Code-shaped shell**: activity bar, resizable side bar and outline, a
   bottom panel holding the console, the problems list and the terminal, and the
   four layout glyphs in the title bar.

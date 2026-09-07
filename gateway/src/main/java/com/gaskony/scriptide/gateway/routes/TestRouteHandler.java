@@ -5,6 +5,7 @@ import com.gaskony.scriptide.gateway.exec.ExecPolicy;
 import com.gaskony.scriptide.gateway.exec.ExecutionService;
 import com.gaskony.scriptide.gateway.exec.PrivateStateRunner;
 import com.gaskony.scriptide.gateway.exec.TracebackFormatter;
+import com.gaskony.scriptide.gateway.lang.ModuleSymbols;
 import com.gaskony.scriptide.gateway.lang.ProjectIndex;
 import com.gaskony.scriptide.gateway.security.SessionSecurity;
 import com.gaskony.scriptide.gateway.testing.TestDiscovery;
@@ -293,7 +294,18 @@ public class TestRouteHandler {
             Map<String, String> sources = new LinkedHashMap<>();
             for (TestDiscovery.TestCase test : selected) {
                 sources.computeIfAbsent(test.module(),
-                    name -> projectIndex.source(project, name).orElse(null));
+                    // Neutralised, or a module with a `# -*- coding: utf-8 -*-`
+                    // header is discovered and then fails to RUN. The source
+                    // reaches Jython's compile() as a unicode string, and Python 2
+                    // refuses a coding declaration in one — measured 07/09/2026,
+                    // and the two halves of that bug are separate: fixing the
+                    // parse made the module visible, and it still would not run.
+                    // Only the word `coding` changes, to one of the same length,
+                    // so every line and column in a traceback still points at the
+                    // right place.
+                    name -> projectIndex.source(project, name)
+                        .map(ModuleSymbols::neutraliseCodingDeclaration)
+                        .orElse(null));
             }
             sources.values().removeIf(java.util.Objects::isNull);
             locals.__setitem__(TestHarness.VAR_SOURCES, Py.java2py(sources));

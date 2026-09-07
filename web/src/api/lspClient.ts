@@ -59,6 +59,14 @@ export interface CompletionItem {
   /** Only present AFTER completionItem/resolve — deliberately, to keep the popup fast. */
   documentation?: Documentation;
   data?: { dottedPath?: string };
+  /**
+   * The text to insert, in the syntax `insertTextFormat` names. Absent for an
+   * ordinary API entry, whose label IS the text to insert; present for a
+   * built-in snippet, whose body is a template rather than the label.
+   */
+  insertText?: string;
+  /** LSP InsertTextFormat: 1 PlainText (the default), 2 Snippet. */
+  insertTextFormat?: number;
 }
 
 export interface CompletionList {
@@ -640,7 +648,7 @@ export class LspClient {
           textDocument: {
             synchronization: { dynamicRegistration: false },
             completion: {
-              completionItem: { snippetSupport: false, resolveSupport: { properties: ['documentation'] } },
+              completionItem: { snippetSupport: true, resolveSupport: { properties: ['documentation'] } },
             },
             hover: { contentFormat: ['markdown', 'plaintext'] },
             signatureHelp: {
