@@ -2,7 +2,58 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.20.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+**Version 1.21.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+
+### 1.21.0 — the test framework (07/09/2026)
+
+The first of the four groups of ideas taken from the alternative's Script IDE
+(`the borrowed-ideas brief`, Nigel approved all four). What is portable from
+their runner is the SHAPE of a test framework, not its mechanism — theirs cannot
+execute on the gateway at all — and the mechanism they use for mocking turns out
+to be unsafe here. That is the substance of the release. `docs/TEST-FRAMEWORK.md`
+is what a person writing a test reads.
+
+**The measurement it rests on.** `__import__` of a project-library module hands
+back the manager's OWN module object, shared with every script on the gateway:
+the same `id()` from two separate runs, a module global set in one run read back
+by the next, and `system` living in each module's own globals rather than in
+builtins. So swapping `globals()['system']` — how their mocks work — would change
+what every other user's scripts see for as long as the block is open. Same class
+of mistake as the JVM-wide `__builtins__` edit at 1.19.0.
+
+**So the runner executes each selected module's source into a namespace private
+to the run** rather than importing it. Three things follow, all asserted on the
+gateway by `validate_v28_tests.py` (38/38):
+
+- a mock replaces `system` in that namespace and the SHARED module is untouched —
+  proved by importing it from the console after a run that mocked it;
+- **module state no longer carries between runs**, a cost the panel used to have
+  to warn about;
+- when the source cannot be read the runner imports instead and a mock **refuses**
+  rather than quietly writing into the gateway's copy.
+
+**What was built.** `@test`, `@skip`, `@timeout`, `@cases`, `@beforeAll` /
+`@afterAll` / `@beforeEach` / `@afterEach` (with `setUp` / `tearDown` still
+working); twelve assertions; `mockTags` and `mockQuery`, which record every write
+and every call and RAISE for anything they were not given; a fourth outcome
+`skip`; and re-run-failed-only, which sends parent ids because a parameterised
+case is not separately runnable.
+
+**Two limits, stated rather than left to be discovered.** A mock reaches the TEST
+module only — production code the test calls has its own module globals and still
+reaches the real gateway. And `scriptide` exists only during a run, so a test
+module that imports it at the top is not importable outside one; a module that
+must stay importable imports inside the function. Both are asserted, so neither
+gets reported later as a bug.
+
+`@timeout` is a **budget, not an interrupt**: the test finishes and then fails if
+it took too long. Interrupting a running Jython call needs the mechanism that
+stops the whole execution, which would end the run rather than the test.
+
+**The Jython is a resource now**, not a Java string: `scriptide.py` and
+`runner.py` in the gateway jar, parsed by `TestHarnessTest` and asserted into the
+built `.modl` by `ModuleJarPackagingTest` — this estate has already shipped a
+green build of a `.modl` missing a file nobody had asserted was in it.
 
 ### 1.20.0 — export and import, in the Designer's format (07/09/2026)
 

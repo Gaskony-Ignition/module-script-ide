@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.20.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.21.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -110,9 +110,15 @@ apart: an error never got far enough to have an opinion.*
   any open document, the divider is draggable and its width is remembered.
 - **Run your Jython tests.** A `def test_*` in a module named for tests is
   discovered, run on the gateway in an isolated interpreter, and reported as
-  passed, failed or errored — with how long it took, the traceback, and whatever
-  it printed before it stopped. `setUp` and `tearDown` work the way `unittest`
-  means them.
+  passed, failed, errored or skipped — with how long it took, the traceback, and
+  whatever it printed before it stopped. `setUp` and `tearDown` work the way
+  `unittest` means them.
+- **Write them with a real framework.** `@test`, `@skip`, `@cases` for
+  parameterised runs, `@beforeEach` and the rest, twelve assertions, and
+  `mockTags` / `mockQuery` to answer tag reads and queries from a dict and record
+  what the code under test wrote. Each module is executed into a namespace
+  private to the run, so module state does not carry from one run to the next.
+  See [docs/TEST-FRAMEWORK.md](docs/TEST-FRAMEWORK.md).
 - **A VS Code-shaped shell**: activity bar, resizable side bar and outline, a
   bottom panel holding the console, the problems list and the terminal, and the
   four layout glyphs in the title bar.

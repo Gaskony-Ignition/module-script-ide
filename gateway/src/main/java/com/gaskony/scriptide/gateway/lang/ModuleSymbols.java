@@ -2,6 +2,8 @@ package com.gaskony.scriptide.gateway.lang;
 
 import org.python.antlr.ParseException;
 import org.python.antlr.ast.Assign;
+import org.python.antlr.ast.Attribute;
+import org.python.antlr.ast.Call;
 import org.python.antlr.ast.ClassDef;
 import org.python.antlr.ast.FunctionDef;
 import org.python.antlr.ast.Import;
@@ -52,9 +54,35 @@ public final class ModuleSymbols {
     /** What kind of thing a symbol is, mapped to LSP SymbolKind on the way out. */
     public enum SymbolKind { FUNCTION, CLASS, METHOD, VARIABLE }
 
-    /** One definition in a module. */
+    /**
+     * One definition in a module.
+     *
+     * <p>{@code decorators} carries the NAME of each decorator on a {@code def},
+     * flattened: {@code @skip('why')} and {@code @scriptide.skip} both record
+     * {@code skip}. It is the last segment that is kept, because that is what a
+     * reader means by "the skip decorator" however the module was imported. Only
+     * functions and methods can carry one; everything else records an empty
+     * list.</p>
+     */
     public record Symbol(String name, SymbolKind kind, int line, int column,
-                         String container, String signature, String documentation) {
+                         String container, String signature, String documentation,
+                         List<String> decorators) {
+
+        /** Defensive copy: a record's list component is otherwise shared. */
+        public Symbol {
+            decorators = decorators == null ? List.of() : List.copyOf(decorators);
+        }
+
+        /** The form for a symbol that cannot carry a decorator. */
+        public Symbol(String name, SymbolKind kind, int line, int column,
+                      String container, String signature, String documentation) {
+            this(name, kind, line, column, container, signature, documentation, List.of());
+        }
+
+        /** Whether one of the decorators is named this, ignoring any arguments. */
+        public boolean hasDecorator(String decorator) {
+            return decorators.contains(decorator);
+        }
     }
 
     /** One name brought into the module by an import. */
@@ -262,7 +290,8 @@ public final class ModuleSymbols {
                     Math.max(0, function.getLineno() - 1), function.getCol_offset(),
                     container,
                     signatureOf(function),
-                    docstringOf(function.getInternalBody())));
+                    docstringOf(function.getInternalBody()),
+                    decoratorsOf(function)));
             } else if (statement instanceof ClassDef klass) {
                 symbols.add(new Symbol(
                     klass.getInternalName(), SymbolKind.CLASS,
@@ -310,6 +339,43 @@ public final class ModuleSymbols {
     }
 
     /** {@code name(a, b=..., *args, **kwargs)} reconstructed from the AST. */
+    /**
+     * The names of a {@code def}'s decorators, in source order.
+     *
+     * <p>Three shapes reach here and all three are one name to a reader:
+     * {@code @test} (a {@code Name}), {@code @skip('why')} (a {@code Call} whose
+     * function is one), and {@code @scriptide.test} (an {@code Attribute}).
+     * Anything else — a decorator built by an expression — records nothing rather
+     * than a guess.</p>
+     */
+    static List<String> decoratorsOf(FunctionDef function) {
+        List<expr> decorators = function.getInternalDecorator_list();
+        if (decorators == null || decorators.isEmpty()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (expr decorator : decorators) {
+            String name = decoratorName(decorator);
+            if (name != null) {
+                out.add(name);
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private static String decoratorName(expr node) {
+        if (node instanceof Call call) {
+            return decoratorName(call.getInternalFunc());
+        }
+        if (node instanceof Name name) {
+            return name.getInternalId();
+        }
+        if (node instanceof Attribute attribute) {
+            return attribute.getInternalAttr();
+        }
+        return null;
+    }
+
     static String signatureOf(FunctionDef function) {
         StringBuilder sb = new StringBuilder(function.getInternalName()).append('(');
         var args = function.getInternalArgs();

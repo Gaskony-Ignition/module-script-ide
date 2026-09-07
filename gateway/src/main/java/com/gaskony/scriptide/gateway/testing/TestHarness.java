@@ -1,26 +1,45 @@
 package com.gaskony.scriptide.gateway.testing;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+
 /**
- * The Jython that actually runs the tests. A CONSTANT.
+ * What the gateway executes to run a project's tests.
  *
- * <h2>Nothing the user typed is concatenated into it</h2>
+ * <p>Three pieces: a flat driver held here as a constant, and two Jython source
+ * files carried as resources — {@code scriptide.py}, the helpers a test module
+ * imports, and {@code runner.py}, the loop. The driver seeds the first into
+ * {@code sys.modules} and executes the second.</p>
  *
- * <p>Same rule as {@code NamedQueryTestRouteHandler}, and for the same reason:
- * the selected tests arrive as a LIST seeded into the execution's namespace, not
- * as generated Python. A module called {@code x'); import os; os.system('} is a
- * name Ignition will accept, and the only defence that keeps working when
- * somebody adds a feature later is that there is no string formatting in this
- * path at all.</p>
+ * <h2>Nothing the user typed is concatenated into any of it</h2>
  *
- * <h2>Why it is written flat</h2>
+ * <p>The selected tests arrive as a LIST seeded into the execution's namespace,
+ * and each test module's source arrives as a DICT beside it. A module called
+ * {@code x'); import os; os.system('} is a name Ignition will accept, and the
+ * only defence that keeps working when somebody adds a feature later is that
+ * there is no string formatting in this path at all.</p>
  *
- * <p>No {@code def}, anywhere. This module executes a script with ONE namespace
- * serving as both locals and globals — see the two-dict trap recorded in
- * {@code PrivateStateRunner} — and a function body defined here would not see
- * the module-level names it needs. Everything is therefore a module-level
- * statement, including the loop over the tests.</p>
+ * <h2>Why the driver is written flat</h2>
  *
- * <h2>Three outcomes, and the difference between two of them matters</h2>
+ * <p>No {@code def}, anywhere in {@link #SOURCE}. This module executes a script
+ * with ONE namespace serving as both locals and globals — see the two-dict trap
+ * recorded in {@code PrivateStateRunner} — and a function body defined here would
+ * not see the module-level names it needs. The loop that needs functions lives in
+ * {@code runner.py}, which is executed into a namespace of its own where
+ * {@code def} behaves normally.</p>
+ *
+ * <h2>The private builtins table is handed on, and that is load-bearing</h2>
+ *
+ * <p>Both files are executed with the driver's own {@code __builtins__}, which is
+ * the per-run copy whose {@code __import__} restores the thread's system state
+ * (see {@code PrivateStateRunner.installImportHook}). A test module executed with
+ * anything else would move the thread onto the platform's state on its first
+ * project-library import and lose every subsequent line of output — the 1.19.0
+ * defect, reached by a different door.</p>
+ *
+ * <h2>Four outcomes, and the difference between two of them matters</h2>
  *
  * <ul>
  *   <li>{@code pass} — the function returned.</li>
@@ -30,6 +49,7 @@ package com.gaskony.scriptide.gateway.testing;
  *       to have an opinion, and the first one of these usually explains the rest.
  *       A runner that reported both as "failed" would send you to read an
  *       assertion that never executed.</li>
+ *   <li>{@code skip} — it carries {@code @skip} and was not called.</li>
  * </ul>
  *
  * <h2>A Stop is not caught</h2>
@@ -37,10 +57,11 @@ package com.gaskony.scriptide.gateway.testing;
  * <p>The handlers are {@code except AssertionError} and {@code except Exception},
  * never a bare {@code except:}. A Stop, and the execution timeout that uses the
  * same mechanism, arrive as a Java {@code Error} — which is a {@code Throwable}
- * and not an {@code Exception}, so it passes straight through this loop and ends
+ * and not an {@code Exception}, so it passes straight through the loop and ends
  * the run, exactly as it does in the console. A bare {@code except:} would swallow
  * it and calmly carry on to the next test, which is how a Stop button comes to do
- * nothing while appearing to work.</p>
+ * nothing while appearing to work. {@code assertRaises} obeys the same rule: its
+ * {@code __exit__} suppresses only the class it was asked about.</p>
  *
  * <h2>Each test's output is its own — and NOT by swapping {@code sys.stdout}</h2>
  *
@@ -50,50 +71,40 @@ package com.gaskony.scriptide.gateway.testing;
  * inside a PROJECT LIBRARY function does not consult the {@code sys.stdout} the
  * calling script can see: with the swap in place the text reached neither the
  * buffer nor the execution's stream — it vanished — and with no swap at all the
- * same print streamed perfectly. Two probes against the running gateway,
- * reporting through an exception message because the thing under test was the
- * output path itself.</p>
+ * same print streamed perfectly.</p>
  *
- * <p>So nothing is redirected. The harness writes a MARKER around each test on
- * the ordinary stream, and the Java side splits the streamed output on those
- * markers to attribute it. The marker carries a per-run nonce generated in Java,
- * so a test that prints something marker-shaped cannot forge a boundary.</p>
+ * <p>So nothing is redirected. The runner writes a MARKER around each test on the
+ * ordinary stream, and the Java side splits the streamed output on those markers
+ * to attribute it. The marker carries a per-run nonce generated in Java, so a test
+ * that prints something marker-shaped cannot forge a boundary.</p>
  *
  * <h2>Two passes, a re-assert and a flush — all three measured, all three needed</h2>
  *
  * <p>Getting a test's own output back took three separate findings on 8.3.8, and
  * each of them fails SILENTLY: the run reports success and the output is simply
- * gone. They are listed with what proves them, because the obvious edit to any
- * one of them puts the bug straight back.</p>
+ * gone. They live in {@code runner.py} and in the tail of {@link #SOURCE}, and the
+ * obvious edit to any one of them puts the bug straight back.</p>
  *
  * <ol>
- *   <li><b>Every import happens in pass one, before any output.</b> Writing to
+ *   <li><b>Every module is prepared in pass one, before any output.</b> Writing to
  *       {@code sys.stdout} and then importing a project library module loses the
  *       whole execution's output — not just the buffered write, everything after
- *       it too. Import first and the identical sequence works. So pass one
- *       imports and resolves and prints nothing; pass two writes markers and
- *       runs.</li>
- *   <li><b>The private state is re-asserted after the imports.</b> An import of a
- *       project library module leaves the THREAD's {@code PySystemState}
- *       pointing at the platform's, so {@code print} — which resolves stdout
- *       through {@code Py.getSystemState()} — goes to the gateway's own console
- *       from then on. Explicit {@code sys.stdout.write} kept working the whole
- *       time, and that asymmetry is what made it visible: a captured write
- *       beside a missing print means the two are resolving different objects.
- *       {@code Py.setSystemState(sys)} from Jython puts it back.</li>
- *   <li><b>The harness flushes its own streams at the end.</b> Jython buffers
+ *       it too.</li>
+ *   <li><b>The private state is re-asserted after that pass.</b> Resolving an
+ *       import of a project library module leaves the THREAD's
+ *       {@code PySystemState} pointing at the platform's, so {@code print} — which
+ *       resolves stdout through {@code Py.getSystemState()} — goes to the
+ *       gateway's own console from then on. Explicit {@code sys.stdout.write} kept
+ *       working the whole time, and that asymmetry is what made it visible.</li>
+ *   <li><b>The driver flushes its own streams at the end.</b> Jython buffers
  *       {@code sys.stdout}; on this path the runner's tail-flush does not reach
  *       that buffer, and without an explicit flush the capture came back
  *       completely empty. The script console never showed any of this, because a
  *       socket run has a periodic pump and a batch run does not.</li>
  * </ol>
  *
- * <p>One visible consequence of (1): a module's import-time output belongs to no
- * test and is dropped. That is the right answer anyway — it is not something a
- * test wrote.</p>
- *
- * <p>The cost, stated because it is real: attribution is positional, so anything
- * a BACKGROUND thread a test started prints after that test ends is attributed to
+ * <p>The cost, stated because it is real: attribution is positional, so anything a
+ * BACKGROUND thread a test started prints after that test ends is attributed to
  * whichever test is running then. A test that leaves threads behind has a bigger
  * problem than its output labelling.</p>
  */
@@ -104,6 +115,15 @@ public final class TestHarness {
     /** The list of {@code [module, class, function, id]} entries to run. */
     public static final String VAR_TESTS = "_scriptide_test_specs";
 
+    /**
+     * {@code {module name: source}} for every module holding a selected test.
+     *
+     * <p>The runner executes these rather than importing them, which is what makes
+     * the namespace private to the run — see {@code runner.py}. A module missing
+     * from this dict is imported instead, and a mock inside it then refuses rather
+     * than writing into the gateway's shared copy.</p>
+     */
+    public static final String VAR_SOURCES = "_scriptide_test_sources";
 
     /** Where the JSON result is left for the handler to read. */
     public static final String VAR_RESULT = "_scriptide_test_result";
@@ -117,107 +137,76 @@ public final class TestHarness {
      */
     public static final String VAR_MARKER = "_scriptide_test_marker";
 
+    /** The module name a test file imports the helpers from. */
+    public static final String HELPER_MODULE = "scriptide";
 
-    /** The harness, as one flat script. */
+    /** The import line the panel shows, so the helpers are discoverable at all. */
+    public static final String HELPER_IMPORT =
+        "from scriptide import test, assertEquals, mockTags";
+
+    /** {@code scriptide.py} — the helpers a test module imports. */
+    public static final String HELPER_SOURCE = load("scriptide.py");
+
+    /** {@code runner.py} — the loop, executed into a namespace of its own. */
+    public static final String RUNNER_SOURCE = load("runner.py");
+
+    /**
+     * Read one of the Jython resources, or fail at class initialisation.
+     *
+     * <p>Loudly, because the alternative is a module that builds, signs, installs
+     * and then cannot run a test — the failure class already recorded for this
+     * estate, where a green build shipped a {@code .modl} missing a file nobody
+     * had asserted was in it. {@code ModuleJarPackagingTest} asserts both are
+     * present in the built artefact for the same reason.</p>
+     */
+    private static String load(String name) {
+        try (InputStream in = TestHarness.class.getResourceAsStream(name)) {
+            if (in == null) {
+                throw new IllegalStateException(
+                    "The Script IDE test resource " + name + " is not on the classpath. "
+                        + "The module was packaged without it.");
+            }
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not read the test resource " + name, e);
+        }
+    }
+
+    /**
+     * The driver, as one flat script.
+     *
+     * <p>It seeds the helper module, executes the runner, and leaves the result as
+     * JSON. Everything with a {@code def} in it is in the two resources.</p>
+     */
     public static final String SOURCE = String.join("\n",
-        "import json as _si_json",
         "import sys as _si_sys",
-        "import time as _si_time",
-        "import traceback as _si_tb",
+        "import json as _si_json",
+        "import imp as _si_imp",
         "",
-        "_si_results = []",
-        "_si_modules = {}",
-        "_si_prepared = []",
+        // The helpers, as a real module in sys.modules, so a test module's
+        // `from scriptide import ...` resolves without touching disk. sys.modules
+        // here is the run's own COPY of the manager's map (see
+        // PrivateStateRunner.applyModuleRegistry), so this does not add a module
+        // to the gateway: it is gone when the run ends.
+        "_si_api = _si_imp.new_module('" + HELPER_MODULE + "')",
+        "_si_api.__dict__['__builtins__'] = __builtins__",
+        "exec compile(_si_helper_source, '<scriptide:scriptide.py>', 'exec') "
+            + "in _si_api.__dict__",
+        "_si_sys.modules['" + HELPER_MODULE + "'] = _si_api",
         "",
-        // ---- PASS ONE: import and resolve. NOTHING is printed in this loop.
-        // See the class Javadoc: a write to stdout before an import loses the
-        // whole execution's output, silently.
-        "for _si_spec in " + VAR_TESTS + ":",
-        "    _si_entry = {'spec': _si_spec, 'call': None, 'setup': None,",
-        "                 'teardown': None, 'status': 'pass', 'message': '', 'trace': ''}",
-        "    try:",
-        "        _si_module = _si_spec[0]",
-        "        if _si_module in _si_modules:",
-        "            _si_target_module = _si_modules[_si_module]",
-        "        else:",
-        "            _si_target_module = __import__(_si_module, {}, {}, ['*'])",
-        "            _si_modules[_si_module] = _si_target_module",
-        "        _si_entry['setup'] = getattr(_si_target_module, '"
-            + TestDiscovery.SETUP_NAME + "', None)",
-        "        _si_entry['teardown'] = getattr(_si_target_module, '"
-            + TestDiscovery.TEARDOWN_NAME + "', None)",
-        "        if _si_spec[1]:",
-        "            _si_owner = getattr(_si_target_module, _si_spec[1])()",
-        "            _si_entry['call'] = getattr(_si_owner, _si_spec[2])",
-        "        else:",
-        "            _si_entry['call'] = getattr(_si_target_module, _si_spec[2])",
-        "    except Exception, _si_error:",
-        // A module that will not import is an ERROR for every test in it, and it
-        // is reported per test rather than as one failure of the run: the
-        // panel's row is where a reader looks.
-        "        _si_entry['status'] = 'error'",
-        "        _si_entry['message'] = _si_error.__class__.__name__ + ': ' + str(_si_error)",
-        "        _si_entry['trace'] = _si_tb.format_exc()",
-        "    _si_prepared.append(_si_entry)",
+        // The runner, in a namespace of its own so its `def`s behave normally.
+        // __builtins__ is handed on deliberately: it is the per-run copy whose
+        // __import__ restores the thread's system state.
+        "_si_runner = {}",
+        "_si_runner['__name__'] = '_scriptide_runner'",
+        "_si_runner['__builtins__'] = __builtins__",
+        "exec compile(_si_runner_source, '<scriptide:runner.py>', 'exec') in _si_runner",
         "",
-        // RE-ASSERT THE PRIVATE STATE. Importing a project library module
-        // leaves the thread's PySystemState pointing at the PLATFORM's, so from
-        // here on `print` — which resolves stdout through Py.getSystemState()
-        // rather than through the `sys` this script can see — writes to the
-        // gateway's own console and not to this execution's capture. Explicit
-        // sys.stdout.write kept working throughout, which is what made the
-        // difference visible: with the write captured and the print missing,
-        // the two must be resolving different objects. Guarded, because a
-        // gateway that will not hand out org.python.core should lose output
-        // rather than lose the run.
-        "try:",
-        "    from org.python.core import Py as _si_Py",
-        "    _si_Py.setSystemState(_si_sys)",
-        "except Exception:",
-        "    pass",
-        "",
-        // ---- PASS TWO: markers, and the actual runs.
-        "for _si_entry in _si_prepared:",
-        "    _si_spec = _si_entry['spec']",
-        "    _si_id = _si_spec[3]",
-        "    _si_status = _si_entry['status']",
-        "    _si_message = _si_entry['message']",
-        "    _si_trace = _si_entry['trace']",
-        "    _si_started = _si_time.time()",
-        "    _si_sys.stdout.write(" + VAR_MARKER + " + '>' + _si_id + chr(10))",
-        "    if _si_entry['call'] is not None:",
-        "        try:",
-        "            if _si_entry['setup'] is not None:",
-        "                _si_entry['setup']()",
-        // tearDown runs even when the test raises, which is the whole reason
-        // anyone writes one. It is NOT inside the except clauses below: a
-        // teardown that runs only on success leaks exactly when it matters.
-        "            try:",
-        "                _si_entry['call']()",
-        "            finally:",
-        "                if _si_entry['teardown'] is not None:",
-        "                    _si_entry['teardown']()",
-        "        except AssertionError, _si_error:",
-        "            _si_status = 'fail'",
-        "            _si_message = str(_si_error)",
-        "            if not _si_message:",
-        "                _si_message = 'assertion failed'",
-        "            _si_trace = _si_tb.format_exc()",
-        "        except Exception, _si_error:",
-        "            _si_status = 'error'",
-        "            _si_message = _si_error.__class__.__name__ + ': ' + str(_si_error)",
-        "            _si_trace = _si_tb.format_exc()",
-        "    _si_sys.stdout.write(" + VAR_MARKER + " + '<' + chr(10))",
-        "    _si_elapsed = int((_si_time.time() - _si_started) * 1000)",
-        "    _si_results.append({",
-        "        'id': _si_id,",
-        "        'module': _si_spec[0],",
-        "        'function': _si_spec[2],",
-        "        'status': _si_status,",
-        "        'message': _si_message,",
-        "        'traceback': _si_trace,",
-        "        'elapsedMs': _si_elapsed})",
-        "",
+        // globals(), not a bare name: a gateway that hands out no `system` should
+        // run the tests and let them fail on their own terms, not fail to start.
+        "_si_system = globals().get('system')",
+        "_si_results = _si_runner['run'](" + VAR_TESTS + ", " + VAR_SOURCES + ", "
+            + VAR_MARKER + ", _si_system)",
         VAR_RESULT + " = _si_json.dumps({'results': _si_results})",
         // FLUSH FROM INSIDE. Jython buffers sys.stdout, and the runner's own
         // tail-flush does not reach this buffer on this path: without these two
@@ -227,6 +216,12 @@ public final class TestHarness {
         "_si_sys.stdout.flush()",
         "_si_sys.stderr.flush()",
         "");
+
+    /** Where {@link #HELPER_SOURCE} is seeded for {@link #SOURCE} to compile. */
+    public static final String VAR_HELPER_SOURCE = "_si_helper_source";
+
+    /** Where {@link #RUNNER_SOURCE} is seeded for {@link #SOURCE} to compile. */
+    public static final String VAR_RUNNER_SOURCE = "_si_runner_source";
 
     /**
      * Split streamed output into what each test produced.

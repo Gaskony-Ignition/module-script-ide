@@ -4,6 +4,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.python.antlr.ast.FunctionDef;
+import org.python.antlr.ast.Num;
+import org.python.antlr.base.expr;
+import org.python.antlr.base.stmt;
+import org.python.antlr.runtime.Token;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -124,5 +131,74 @@ class ModuleSymbolsTest {
         ModuleSymbols m = ModuleSymbols.parse("m", "def f():\n\treturn 1");
         assertThat(m.syntaxError()).isEmpty();
         assertThat(m.find("f")).isPresent();
+    }
+
+    // ==================== decoratorsOf ====================
+
+    @Test
+    @DisplayName("@test (a Name) records its bare name")
+    void decoratorAsName() {
+        ModuleSymbols m = ModuleSymbols.parse("m", "@test\ndef check_totals():\n\tpass\n");
+        var f = m.find("check_totals").orElseThrow();
+        assertThat(f.decorators()).containsExactly("test");
+        assertThat(f.hasDecorator("test")).isTrue();
+        assertThat(f.hasDecorator("skip")).isFalse();
+    }
+
+    @Test
+    @DisplayName("@skip('why') (a Call) records the name of the thing being called")
+    void decoratorAsCall() {
+        ModuleSymbols m = ModuleSymbols.parse("m", "@skip('why')\ndef check_totals():\n\tpass\n");
+        assertThat(m.find("check_totals").orElseThrow().decorators()).containsExactly("skip");
+    }
+
+    @Test
+    @DisplayName("@scriptide.test (an Attribute) records the LAST segment")
+    void decoratorAsAttributeKeepsLastSegment() {
+        ModuleSymbols m = ModuleSymbols.parse("m", "@scriptide.test\ndef check_totals():\n\tpass\n");
+        // Whatever the module was imported as, a reader means "the test decorator" —
+        // the dotted prefix is how it was reached, not part of its name.
+        assertThat(m.find("check_totals").orElseThrow().decorators()).containsExactly("test");
+    }
+
+    @Test
+    @DisplayName("several decorators on one def are recorded in source order")
+    void decoratorsRecordedInSourceOrder() {
+        ModuleSymbols m = ModuleSymbols.parse("m",
+            "@skip('why')\n@test\n@scriptide.cases\ndef check_totals():\n\tpass\n");
+        assertThat(m.find("check_totals").orElseThrow().decorators())
+            .containsExactly("skip", "test", "cases");
+    }
+
+    @Test
+    @DisplayName("a def with no decorators records an empty list, never null")
+    void noDecoratorsIsEmptyNotNull() {
+        ModuleSymbols m = ModuleSymbols.parse("m", "def plain():\n\tpass\n");
+        assertThat(m.find("plain").orElseThrow().decorators()).isNotNull().isEmpty();
+    }
+
+    @Test
+    @DisplayName("only functions and methods can carry a decorator — a class and a "
+        + "module variable record none")
+    void classAndVariableRecordNoDecorators() {
+        ModuleSymbols m = ModuleSymbols.parse("m", "CONSTANT = 1\n\nclass Widget:\n\tpass\n");
+        assertThat(m.find("CONSTANT").orElseThrow().decorators()).isEmpty();
+        var widget = m.symbols().stream().filter(s -> s.name().equals("Widget")).findFirst()
+            .orElseThrow();
+        assertThat(widget.decorators()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a decorator built by an expression that is none of the three known "
+        + "shapes records nothing rather than a guess")
+    void unknownDecoratorShapeRecordsNothing() {
+        // The Jython 2 grammar accepts only a dotted name, optionally called, as a
+        // decorator — @(1+2) and its like are a syntax error (measured against the
+        // actual parser), so this shape can only be reached by handing decoratorsOf
+        // an AST built directly, never by parsing real source.
+        expr bogusDecorator = new Num((Token) null, Integer.valueOf(1));
+        FunctionDef function = new FunctionDef((Token) null, "odd", null,
+            List.<stmt>of(), List.<expr>of(bogusDecorator));
+        assertThat(ModuleSymbols.decoratorsOf(function)).isEmpty();
     }
 }

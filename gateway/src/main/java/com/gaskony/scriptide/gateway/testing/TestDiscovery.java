@@ -43,13 +43,25 @@ import java.util.TreeMap;
  * the module that holds it, and a timer script is not importable. A gateway event
  * script cannot hold a test because there is no way to call one.</p>
  *
+ * <h2>The decorator widens the FUNCTION rule, never the module rule</h2>
+ *
+ * <p>{@code @test} marks a function whose name does not begin {@code test_},
+ * and {@code @cases} implies it. Both are still only looked for inside a test
+ * module, so the discovery hazard above is untouched: a decorator has to be
+ * written on purpose, and it cannot be written in a module the rule does not
+ * already admit.</p>
+ *
  * <h2>Setup and teardown</h2>
  *
  * <p>A module may define {@code setUp} and {@code tearDown} at the top level;
  * they run around EACH test in that module, which is the {@code unittest}
- * meaning of those names and therefore the one a reader already has. They are
- * discovered here so the runner does not have to guess whether calling them
- * would raise {@code NameError}.</p>
+ * meaning of those names and therefore the one a reader already has. Since
+ * 1.21.0 the same brackets can be written as {@code @beforeEach} /
+ * {@code @afterEach}, with {@code @beforeAll} / {@code @afterAll} running once
+ * per module. The old names keep working and are the fallback, because a project
+ * written against the previous runner must not stop working because a decorator
+ * now exists. They are discovered here so the runner does not have to guess
+ * whether calling one would raise {@code NameError}.</p>
  */
 public final class TestDiscovery {
 
@@ -61,10 +73,32 @@ public final class TestDiscovery {
     /** @see #SETUP_NAME */
     public static final String TEARDOWN_NAME = "tearDown";
 
+    /** Marks a function as a test whatever it is called. */
+    public static final String DECORATOR_TEST = "test";
+
+    /** Parameterises a test, and implies {@link #DECORATOR_TEST}. */
+    public static final String DECORATOR_CASES = "cases";
+
+    /** Listed, reported, never called. */
+    public static final String DECORATOR_SKIP = "skip";
+
+    /** The four brackets, in the order the runner applies them. */
+    public static final String DECORATOR_BEFORE_ALL = "beforeAll";
+
+    /** @see #DECORATOR_BEFORE_ALL */
+    public static final String DECORATOR_AFTER_ALL = "afterAll";
+
+    /** @see #DECORATOR_BEFORE_ALL */
+    public static final String DECORATOR_BEFORE_EACH = "beforeEach";
+
+    /** @see #DECORATOR_BEFORE_ALL */
+    public static final String DECORATOR_AFTER_EACH = "afterEach";
+
     /** The convention, in one sentence, for the panel to show. */
     public static final String CONVENTION =
-        "A test is a top-level def test_* (or a test_* method on a class named Test*) "
-        + "in a module whose last name starts with 'test' or that sits under a 'tests' package.";
+        "A test is a top-level def test_* (or a test_* method on a class named Test*, "
+        + "or any function marked @test) in a module whose last name starts with 'test' "
+        + "or that sits under a 'tests' package.";
 
     /**
      * One discovered test.
@@ -74,7 +108,8 @@ public final class TestDiscovery {
      * @param function the function name
      * @param line     0-based, for click-to-open
      */
-    public record TestCase(String module, String className, String function, int line) {
+    public record TestCase(String module, String className, String function, int line,
+                           boolean decorated, boolean skipped) {
 
         /** How the runner and the UI both name it: {@code module.Class.function}. */
         public String id() {
@@ -86,6 +121,8 @@ public final class TestDiscovery {
 
     /** A module holding tests, with what brackets them. */
     public record TestModule(String module, boolean hasSetUp, boolean hasTearDown,
+                             boolean hasBeforeAll, boolean hasAfterAll,
+                             boolean hasBeforeEach, boolean hasAfterEach,
                              List<TestCase> tests) {
 
         /** Defensive copy: a record's list component is otherwise shared with its caller. */
@@ -134,25 +171,46 @@ public final class TestDiscovery {
             List<TestCase> tests = new ArrayList<>();
             boolean setUp = false;
             boolean tearDown = false;
+            boolean beforeAll = false;
+            boolean afterAll = false;
+            boolean beforeEach = false;
+            boolean afterEach = false;
             for (ModuleSymbols.Symbol symbol : symbols.symbols()) {
                 if (symbol.container() == null
                     && symbol.kind() == ModuleSymbols.SymbolKind.FUNCTION) {
-                    if (SETUP_NAME.equals(symbol.name())) {
-                        setUp = true;
-                    } else if (TEARDOWN_NAME.equals(symbol.name())) {
-                        tearDown = true;
-                    } else if (isTestName(symbol.name())) {
-                        tests.add(new TestCase(moduleName, null, symbol.name(), symbol.line()));
+                    if (symbol.hasDecorator(DECORATOR_BEFORE_ALL)) {
+                        beforeAll = true;
+                    }
+                    if (symbol.hasDecorator(DECORATOR_AFTER_ALL)) {
+                        afterAll = true;
+                    }
+                    if (symbol.hasDecorator(DECORATOR_BEFORE_EACH)) {
+                        beforeEach = true;
+                    }
+                    if (symbol.hasDecorator(DECORATOR_AFTER_EACH)) {
+                        afterEach = true;
+                    }
+                    // A bracket is not a test, however it is spelled. Checked
+                    // before the test rule so `@beforeEach def test_data()` is a
+                    // fixture and not something the Run button calls twice.
+                    if (isBracket(symbol)) {
+                        setUp = setUp || SETUP_NAME.equals(symbol.name());
+                        tearDown = tearDown || TEARDOWN_NAME.equals(symbol.name());
+                        continue;
+                    }
+                    if (isTest(symbol)) {
+                        tests.add(testCase(moduleName, null, symbol));
                     }
                 } else if (symbol.kind() == ModuleSymbols.SymbolKind.METHOD
                     && testClasses.contains(symbol.container())
-                    && isTestName(symbol.name())) {
-                    tests.add(new TestCase(moduleName, symbol.container(), symbol.name(),
-                        symbol.line()));
+                    && isTest(symbol)) {
+                    tests.add(testCase(moduleName, symbol.container(), symbol));
                 }
             }
             if (!tests.isEmpty()) {
-                out.add(new TestModule(moduleName, setUp, tearDown, List.copyOf(tests)));
+                out.add(new TestModule(moduleName, setUp, tearDown,
+                    beforeAll, afterAll, beforeEach || setUp, afterEach || tearDown,
+                    List.copyOf(tests)));
             }
         }
         return List.copyOf(out);
@@ -184,5 +242,37 @@ public final class TestDiscovery {
     /** Whether a function name is a test. {@code test_} or bare {@code test}. */
     public static boolean isTestName(String name) {
         return name != null && (name.startsWith("test_") || "test".equals(name));
+    }
+
+    /** Whether a symbol is a test: by its name, or because it is marked one. */
+    static boolean isTest(ModuleSymbols.Symbol symbol) {
+        return isTestName(symbol.name())
+            || symbol.hasDecorator(DECORATOR_TEST)
+            || symbol.hasDecorator(DECORATOR_CASES);
+    }
+
+    /**
+     * Whether a symbol is one of the four brackets rather than a test.
+     *
+     * <p>The old names count only when they are the whole story: a function
+     * called {@code setUp} that also carries {@code @test} is being asked to be a
+     * test, and honouring the name over the decorator would silently drop it.</p>
+     */
+    static boolean isBracket(ModuleSymbols.Symbol symbol) {
+        if (symbol.hasDecorator(DECORATOR_TEST) || symbol.hasDecorator(DECORATOR_CASES)) {
+            return false;
+        }
+        return SETUP_NAME.equals(symbol.name())
+            || TEARDOWN_NAME.equals(symbol.name())
+            || symbol.hasDecorator(DECORATOR_BEFORE_ALL)
+            || symbol.hasDecorator(DECORATOR_AFTER_ALL)
+            || symbol.hasDecorator(DECORATOR_BEFORE_EACH)
+            || symbol.hasDecorator(DECORATOR_AFTER_EACH);
+    }
+
+    private static TestCase testCase(String moduleName, String className,
+                                     ModuleSymbols.Symbol symbol) {
+        return new TestCase(moduleName, className, symbol.name(), symbol.line(),
+            !isTestName(symbol.name()), symbol.hasDecorator(DECORATOR_SKIP));
     }
 }

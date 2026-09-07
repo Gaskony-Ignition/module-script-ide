@@ -175,4 +175,125 @@ class TestDiscoveryTest {
         assertThat(found).extracting(TestDiscovery.TestModule::module)
             .containsExactly("alpha.test_a", "zulu.test_z");
     }
+
+    // ==================== The decorator, inside a test module ====================
+
+    @Test
+    @DisplayName("@test marks a function as a test although its name doesn't start with test_")
+    void atTestDecoratorMarksFunction() {
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.test_totals", "@test\ndef check_totals():\n    pass\n"));
+
+        assertThat(found).hasSize(1);
+        TestDiscovery.TestCase test = found.get(0).tests().get(0);
+        assertThat(test.function()).isEqualTo("check_totals");
+        assertThat(test.decorated()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a plain test_-named function reports decorated == false")
+    void plainTestNameIsNotDecorated() {
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.test_totals", "def test_x():\n    pass\n"));
+        assertThat(found.get(0).tests().get(0).decorated()).isFalse();
+    }
+
+    @Test
+    @DisplayName("@cases implies @test, so a @cases-only function is discovered")
+    void casesImpliesTest() {
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.test_totals", "@cases([1, 2, 3])\ndef check_each(n):\n    pass\n"));
+
+        assertThat(found).hasSize(1);
+        assertThat(found.get(0).tests()).extracting(TestDiscovery.TestCase::function)
+            .containsExactly("check_each");
+    }
+
+    @Test
+    @DisplayName("@test does NOT widen the module rule — an ordinary module still finds nothing")
+    void decoratorDoesNotWidenModuleRule() {
+        // The load-bearing case: @test only widens which FUNCTIONS count inside a
+        // module the rule already admits. Written in an ordinary module it must not
+        // turn that module into a test module — that is exactly the discovery hazard
+        // the whole convention exists to avoid.
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.totals", "@test\ndef check_totals():\n    pass\n"));
+        assertThat(found).isEmpty();
+    }
+
+    @Test
+    @DisplayName("@skip is listed, not omitted — skipping is a run outcome, not an absence")
+    void skipIsListedNotOmitted() {
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.test_totals", "@skip('flaky')\ndef test_sums():\n    pass\n"));
+
+        assertThat(found).hasSize(1);
+        TestDiscovery.TestCase test = found.get(0).tests().get(0);
+        assertThat(test.function()).isEqualTo("test_sums");
+        assertThat(test.skipped()).isTrue();
+    }
+
+    @Test
+    @DisplayName("the four brackets set their module flags and are not themselves discovered")
+    void bracketDecoratorsSetModuleFlags() {
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.test_totals",
+            "@beforeAll\ndef prepare():\n    pass\n\n"
+                + "@afterAll\ndef cleanup():\n    pass\n\n"
+                + "@beforeEach\ndef reset():\n    pass\n\n"
+                + "@afterEach\ndef verify():\n    pass\n\n"
+                + "def test_a():\n    pass\n"));
+
+        TestDiscovery.TestModule module = found.get(0);
+        assertThat(module.hasBeforeAll()).isTrue();
+        assertThat(module.hasAfterAll()).isTrue();
+        assertThat(module.hasBeforeEach()).isTrue();
+        assertThat(module.hasAfterEach()).isTrue();
+        assertThat(module.tests()).extracting(TestDiscovery.TestCase::function)
+            .containsExactly("test_a");
+    }
+
+    @Test
+    @DisplayName("setUp/tearDown still work, and now also imply beforeEach/afterEach")
+    void setUpTearDownImplyBeforeAndAfterEach() {
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.test_totals",
+            "def setUp():\n    pass\n\ndef tearDown():\n    pass\n\ndef test_a():\n    pass\n"));
+
+        TestDiscovery.TestModule module = found.get(0);
+        assertThat(module.hasSetUp()).isTrue();
+        assertThat(module.hasTearDown()).isTrue();
+        assertThat(module.hasBeforeEach()).isTrue();
+        assertThat(module.hasAfterEach()).isTrue();
+        // Nothing wrote @beforeAll/@afterAll, so those stay false.
+        assertThat(module.hasBeforeAll()).isFalse();
+        assertThat(module.hasAfterAll()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a setUp that also carries @test is a test, not a bracket")
+    void testDecoratorOverridesSetUpName() {
+        // Honouring the name over the decorator would silently drop a function
+        // someone explicitly asked to be a test.
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.test_totals", "@test\ndef setUp():\n    pass\n"));
+
+        TestDiscovery.TestModule module = found.get(0);
+        assertThat(module.hasSetUp()).isFalse();
+        assertThat(module.tests()).extracting(TestDiscovery.TestCase::function)
+            .containsExactly("setUp");
+    }
+
+    @Test
+    @DisplayName("@test on a method of a Test* class is discovered with the class name")
+    void atTestMethodOnTestClass() {
+        List<TestDiscovery.TestModule> found = TestDiscovery.discover(project(
+            "orders.test_totals",
+            "class TestTotals:\n    @test\n    def check_totals(self):\n        pass\n"));
+
+        TestDiscovery.TestCase test = found.get(0).tests().get(0);
+        assertThat(test.className()).isEqualTo("TestTotals");
+        assertThat(test.function()).isEqualTo("check_totals");
+        assertThat(test.id()).isEqualTo("orders.test_totals.TestTotals.check_totals");
+    }
 }
