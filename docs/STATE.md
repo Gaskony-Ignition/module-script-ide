@@ -1602,9 +1602,12 @@ gutter marker.
   module — `Gaskony-Ignition/module-git` already exists. git is driven from the
   terminal's command line, and any UI added later is VS Code-shaped status and
   diffs on top of that, not a second implementation.
-- **Tag Change attribute writes are still refused**, because that Designer
-  workspace has never been measured. Its tag-path list is the missing piece, and
-  guessing the key would write a value the Designer never reads.
+- **Tag Change is no longer a gap.** It sat here from 1.1.0 to 1.16.0 waiting on
+  a measurement; the workspace was driven on 06/09/2026 and `paths` /
+  `changeTypes` / `enabled` are editable, with `changeTypes` on an allowlist. See
+  "Tag Change, measured off the real Designer" below. Kept here because the entry
+  outlived the gap by three releases, which is how a doc comes to describe a
+  product that no longer exists.
 - **Git**: own repo, private at `Gaskony-Ignition/module-script-ide`. Tagged
   `v1.0.0`–`v1.5.4` (01–02/09/2026) and `v1.7.0`–`v1.14.4` (05/09/2026,
   retroactively — the tag dates are the day they were written, the commit dates
