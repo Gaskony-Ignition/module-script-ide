@@ -233,7 +233,13 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
                     return target.isEmpty()
                         ? ctx.getScriptManager()
                         : ctx.getProjectManager().getProjectScriptManager(target);
-                }, index, target.isEmpty() ? null : target);
+                }, index, target.isEmpty() ? null : target,
+                    // Group 3 (the borrowed-ideas brief §3): live tag-path
+                    // and database-schema completion. Read from the registry
+                    // rather than captured once, same reasoning as the
+                    // ScriptManager supplier above — both are rebuilt if the
+                    // module ever re-initialises.
+                    ScriptIdeSocketRegistry.getTagBrowser(), ScriptIdeSocketRegistry.getDbSchema());
                 // Diagnostics are server-initiated, so the server needs a way to
                 // push a frame rather than only answering requests.
                 server.setNotifier(notification -> sendOn("lsp", notification));

@@ -201,4 +201,55 @@ class ModuleSymbolsTest {
             List.<stmt>of(), List.<expr>of(bogusDecorator));
         assertThat(ModuleSymbols.decoratorsOf(function)).isEmpty();
     }
+
+    @Test
+    @DisplayName("a PEP 263 coding declaration does not make the whole file a syntax error")
+    void codingDeclarationParses() {
+        // Measured 07/09/2026: a StringReader is Unicode text, and Jython refuses
+        // a coding declaration in one — "encoding declaration in Unicode string".
+        // Untreated, a file with an ordinary `# -*- coding: utf-8 -*-` header got
+        // a red mark on line 1 about nothing in its own code, was skipped by test
+        // discovery, and contributed nothing to the outline.
+        ModuleSymbols symbols = ModuleSymbols.parse("m",
+            "# -*- coding: utf-8 -*-\nimport os\n\ndef helper():\n\treturn os\n");
+
+        assertThat(symbols.syntaxError()).isEmpty();
+        assertThat(symbols.symbols()).extracting(ModuleSymbols.Symbol::name).contains("helper");
+    }
+
+    @Test
+    @DisplayName("neutralising the declaration changes no line number and no column")
+    void codingDeclarationKeepsEveryPosition() {
+        // The reason it edits one word rather than deleting the line: every
+        // position this class reports becomes a range in the editor, so a shift
+        // of one line puts every mark in the file on the wrong line.
+        String source = "#!/usr/bin/env python\n# -*- coding: utf-8 -*-\ndef helper():\n\tpass\n";
+        String treated = ModuleSymbols.neutraliseCodingDeclaration(source);
+
+        assertThat(treated).hasSameSizeAs(source);
+        assertThat(treated.split("\n", -1)).hasSameSizeAs(source.split("\n", -1));
+        assertThat(treated).doesNotContain("coding:");
+        assertThat(ModuleSymbols.parse("m", source).find("helper"))
+            .get().extracting(ModuleSymbols.Symbol::line).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("only the first two lines can carry one, and only the first is honoured")
+    void codingDeclarationScope() {
+        // Python looks in the first two lines and takes the first. A `coding:`
+        // further down is somebody's prose and must be left alone.
+        String late = "x = 1\ny = 2\n# coding: utf-8\n";
+        assertThat(ModuleSymbols.neutraliseCodingDeclaration(late)).isEqualTo(late);
+
+        String prose = "def f():\n\t\"\"\"Mentions coding: utf-8 in passing.\"\"\"\n\tpass\n";
+        assertThat(ModuleSymbols.neutraliseCodingDeclaration(prose)).isEqualTo(prose);
+    }
+
+    @Test
+    @DisplayName("a file with no declaration is returned untouched")
+    void noDeclarationIsUntouched() {
+        String plain = "import os\nprint(os)\n";
+        assertThat(ModuleSymbols.neutraliseCodingDeclaration(plain)).isSameAs(plain);
+        assertThat(ModuleSymbols.neutraliseCodingDeclaration("")).isEmpty();
+    }
 }

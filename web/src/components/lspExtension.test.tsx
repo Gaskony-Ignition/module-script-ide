@@ -1,4 +1,5 @@
 import { startCompletion } from '@codemirror/autocomplete';
+import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +15,7 @@ import {
   detailToShow,
   documentationText,
   isDeprecated,
+  lspSnippetToCodeMirror,
   markdownToText,
   toCompletions,
 } from './lspExtension';
@@ -32,6 +34,7 @@ describe('LSP kind → CodeMirror completion type', () => {
     [6, 'variable', 'Variable'],
     [7, 'class', 'Class'],
     [14, 'keyword', 'Keyword'],
+    [15, 'text', 'Snippet — a built-in like logger or readtag'],
   ])('maps kind %i to %s (%s)', (kind, expected) => {
     expect(completionType(kind as number)).toBe(expected);
   });
@@ -103,6 +106,118 @@ describe('completion mapping', () => {
     const options = toCompletions(items, () => Promise.reject(new Error('socket dropped')));
     const info = await (options[1]?.info as (c: unknown) => Promise<Node | null>)(options[1]);
     expect((info as HTMLElement).textContent).toContain('readBlocking(tagPaths, [timeout])');
+  });
+});
+
+describe('lspSnippetToCodeMirror', () => {
+  it('turns a numbered stop with default text into a plain named field', () => {
+    expect(lspSnippetToCodeMirror('logger = system.util.getLogger("${1:Name}")')).toBe(
+      'logger = system.util.getLogger("${Name}")'
+    );
+  });
+
+  it('turns a bare braced stop with no text into an empty field', () => {
+    expect(lspSnippetToCodeMirror('rows = system.db.runNamedQuery("Path/Name", {${2}})')).toBe(
+      'rows = system.db.runNamedQuery("Path/Name", {${}})'
+    );
+  });
+
+  it('turns an unbraced tab stop into an empty field', () => {
+    expect(lspSnippetToCodeMirror('system.tag.writeBlocking([$1], [$2])')).toBe(
+      'system.tag.writeBlocking([${}], [${}])'
+    );
+  });
+
+  it('turns the final-cursor $0 into an empty field, same as a bare numbered stop', () => {
+    expect(lspSnippetToCodeMirror('${1:pass}\n$0')).toBe('${pass}\n${}');
+  });
+
+  it('converts every stop independently, even when the numbers run out of textual order', () => {
+    // LSP orders tab stops by NUMBER, not by where they sit in the text, so a
+    // template is free to write ${2:...} before ${1:...}. The conversion must
+    // not assume ascending order — each match is rewritten where it stands.
+    expect(lspSnippetToCodeMirror('${2:second} then ${1:first}, finally $0')).toBe(
+      '${second} then ${first}, finally ${}'
+    );
+  });
+
+  it('leaves a body with no tab stops completely unchanged', () => {
+    const body = 'path = event.getTagPath()';
+    expect(lspSnippetToCodeMirror(body)).toBe(body);
+  });
+
+  it('keeps an empty default (${2:}) as an empty field, not the literal text "undefined"', () => {
+    // A colon with nothing after it is how this server writes an empty dict
+    // literal — `runNamedQuery(path, {${2:}})` — and it must round-trip to an
+    // empty field, not swallow the braces or print the word "undefined".
+    expect(lspSnippetToCodeMirror('{${2:}}')).toBe('{${}}');
+  });
+
+  it('un-escapes a literal dollar sign the author escaped, without treating it as a stop', () => {
+    expect(lspSnippetToCodeMirror('price is \\$5, not a ${1:field}')).toBe(
+      'price is $5, not a ${field}'
+    );
+  });
+
+  it('mirrors two stops that share the same number and default text', () => {
+    // Two occurrences of ${1:datasource} name the SAME field once numbers are
+    // dropped, because CodeMirror groups unnumbered fields by their text — so
+    // typing the datasource once fills in both. This is how `tx` uses the
+    // datasource name twice on purpose.
+    const body = 'tx = system.db.beginTransaction("${1:datasource}") # ... "${1:datasource}"';
+    const converted = lspSnippetToCodeMirror(body);
+    expect(converted).toBe('tx = system.db.beginTransaction("${datasource}") # ... "${datasource}"');
+  });
+});
+
+describe('a snippet completion item, end to end', () => {
+  const snippetItem: CompletionItem = {
+    label: 'logger',
+    detail: 'Get a named logger',
+    insertText: 'logger = system.util.getLogger("${1:Name}")',
+    insertTextFormat: 2,
+  };
+  const apiItem: CompletionItem = {
+    label: 'readBlocking',
+    kind: 3,
+    detail: 'readBlocking(tagPaths, [timeout])',
+  };
+
+  it('gives a snippet item an apply function; leaves an ordinary item on the default insert', () => {
+    const [snippet, api] = toCompletions([snippetItem, apiItem], neverResolves);
+    expect(typeof snippet?.apply).toBe('function');
+    expect(api?.apply).toBeUndefined();
+  });
+
+  it('expanding the snippet inserts the CodeMirror form of the body, tab stops and all', () => {
+    const [snippet] = toCompletions([snippetItem], neverResolves);
+    const view = new EditorView({ state: EditorState.create({ doc: '' }) });
+    try {
+      (snippet?.apply as (view: EditorView, completion: unknown, from: number, to: number) => void)(
+        view,
+        snippet,
+        0,
+        0
+      );
+      // Accepting the default (never tabbing to rename it) leaves the field's
+      // default text in the document — exactly what a plain-text insert of the
+      // LSP body would NOT have given, since that body still had `${1:Name}`
+      // literally in it.
+      expect(view.state.doc.toString()).toBe('logger = system.util.getLogger("Name")');
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('still carries detail and the info panel like an ordinary item', async () => {
+    const resolve = vi.fn(async (item: CompletionItem) => ({
+      ...item,
+      documentation: { kind: 'markdown' as const, value: 'Creates a logger.' },
+    }));
+    const [snippet] = toCompletions([snippetItem], resolve);
+    expect(snippet?.detail).toBe('Get a named logger');
+    const info = await (snippet?.info as (c: unknown) => Promise<Node | null>)(snippet);
+    expect((info as HTMLElement).textContent).toContain('Creates a logger.');
   });
 });
 

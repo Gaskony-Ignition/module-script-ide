@@ -41,6 +41,7 @@ import {
   type NamedQueryList,
   type NamedQuerySettings,
 } from '../api/namedQueries';
+import { organiseImports, type ImportSuggestion } from '../api/imports';
 import { lspUri, sharedLspClient } from '../api/lspClient';
 import { sharedTransport } from '../api/lspTransport';
 import type { SessionInfo } from '../api/session';
@@ -64,6 +65,7 @@ import {
   type ImportInspection,
   type ImportOutcome,
 } from '../api/transfer';
+import { insertImportAtTopOfBlock } from './insertImport';
 import { rememberWidth, storedHeight, storedWidth } from './layoutStore';
 import TerminalView from '../components/Terminal';
 import WebDevConfigDialog from '../components/WebDevConfigDialog';
@@ -341,6 +343,15 @@ export default function Workspace({ session }: WorkspaceProps) {
   }, []);
   const [savingAttrs, setSavingAttrs] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  /**
+   * Suggestions from the last "Organise imports" run, for the document that
+   * produced them. Keyed to a URI rather than just "the current suggestions"
+   * so switching tabs does not carry one document's offers onto another's
+   * buffer, and so closing or organising the same document again drops the
+   * stale set rather than leaving an insert button that no longer applies.
+   */
+  const [importSuggestions, setImportSuggestions] =
+    useState<{ uri: string; items: ImportSuggestion[] } | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   /**
    * The session has ended — a gateway restart, or a timeout.
@@ -935,6 +946,8 @@ export default function Workspace({ session }: WorkspaceProps) {
       delete remaining[uri];
       return remaining;
     });
+    // A closed document's offers apply to a buffer that no longer exists.
+    setImportSuggestions((current) => (current?.uri === uri ? null : current));
     // Release the pane assignment with the document — see forgetInPanes.
     const panes = forgetInPanes(paneStateRef.current, uri);
     paneStateRef.current = { ...panes, activeUri: nextActive };
@@ -1419,6 +1432,82 @@ export default function Workspace({ session }: WorkspaceProps) {
     },
     [beginSaving, commitSaved, endSaving, lsp, project, raiseConflict, readOnly,
       saveQueryDoc, session.csrfToken]
+  );
+
+  /**
+   * Sort/dedupe the open buffer's leading import block and offer suggestions
+   * for names it reads but never binds.
+   *
+   * An ordinary edit, not a save: the result replaces `doc.text` through the
+   * same `handleChange` a keystroke goes through, so Ctrl+Z undoes it and
+   * nothing reaches the gateway. Mirrors the History dialog's own "load a
+   * different body into this buffer" pattern rather than Save's — a locked,
+   * inherited buffer can still be organised in the tab; it just cannot be
+   * written back until it is overridden, exactly as typing into one already
+   * behaves.
+   */
+  const organiseImportsDoc = useCallback(async () => {
+    const doc = activeDoc;
+    if (!doc || !isPythonDoc(doc)) return;
+    setNotice(null);
+    try {
+      const result = await organiseImports(doc.project, doc.text, session.csrfToken);
+      const changed = result.source !== doc.text;
+      if (changed) {
+        handleChange(doc.uri, result.source);
+      }
+
+      const parts: string[] = [];
+      if (result.removed.length > 0) {
+        parts.push(
+          `Removed ${result.removed.length} unused import${result.removed.length === 1 ? '' : 's'}.`
+        );
+      }
+      if (result.notes.length > 0) {
+        parts.push(...result.notes);
+      }
+      if (parts.length > 0) {
+        setNotice({ kind: 'info', text: parts.join(' ') });
+      } else if (changed) {
+        setNotice({ kind: 'info', text: 'Imports reorganised.' });
+      } else {
+        setNotice({ kind: 'info', text: 'Imports are already organised — nothing to change.' });
+      }
+
+      setImportSuggestions(
+        result.suggestions.length > 0 ? { uri: doc.uri, items: result.suggestions } : null
+      );
+    } catch (e: unknown) {
+      setNotice({ kind: 'error', text: `Could not organise imports: ${describe(e)}` });
+    }
+  }, [activeDoc, handleChange, session.csrfToken]);
+
+  /** Removes one offer from the list — the whole bar goes once none are left. */
+  const dropSuggestion = useCallback((statement: string) => {
+    setImportSuggestions((current) => {
+      if (!current) return current;
+      const items = current.items.filter((s) => s.statement !== statement);
+      return items.length > 0 ? { ...current, items } : null;
+    });
+  }, []);
+
+  /**
+   * Insert one suggested import at the top of the buffer's leading import
+   * block — the first column-0 line that is already `import`/`from`, or line
+   * 0 when the file has no leading block yet. A simple insertion, not a full
+   * reorganise: the user can press "Organise imports" straight after to sort
+   * and de-duplicate, and that button stays one click away because this one
+   * does not try to be it.
+   */
+  const insertSuggestedImport = useCallback(
+    (statement: string) => {
+      if (!importSuggestions) return;
+      const doc = docsRef.current.find((d) => d.uri === importSuggestions.uri);
+      if (!doc) return;
+      handleChange(doc.uri, insertImportAtTopOfBlock(doc.text, statement));
+      dropSuggestion(statement);
+    },
+    [dropSuggestion, handleChange, importSuggestions]
   );
 
   const resolveReloadTheirs = useCallback(() => {
@@ -2497,6 +2586,42 @@ export default function Workspace({ session }: WorkspaceProps) {
                   </button>
                 </div>
               )}
+              {activeDoc && importSuggestions && importSuggestions.uri === activeDoc.uri && (
+                <div className="import-suggestions-bar" role="status">
+                  <span className="import-suggestions-label">Suggested imports:</span>
+                  <ul className="import-suggestions-list">
+                    {importSuggestions.items.map((suggestion) => (
+                      <li key={suggestion.statement} className="import-suggestion">
+                        <button
+                          type="button"
+                          className="import-suggestion-insert"
+                          onClick={() => insertSuggestedImport(suggestion.statement)}
+                          title={`Insert "${suggestion.statement}" at the top of the import block`}
+                        >
+                          <span className="import-suggestion-origin">{suggestion.origin}</span>
+                          {suggestion.statement}
+                        </button>
+                        <button
+                          type="button"
+                          className="import-suggestion-dismiss"
+                          onClick={() => dropSuggestion(suggestion.statement)}
+                          aria-label={`Dismiss the suggestion for ${suggestion.name}`}
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    className="import-suggestions-close"
+                    onClick={() => setImportSuggestions(null)}
+                    aria-label="Dismiss all suggestions"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               {activeUri && activeQueryDoc && activeQueryDoc.settings && (
                 /* Keyed on the document so each query opens its own editor state
                    — a parameter table left mid-edit must not follow you to the
@@ -2625,6 +2750,20 @@ export default function Workspace({ session }: WorkspaceProps) {
             title="Versions this IDE has saved of this file"
           >
             History
+          </button>
+        )}
+
+        {/* Python documents only — a named query is SQL and a Web Dev text
+            resource is HTML, and organising either as Jython imports would be
+            nonsense. See isPythonDoc. */}
+        {activeDoc && isPythonDoc(activeDoc) && (
+          <button
+            type="button"
+            className="button"
+            onClick={() => void organiseImportsDoc()}
+            title="Sort and de-duplicate the leading import block, and suggest imports for unknown names"
+          >
+            Organise imports
           </button>
         )}
 

@@ -59,8 +59,16 @@ public class ScriptIdeRouteRegistrar {
             ? null
             : new com.gaskony.scriptide.gateway.history.SaveHistory(
                 context.getSystemManager().getDataDir().toPath());
+        // ONE index for every feature that navigates or inspects a project, and
+        // for the same reason the language server keeps one: it caches a
+        // module's parse against its resource signature, so a second instance
+        // would re-parse every script the first one already has. Null-safe on
+        // the mount-order test's null context, in which no handler is invoked.
+        var index = projectManager == null
+            ? null
+            : new com.gaskony.scriptide.gateway.lang.ProjectIndex(projectManager);
         this.scriptResourceRouteHandler =
-            new ScriptResourceRouteHandler(projectManager, saveHistory);
+            new ScriptResourceRouteHandler(projectManager, saveHistory, index);
         this.historyRouteHandler = new HistoryRouteHandler(saveHistory);
         this.runtimeErrorsRouteHandler = new RuntimeErrorsRouteHandler(context);
         this.scriptAttributesRouteHandler =
@@ -76,14 +84,7 @@ public class ScriptIdeRouteRegistrar {
         this.namedQueryTestRouteHandler = new NamedQueryTestRouteHandler(projectManager,
             com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecutionService,
             com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecAudit);
-        // ONE index for both features, and for the same reason the language
-        // server keeps one: it caches a module's parse against its resource
-        // signature, so a second instance would re-parse every script the first
-        // one already has. Null-safe on the mount-order test's null context, in
-        // which no handler is ever invoked.
-        var index = projectManager == null
-            ? null
-            : new com.gaskony.scriptide.gateway.lang.ProjectIndex(projectManager);
+        // Same index created above, for the reason given there.
         this.testRouteHandler = new TestRouteHandler(index,
             com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecutionService,
             com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry::getExecAudit);
@@ -179,6 +180,15 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_JSON)
             .accessControl(admin)
             .handler(scriptAttributesRouteHandler::write)
+            .mount();
+
+        // Authenticated, not admin: it writes nothing to the gateway, only
+        // transforms text the caller already holds — see the handler Javadoc.
+        routes.newRoute(ScriptIdePaths.ROUTE_ORGANISE_IMPORTS)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(scriptResourceRouteHandler::organiseImports)
             .mount();
 
         // ==================== Web Dev endpoint config ====================

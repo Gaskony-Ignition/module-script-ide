@@ -25,6 +25,30 @@
   --bg-chrome: #181818;
   --surface: #252526;         /* panels, dialogs */
 
+  /* The sixteen ANSI colours, for output a script coloured itself with cprint,
+     jsonPrint, or an escape of its own. Variables rather than literals at the
+     use site so a theme can move them; the values here are the xterm defaults
+     with the dark eight lifted enough to be legible on --bg-primary, because an
+     ANSI black on a dark page is not readable and "the terminal does that too"
+     is not a reason to ship an unreadable line. A 256-colour or 24-bit escape
+     carries its own value and never reaches these. */
+  --ansi-black: #6e7681;
+  --ansi-red: #f14c4c;
+  --ansi-green: #23d18b;
+  --ansi-yellow: #e5c07b;
+  --ansi-blue: #4fa6ff;
+  --ansi-magenta: #d670d6;
+  --ansi-cyan: #29b8db;
+  --ansi-white: #cccccc;
+  --ansi-bright-black: #8b949e;
+  --ansi-bright-red: #ff7b72;
+  --ansi-bright-green: #3fdd9c;
+  --ansi-bright-yellow: #f2cc86;
+  --ansi-bright-blue: #7cc0ff;
+  --ansi-bright-magenta: #e58ae5;
+  --ansi-bright-cyan: #56d4f0;
+  --ansi-bright-white: #ffffff;
+
   /* The activity bar's OWN ink and accent.
      Two packs put a DARK rail on a LIGHT page — that inversion is the loudest
      thing about either design — so the strip cannot read the shared text

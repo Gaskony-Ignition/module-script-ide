@@ -2,6 +2,88 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.22.0] — 2026-09-07
+
+feat: snippets, organise imports, live tag and schema completion, style lints,
+and colour in the console.
+
+Groups 2 and 3 of `the borrowed-ideas brief`, and the first part of group 4.
+
+### The bug this release also fixes, which nobody was looking for
+
+**A `# -*- coding: utf-8 -*-` header made the whole file a syntax error.**
+Everything here parses from a `StringReader`, which is Unicode text, and Python 2
+refuses a coding declaration in one — `encoding declaration in Unicode string`.
+The declaration had already done its job by the time the bytes reached us as a
+String, so it meant nothing here; but a file carrying one got a red mark on line 1
+about nothing in its own code, contributed nothing to the outline or to
+go-to-definition, could not be organised, and **was skipped entirely by test
+discovery**. Confirmed on the released 1.21.0: a test module with that header was
+invisible. It is ordinary in any file that has ever held a non-ASCII character.
+
+Fixed by changing only the word `coding` to one of the same length, so every line
+and every column the editor is handed is identical to the original. Deleting the
+line would shift every mark below it.
+
+**It had two halves, and they are in different places.** Repairing the parse made
+the module visible; it still would not RUN, because the test runner compiles the
+module's source itself and seeds it through `Py.java2py`, which hands Jython a
+unicode string. The script console never had the problem at all — it passes a
+Java String, which compiles as a byte str. `validate_v29_authoring.py` asserts all
+three: parsed, run, and the console left alone.
+
+### Added
+
+- **Eighteen snippets with tab-stops** in the completion popup — a logger, a
+  prepared query, a transaction, a Web Dev handler, a tag-change body, a test.
+  Offered only where a snippet can go: never after a dot, because a snippet is not
+  a member of anything.
+- **Organise imports** on the open buffer. Sorts, de-duplicates and removes what
+  is unused, then loads the result into the editor as an ordinary edit — Ctrl+Z
+  undoes it, and nothing is written to the gateway.
+- **Suggested imports** for a name the file does not define, from the project's
+  own modules first and a small standard-library table second. It suggests; it
+  never inserts on its own.
+- **Live tag-path completion inside a string literal.** Typing `"[` offers the
+  gateway's tag providers, and each `/` browses the next level. Folders complete
+  with a trailing slash; a tag carries its data type.
+- **Table and column completion** inside a string that looks like SQL, from every
+  configured datasource, each labelled with the connection it came from — the
+  datasource argument is not knowable at completion time, so the answer says
+  where each name is from rather than guessing.
+- **Seven style checks** in the Problems panel, as warnings: a bare `except:`, a
+  mutable default argument, `== None`, `is` against a literal, an assert on a
+  tuple, a duplicate dict key, and a file that mixes tabs and spaces.
+- **`cprint` and `jsonPrint`**, and a console that renders ANSI colour rather
+  than showing the escape bytes.
+
+### The lints are over the AST, not over the text
+
+the alternative ships the same idea as seven regular expressions; they have to, having no
+parser. This module runs the interpreter's own, and the difference is not
+cosmetic: a regex for `== None` fires inside a docstring that explains why you
+should not write `== None`, and a regex for a bare `except:` fires on the string
+`"except:"` in a log message. Half of `StyleChecksTest` is those negative cases.
+The bar for a diagnostic here is zero false positives, because a lint that cries
+wolf gets every lint switched off.
+
+### Completion never waits on a database
+
+Tag browses and schema reads are cached with a TTL, and a miss returns nothing
+for that keystroke while a background refresh fills the cache. Reading JDBC
+metadata on the completion thread would make typing wait on a database.
+
+### Fixed
+
+- **Organise imports read a module docstring as code**, so the imports below it
+  counted as "below code" and the whole feature was a silent no-op on exactly the
+  files that are written well — which is nearly every module in this estate.
+- The `tagchange` snippet named `event.getTagPath()`. There is no `event` in a
+  tag change script: `tagPath` is bound directly. The correct list was already in
+  this repo, in `UnknownNames`.
+- A reset in the console's ANSI parser turned bold off and left the text
+  coloured — `Object.assign` cannot copy keys that are not there.
+
 ## [1.21.0] — 2026-09-07
 
 feat: a test framework — decorators, assertions, mocks, and a namespace per run.

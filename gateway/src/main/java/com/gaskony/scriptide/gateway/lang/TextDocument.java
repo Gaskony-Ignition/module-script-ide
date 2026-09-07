@@ -2,6 +2,7 @@ package com.gaskony.scriptide.gateway.lang;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * One open document, and the position arithmetic every LSP feature depends on.
@@ -133,6 +134,90 @@ public final class TextDocument {
             }
         }
         return lineContent.substring(start, end);
+    }
+
+    /** One string literal's content up to some cursor, and which quote it used. */
+    public record StringLiteral(String content, char quote) {
+    }
+
+    /**
+     * If {@code character} sits inside a single-line string literal on
+     * {@code line}, that literal's content up to the cursor and its quote
+     * character; empty otherwise.
+     *
+     * <h2>Why this exists</h2>
+     *
+     * <p>A tag path or a piece of SQL is written INSIDE a Jython string
+     * literal — {@code system.tag.readBlocking(["[default]Area/Tag"])} — so
+     * the trigger for both kinds of live completion is "is the cursor inside
+     * a string", which is a different question from the dotted-name walk
+     * {@link #dottedPrefixAt} already does for API completions.</p>
+     *
+     * <h2>What this deliberately does not attempt</h2>
+     *
+     * <p>Like {@link #lineText} and {@link #dottedPrefixAt}, this looks at
+     * exactly ONE line. A triple-quoted string ({@code '''} or {@code """})
+     * is a genuinely multi-line construct, and a single-line scan cannot know
+     * where one actually starts or ends without reading backward through the
+     * whole document — so a triple-quote opener anywhere before the cursor
+     * makes this answer empty rather than guessing wrong and popping a
+     * tag-path menu open in the middle of a docstring. A PLAIN single- or
+     * double-quoted string that has simply not been closed yet on this line is
+     * not the same thing — that is the ordinary, expected state while someone
+     * is mid-keystroke typing a tag path, and it still answers, using
+     * whatever has been typed so far as the content.</p>
+     *
+     * <p>Escaping and comments are handled the way the Jython lexer would: a
+     * backslash escapes the very next character, so {@code 'it\'s'} never
+     * closes early on the escaped quote, and a {@code #} outside any string
+     * starts a comment running to the end of the line — a quote character
+     * inside a comment opens nothing. A string prefix letter such as
+     * {@code u} or {@code r} needs no special handling: it is just an
+     * ordinary character sitting before the quote that opens the string.</p>
+     */
+    public Optional<StringLiteral> stringLiteralAt(int line, int character) {
+        String lineContent = lineText(line);
+        int end = Math.min(Math.max(0, character), lineContent.length());
+
+        char quote = 0;          // 0 == not currently inside a string
+        int contentStart = -1;
+        boolean escaped = false;
+        boolean inComment = false;
+
+        for (int i = 0; i < end; i++) {
+            char c = lineContent.charAt(i);
+            if (inComment) {
+                continue;
+            }
+            if (quote != 0) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == quote) {
+                    quote = 0;
+                    contentStart = -1;
+                }
+                continue;
+            }
+            if (c == '#') {
+                inComment = true;
+            } else if (c == '\'' || c == '"') {
+                // A triple-quote opener is a multi-line construct this
+                // single-line scan cannot safely resolve - see the Javadoc.
+                if (i + 2 < lineContent.length()
+                    && lineContent.charAt(i + 1) == c && lineContent.charAt(i + 2) == c) {
+                    return Optional.empty();
+                }
+                quote = c;
+                contentStart = i + 1;
+            }
+        }
+
+        if (quote == 0 || contentStart < 0) {
+            return Optional.empty();
+        }
+        return Optional.of(new StringLiteral(lineContent.substring(contentStart, end), quote));
     }
 
     private static int[] computeLineStarts(String text) {

@@ -2,7 +2,47 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.21.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+**Version 1.22.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+
+### 1.22.0 — authoring: snippets, imports, live completion, lints, colour (07/09/2026)
+
+Groups 2 and 3 of `the borrowed-ideas brief`, and the first part of group 4.
+Eighteen tab-stop snippets; organise-imports and suggested imports on the open
+buffer; live tag-path completion inside a string literal and table/column
+completion inside SQL; seven style lints; and `cprint` / `jsonPrint` with a
+console that renders ANSI rather than showing the escape bytes.
+
+**The most valuable thing in it is a bug nobody was looking for.** A
+`# -*- coding: utf-8 -*-` header made the WHOLE FILE a syntax error — everything
+here parses from a `StringReader`, which is Unicode text, and Python 2 refuses a
+coding declaration in one. A file carrying one got a red mark on line 1 about
+nothing in its own code, gave no outline and no go-to-definition, could not be
+organised, and **was skipped entirely by test discovery**. Confirmed on the
+released 1.21.0: a test module with that header was invisible.
+
+It had **two halves, in different places**. Repairing the parse made the module
+visible and it still would not RUN, because the test runner compiles the source
+itself and seeds it through `Py.java2py`, which hands Jython a unicode string. The
+console never had the problem — it passes a Java String, which compiles as a byte
+str, and is deliberately left alone. All three are asserted.
+
+**Three defects were caught in review rather than by a user**, and each is the
+same shape — something asserted from recall rather than read off the repo:
+
+- organise-imports read a module docstring as CODE, so the imports below it were
+  "below code" and the feature was a silent no-op on nearly every well-written
+  module here;
+- the `tagchange` snippet named `event.getTagPath()`, when there is no `event` in
+  a tag change script and `tagPath` is bound directly — the correct list was
+  already in this repo, in `UnknownNames`;
+- the console's ANSI reset turned bold off and left the text coloured, because
+  `Object.assign` cannot copy keys that are not there.
+
+**The lints are structural, not textual.** the alternative ships the same seven checks as
+regular expressions because they have no parser. Half of `StyleChecksTest` is
+negative cases a regex fails: `except:` inside a string, `== None` in a docstring.
+
+Gate PASS. `validate_v29_authoring.py` 20/20.
 
 ### 1.21.0 — the test framework (07/09/2026)
 

@@ -73,14 +73,29 @@ public final class ScriptResourceRouteHandler {
      */
     private final com.gaskony.scriptide.gateway.history.SaveHistory history;
 
+    /**
+     * Backs {@link #organiseImports}'s project-module lookup. Null on a gateway
+     * context this handler was built without — organise then falls back to the
+     * built-in suggestion table only, same as it does for a name no project
+     * module defines.
+     */
+    private final com.gaskony.scriptide.gateway.lang.ProjectIndex projectIndex;
+
     public ScriptResourceRouteHandler(ProjectManager projectManager) {
-        this(projectManager, null);
+        this(projectManager, null, null);
     }
 
     public ScriptResourceRouteHandler(ProjectManager projectManager,
             com.gaskony.scriptide.gateway.history.SaveHistory history) {
+        this(projectManager, history, null);
+    }
+
+    public ScriptResourceRouteHandler(ProjectManager projectManager,
+            com.gaskony.scriptide.gateway.history.SaveHistory history,
+            com.gaskony.scriptide.gateway.lang.ProjectIndex projectIndex) {
         this.projectManager = projectManager;
         this.history = history;
+        this.projectIndex = projectIndex;
     }
 
     // ==================== GET /api/projects ====================
@@ -650,6 +665,104 @@ public final class ScriptResourceRouteHandler {
         projectManager.getResource(project, resourcePath)
             .ifPresent(now -> out.addProperty("signature", now.getResourceSignature().toString()));
         return out;
+    }
+
+    // ==================== POST /api/scripts/organise-imports ====================
+
+    /** Same cap as a Web Dev text body — see {@link WebDevResources#EDITABLE_MAX_BYTES}. */
+    private static final int MAX_ORGANISE_SOURCE_BYTES = WebDevResources.EDITABLE_MAX_BYTES;
+
+    /** Project modules a single lookup call may inspect before giving up on a name. */
+    private static final int MAX_LOOKUP_CANDIDATES = 50;
+
+    /**
+     * Sort and de-duplicate the leading import block of the buffer in the body,
+     * and suggest an import for each name it reads but never binds.
+     *
+     * <p>Authenticated, not Administrator, by the route strategy — this writes
+     * NOTHING to the gateway. It is a pure transform of text the caller already
+     * has open, handed back for the editor to apply as an ordinary local edit;
+     * see {@link com.gaskony.scriptide.gateway.lang.ImportOrganiser}. CSRF is
+     * still enforced because it is a POST from a browser session, but there is
+     * no {@code If-Match}: there is no resource version to assert against
+     * something that never reaches the gateway's own copy.</p>
+     */
+    public Object organiseImports(RequestContext req, HttpServletResponse resp) throws IOException {
+        String project = req.getParameter("project");
+        if (project == null || project.isBlank()) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Missing required 'project' parameter");
+        }
+
+        Object csrf = HandlerSupport.enforceCsrf(req, resp);
+        if (csrf != null) {
+            return csrf;
+        }
+
+        OrganiseImportsRequest body;
+        try {
+            body = HandlerSupport.GSON.fromJson(req.readBody(), OrganiseImportsRequest.class);
+        } catch (JsonParseException e) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Malformed JSON request body");
+        }
+        if (body == null || body.source == null) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Request body must contain a 'source' field");
+        }
+        if (body.source.getBytes(StandardCharsets.UTF_8).length > MAX_ORGANISE_SOURCE_BYTES) {
+            return HandlerSupport.error(resp, HttpServletResponse.SC_BAD_REQUEST,
+                "Source is larger than " + (MAX_ORGANISE_SOURCE_BYTES / 1024) + " KB");
+        }
+
+        com.gaskony.scriptide.gateway.lang.ImportOrganiser.Lookup lookup = lookupFor(project);
+        com.gaskony.scriptide.gateway.lang.ImportOrganiser.Result result =
+            com.gaskony.scriptide.gateway.lang.ImportOrganiser.organise(body.source, lookup);
+
+        JsonObject out = new JsonObject();
+        out.addProperty("source", result.source());
+        JsonArray removed = new JsonArray();
+        result.removed().forEach(removed::add);
+        out.add("removed", removed);
+        JsonArray notes = new JsonArray();
+        result.notes().forEach(notes::add);
+        out.add("notes", notes);
+        JsonArray suggestions = new JsonArray();
+        for (var suggestion : result.suggestions()) {
+            JsonObject item = new JsonObject();
+            item.addProperty("name", suggestion.name());
+            item.addProperty("statement", suggestion.statement());
+            item.addProperty("origin", suggestion.origin());
+            suggestions.add(item);
+        }
+        out.add("suggestions", suggestions);
+        return out;
+    }
+
+    /**
+     * Which project module defines a name — the FIRST top-level symbol whose
+     * name matches exactly. {@link ProjectIndex#search} is a substring match
+     * meant for quick-open, so results are filtered down to an exact,
+     * module-level ({@code container() == null}) hit: a method of that name on
+     * some class is not something {@code from module import name} can reach.
+     */
+    private com.gaskony.scriptide.gateway.lang.ImportOrganiser.Lookup lookupFor(String project) {
+        if (projectIndex == null) {
+            return name -> Optional.empty();
+        }
+        return name -> {
+            for (var hit : projectIndex.search(project, name, MAX_LOOKUP_CANDIDATES)) {
+                if (hit.symbol().name().equals(name) && hit.symbol().container() == null) {
+                    return Optional.of(hit.moduleName());
+                }
+            }
+            return Optional.empty();
+        };
+    }
+
+    /** Body of an organise-imports request: {@code {source}}. */
+    static final class OrganiseImportsRequest {
+        String source;
     }
 
     // ==================== DELETE /api/scripts/content/:path ====================

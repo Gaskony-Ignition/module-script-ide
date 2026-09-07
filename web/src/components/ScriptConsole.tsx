@@ -46,6 +46,7 @@ import {
   type ExecEvent,
   type ExecResult,
 } from '../api/execClient';
+import { hasAnsi, parseAnsi } from './ansi';
 import './ScriptConsole.css';
 
 /** A script file the console can run instead of its own buffer. */
@@ -726,11 +727,48 @@ function OutputBlock({
 }) {
   return (
     <div className={`console-block console-${entry.kind}`}>
-      <pre>{entry.text}</pre>
+      <pre>{hasAnsi(entry.text) ? <AnsiText text={entry.text} /> : entry.text}</pre>
       {entry.error && (
         <Traceback error={entry.error} sourcePath={entry.sourcePath} onOpenFrame={onOpenFrame} />
       )}
     </div>
+  );
+}
+
+/**
+ * Output that carries ANSI colour, as spans.
+ *
+ * Only reached when the text actually holds an escape — the check is one
+ * `includes`, and the overwhelming majority of output has none, so the ordinary
+ * case never builds a span list at all.
+ *
+ * The named colours arrive as `var(--ansi-…)` references and a 24-bit escape as
+ * an `rgb(…)`. Both are inline, and deliberately: the second is a value the
+ * script chose, which is data rather than a design decision, and the first is
+ * already a variable so a theme can still move it.
+ */
+function AnsiText({ text }: { text: string }) {
+  return (
+    <>
+      {parseAnsi(text).map((span, index) => (
+        <span
+          // Index keys: the spans are derived from one immutable string and are
+          // never reordered or edited, so there is nothing for a stable key to
+          // preserve.
+          key={index}
+          className="console-ansi"
+          style={{
+            color: span.color,
+            backgroundColor: span.background,
+            fontWeight: span.bold ? 'bold' : undefined,
+            fontStyle: span.italic ? 'italic' : undefined,
+            textDecoration: span.underline ? 'underline' : undefined,
+          }}
+        >
+          {span.text}
+        </span>
+      ))}
+    </>
   );
 }
 

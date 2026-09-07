@@ -243,6 +243,18 @@ public final class ScriptIdePaths {
     /** What this project's scripts are actually throwing, from the gateway log. */
     public static final String ROUTE_RUNTIME_ERRORS = "/api/runtime/errors";
 
+    /**
+     * {@code POST /api/scripts/organise-imports?project=X} — sort and
+     * de-duplicate the leading import block of the buffer in the body, and
+     * suggest an import for each name it reads but never binds.
+     *
+     * <p>Authenticated, not Administrator: it writes nothing to the gateway,
+     * it transforms text the caller already holds and hands it back for the
+     * editor to apply as an ordinary local edit. See
+     * {@code com.gaskony.scriptide.gateway.lang.ImportOrganiser}.</p>
+     */
+    public static final String ROUTE_ORGANISE_IMPORTS = "/api/scripts/organise-imports";
+
     // ==================== Servlets (NOT under /data) ====================
 
     /**
