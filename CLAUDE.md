@@ -16,8 +16,12 @@ that executes on the Gateway with its output streamed as it is produced. Since
 (Ctrl+P, `#` for symbols), a Search view over project-wide text search, name-based
 references (Shift+F12), and a Problems panel over every open document.
 
-**Internal/PoC status, like web-designer and playwright: NOT in `modules/release.sh`
-or `test-all.sh`, and never on the public portal.** Build with its own `./gradlew`.
+**Internal, and staying internal, like web-designer and playwright: NOT in
+`modules/release.sh` or `test-all.sh`, and never on the public portal.** Build
+with its own `./gradlew`. Nigel decided this again on 08/09/2026 after briefly
+choosing to publish it — he wants to use it enough to be confident in it first.
+The private `Gaskony-Ignition/module-script-ide` repo and its releases are the
+whole distribution.
 
 ## Entry points
 

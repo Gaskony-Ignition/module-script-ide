@@ -408,8 +408,13 @@ are failing, how often, and when.
 
 **R5 (two gateways) and R6 (a test runner) are untouched**, and are not small:
 R5 is a cross-gateway authentication surface, R6 a product in its own right.
-F1 (internal or public) and F2 (prove it on a second gateway) are decisions and
-environment rather than code.
+F1 is now DECIDED: **private, and staying private** (Nigel, 08/09/2026) — "keep
+it a private github repo until I have used it enough to be confident in its
+ability". He had said "public, like project-themes" the evening before and
+reversed it the next morning; the later word is the one that stands. Do not
+re-raise it, and do not do publication work — a stranger-facing README, a
+licence pass, portal wiring — until he asks. F2 (prove it on a second gateway)
+is environment rather than code and is still open.
 
 ### Superseded header — 1.15.3 (05/09/2026)
 
