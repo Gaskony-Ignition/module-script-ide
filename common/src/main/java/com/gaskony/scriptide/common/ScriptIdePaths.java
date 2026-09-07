@@ -208,6 +208,17 @@ public final class ScriptIdePaths {
     public static final String ROUTE_PRESENCE = "/api/presence";
 
     /**
+     * {@code GET /api/git/status?project=X} — which resources differ from the
+     * last commit.
+     *
+     * <p>READ-ONLY, and this module has no route that writes to a repository.
+     * Nigel's decision on 01/09/2026: staging, committing and remotes belong to
+     * {@code module-git}. This answers the question a person has while editing —
+     * what have I changed — and nothing beyond it.</p>
+     */
+    public static final String ROUTE_GIT_STATUS = "/api/git/status";
+
+    /**
      * {@code GET /api/scripts/export?project=X&path=A&path=B} — a resource zip.
      *
      * <p>Repeated {@code path} parameters rather than one delimited value: a

@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.24.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.25.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -451,6 +451,31 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   not read until the loop had ended, and the LSP and terminal froze with it.
   `ExecutionService.submit` returns as soon as the work is accepted, and
   `started`, `output` and `finished` are sent from its callbacks.
+
+- **Git is READ-ONLY here, and must stay so.** The tree shows what differs from
+  the last commit; `module-git` does staging, committing and remotes. There is no
+  route in this module that writes to a repository, and adding one would reopen a
+  decision Nigel took on 01/09/2026. `GitProbe` reads the working tree with JGit
+  at `<dataDir>/projects/<Project>/.git` — the same path `module-git`'s
+  `GitManager.getProjectFolderPath` resolves. Keep them agreeing.
+- **An unresolvable HEAD makes JGit call every tracked file untracked.** Measured
+  on 6.10.1: nothing is "in HEAD", so a whole committed project reports as newly
+  added, and NOTHING throws or logs. Check `getFullBranch()` before asking for
+  status — an indicator claiming a repository lost its history is worse than one
+  admitting it cannot read it. The same rule generalises: an undecorated tree
+  claims "nothing changed", so every failure state needs its own field on the
+  wire, never an empty result.
+- **A shipped library the Gateway already owns is a packaging fault, not a
+  nuisance.** JGit pulls slf4j, and `ModuleJarPackagingTest` refused the build
+  until it was excluded on the dependency. Exclude it there, never on the
+  configuration: `modlImplementation` feeds the compile classpath too, and
+  excluding at that level took slf4j away from this module's own loggers.
+- **A live suite creates the fixtures it destroys.** `validate_v32_git` first
+  edited and deleted whichever library script came first in the project, and
+  three runs permanently removed two real probe scripts from the shared scratch
+  project. Never operate on a resource you did not create, and clear your own
+  fixtures BEFORE taking a baseline — leftovers from an interrupted run get
+  committed into it and the next assertion reads the wrong state.
 
 ## Build, deploy, verify
 

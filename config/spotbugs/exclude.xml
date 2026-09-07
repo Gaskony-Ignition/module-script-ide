@@ -85,6 +85,25 @@
         <Class name="com.gaskony.scriptide.gateway.presence.PresenceSweep" />
         <Bug pattern="EI_EXPOSE_REP2" />
     </Match>
+
+    <!--
+        EI_EXPOSE_REP2 on the git status sweep — the same mechanism, for the same
+        reason as the presence one above.
+
+        The sweep WRITES into the one GitStatusRegistry that the sockets read and
+        subscribe to. A defensive copy would give the sweep a private registry it
+        alone could see, so the poll would keep running and no tree would ever be
+        decorated: the feature would be gone, not protected.
+
+        The other finding on this package was FIXED rather than excluded —
+        GitSnapshot wrapped its marks map in an unmodifiable VIEW, which still
+        changes when the map behind it does. It copies now, which is what a
+        snapshot has to do to describe the moment it was taken.
+    -->
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.git.GitStatusSweep" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
     <Match>
         <Class name="com.gaskony.scriptide.gateway.presence.DesignerPresenceListener" />
         <Bug pattern="EI_EXPOSE_REP2" />

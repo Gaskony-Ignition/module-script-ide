@@ -2,7 +2,43 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.24.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+**Version 1.25.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+
+### 1.25.0 — git status in the tree (07/09/2026)
+
+Nigel asked for it directly. **Read-only**, and it stays that way: `module-git`
+does staging, committing and remotes. This is the half you want while editing —
+which of these files have I changed — shown as one letter per row.
+
+**Pure Java, because there was no other route.** The rig runs a stock image with
+no `git` binary and building a custom one is settled the other way, so the
+gateway reads `.git` with JGit at `<dataDir>/projects/<Project>/.git` — the same
+path `module-git`'s `GitManager` resolves, checked against its source so the two
+cannot disagree on one gateway. slf4j is excluded from the dependency;
+`ModuleJarPackagingTest` refused the build otherwise, correctly.
+
+**Two files are one script.** `code.py` and `resource.json` fold into one
+resource mark on the gateway. The client rolls a deleted resource's mark up to
+the nearest surviving node, and folders take the WORST mark below them — a
+collapsed package must not let a deletion hide behind an addition.
+
+**The measurement that changed the design.** With an unresolvable HEAD, JGit
+reports every tracked file as untracked: nothing is "in HEAD", so a whole
+committed project renders as newly added, with no exception and no log line. The
+first `GitProbe` did exactly that. It checks the branch before asking for status
+now. The states are distinct on the wire — `repo:false`, `error`, `head:null`
+for an unborn branch — because an undecorated tree claims "nothing changed" and
+every failure has to look different from that claim.
+
+**Cost:** polled only for projects a client actually has open, read from the
+presence registry rather than a second list. Ten seconds; an unchanged read does
+not push.
+
+`validate_v32_git.py` 25/25, twice, against a real repository. **Its own first
+version deleted two real probe scripts from the shared scratch project across
+three runs** — it edited and deleted whichever library script came first instead
+of one it owned. Restored from the fixture baseline; the suite now creates what
+it destroys.
 
 ### 1.24.0 — templates, autosave, console export (07/09/2026)
 
@@ -1598,10 +1634,12 @@ gutter marker.
   across scopes, and guessing puts a warning on correct client code.
 - **Perspective/Vision event scripts** are not editable — their code lives inside
   view JSON, not as its own resource.
-- **No git UI**, still. Nigel's decision (01/09/2026): this module is not becoming a git
-  module — `Gaskony-Ignition/module-git` already exists. git is driven from the
-  terminal's command line, and any UI added later is VS Code-shaped status and
-  diffs on top of that, not a second implementation.
+- **Git STATUS ships (1.25.0); git actions do not.** The tree marks what differs
+  from the last commit and the side bar names the branch — the VS Code-shaped
+  status half Nigel's 01/09/2026 decision allowed for. There is still no stage,
+  commit, diff, branch or remote here, and there should not be:
+  `Gaskony-Ignition/module-git` exists and git is driven from the command line.
+  The module has no route that WRITES to a repository.
 - **Tag Change is no longer a gap.** It sat here from 1.1.0 to 1.16.0 waiting on
   a measurement; the workspace was driven on 06/09/2026 and `paths` /
   `changeTypes` / `enabled` are editable, with `changeTypes` on an allowlist. See

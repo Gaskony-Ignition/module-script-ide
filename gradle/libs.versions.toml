@@ -8,6 +8,17 @@ ignition = "8.3.0"
 # crosses an SDK boundary. See gateway/build.gradle.kts for the full rationale.
 gson = "2.14.0"
 
+# JGit, for READING a project's git status. Core only — deliberately NOT
+# org.eclipse.jgit.ssh.apache, which the sibling git module ships: this module
+# never talks to a remote, so pulling in a transport stack would ship an SSH
+# client to serve a tree decoration. Same version as module-git so two modules
+# on one gateway cannot disagree about what "modified" means.
+#
+# Shipped rather than compileOnly because the Gateway bundles no JGit, and the
+# rig runs a STOCK image with no `git` binary at all — reading .git in pure Java
+# is the only route that does not require changing the image.
+jgit = "6.10.1.202505221210-r"
+
 # Matches the EE10 gateway runtime (jakarta.servlet-api 6.0.0 ships in
 # lib/core/gateway on 8.3.x).
 jakarta-servlet = "6.0.0"
@@ -60,6 +71,7 @@ slf4j = "2.0.12"
 ignition-common = { module = "com.inductiveautomation.ignitionsdk:ignition-common", version.ref = "ignition" }
 ignition-gateway-api = { module = "com.inductiveautomation.ignitionsdk:gateway-api", version.ref = "ignition" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+jgit = { module = "org.eclipse.jgit:org.eclipse.jgit", version.ref = "jgit" }
 jakarta-servlet = { module = "jakarta.servlet:jakarta.servlet-api", version.ref = "jakarta-servlet" }
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 jetty-ee10-websocket-server = { module = "org.eclipse.jetty.ee10.websocket:jetty-ee10-websocket-jetty-server", version.ref = "jetty" }

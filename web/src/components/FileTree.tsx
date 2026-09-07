@@ -43,6 +43,7 @@ import type { ScriptEntry, ScriptTypeId } from '../api/scripts';
 import { IconFolder, IconPlus, IconRevert, IconTrash, iconForType } from './Icons';
 import { Chevron } from './Chevron';
 import './FileTree.css';
+import { markLetter, markTitle, type GitMark } from '../api/git';
 
 export interface FileTreeProps {
   scripts: ScriptEntry[];
@@ -70,6 +71,17 @@ export interface FileTreeProps {
    * creates it and opens it, which reaches the same place in one click.
    */
   onCreateSingleton?: (typeId: ScriptTypeId) => void;
+  /**
+   * Git marks, already rolled up onto the paths this tree renders.
+   *
+   * Rolled up by the caller rather than here because the roll-up needs to know
+   * about resources that NO LONGER EXIST — a deleted script has no row, and its
+   * mark belongs to the package above it. This component only knows what is
+   * still there.
+   *
+   * Absent when the project is not a git working tree, which is most of them.
+   */
+  gitMarks?: Map<string, GitMark>;
 }
 
 /**
@@ -188,6 +200,19 @@ export function buildPackageTree(entries: ScriptEntry[]): PackageNode {
   return root;
 }
 
+/**
+ * The resource-path prefix a package key sits under, read off the entries.
+ *
+ * A library entry's `path` ends with its `name`, so what remains is the prefix —
+ * `ignition/script-python/`. Derived rather than written down because the tree
+ * renders whatever the gateway sends, and a literal would go on matching nothing
+ * in silence if a type id ever changed.
+ */
+export function libraryPathPrefix(entries: { path: string; name: string }[]): string {
+  const entry = entries.find((e) => e.name && e.path.endsWith(e.name));
+  return entry ? entry.path.slice(0, entry.path.length - entry.name.length) : '';
+}
+
 /** Case-insensitive name compare — "Zebra" and "apple" sort as `apple, Zebra`. */
 function byName(a: { name: string }, b: { name: string }): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
@@ -213,6 +238,7 @@ export default function FileTree({
   onDelete,
   onContext,
   onCreateSingleton,
+  gitMarks,
 }: FileTreeProps) {
   /**
    * Which branches are OPEN. Everything starts shut (Nigel, 02/09/2026).
@@ -346,6 +372,7 @@ export default function FileTree({
                             onSelect={onSelect}
                             onDelete={onDelete}
                             onContext={onContext}
+                            gitMark={gitMarks?.get(entry.path)}
                           />
                         ))}
                     </ul>
@@ -386,6 +413,15 @@ export default function FileTree({
             <Chevron open={!libraryCollapsed} />
             <span>Project Library</span>
             <span className="file-tree-count">{library.length}</span>
+            {/* A script deleted from the TOP level of the library has no
+                surviving node — its parent is this group. Without a mark here
+                the one change most worth noticing would be the one change the
+                tree could not show. */}
+            {(() => {
+              const root = libraryPathPrefix(library).replace(/\/$/, '');
+              const mark = root ? gitMarks?.get(root) : undefined;
+              return mark ? <GitBadge mark={mark} /> : null;
+            })()}
           </button>
           {onCreate && (
             <button
@@ -412,6 +448,8 @@ export default function FileTree({
               onSelect={onSelect}
               onDelete={onDelete}
               onContext={onContext}
+              gitMarks={gitMarks}
+              pathPrefix={libraryPathPrefix(library)}
             />
           ))}
       </section>
@@ -443,6 +481,7 @@ export default function FileTree({
                     onSelect={onSelect}
                     onDelete={onDelete}
                     onContext={onContext}
+                    gitMark={gitMarks?.get(entry.path)}
                   />
                 ))}
               </ul>
@@ -473,6 +512,15 @@ interface BranchProps {
   selectedPath: string | null;
   onSelect: (entry: ScriptEntry) => void;
   onDelete?: (entry: ScriptEntry) => void;
+  gitMarks?: Map<string, GitMark>;
+  /**
+   * What to prefix a package key with to get its resource path.
+   *
+   * Measured from the entries rather than hardcoded to
+   * `ignition/script-python/`: the tree renders whatever the gateway sends, and
+   * a literal here would silently stop matching if a type ever moved.
+   */
+  pathPrefix?: string;
 }
 
 function PackageBranch({
@@ -484,6 +532,8 @@ function PackageBranch({
   onSelect,
   onDelete,
   onContext,
+  gitMarks,
+  pathPrefix,
 }: BranchProps) {
   return (
     <ul className="file-tree-list">
@@ -514,6 +564,13 @@ function PackageBranch({
               <Chevron open={!isCollapsed} />
               <IconFolder size={14} className="file-tree-icon" />
               <span>{child.name}</span>
+              {/* A collapsed package hides its changed scripts, so it carries
+                  the worst mark of everything below it — including deletions,
+                  whose own row no longer exists. */}
+              {pathPrefix !== undefined && (() => {
+                const mark = gitMarks?.get(`${pathPrefix}${child.key}`);
+                return mark ? <GitBadge mark={mark} /> : null;
+              })()}
             </button>
             {!isCollapsed && (
               <PackageBranch
@@ -525,6 +582,8 @@ function PackageBranch({
                 onSelect={onSelect}
                 onDelete={onDelete}
                 onContext={onContext}
+                gitMarks={gitMarks}
+                pathPrefix={pathPrefix}
               />
             )}
           </li>
@@ -539,6 +598,7 @@ function PackageBranch({
           onSelect={onSelect}
           onDelete={onDelete}
           onContext={onContext}
+          gitMark={gitMarks?.get(entry.path)}
         />
       ))}
     </ul>
@@ -612,6 +672,23 @@ function SingletonRow({
 }
 
 /**
+ * One letter saying how this resource differs from the last commit.
+ *
+ * A letter and a colour, not an icon: the row already carries a type icon and a
+ * chevron, and a third glyph competing with those reads as another file kind.
+ * The letters are git's own — M, A, D — so anybody who has used `git status`
+ * already knows them, and the tooltip spells each one out for anybody who has
+ * not.
+ */
+function GitBadge({ mark }: { mark: GitMark }) {
+  return (
+    <span className={`git-mark git-mark-${mark}`} title={markTitle(mark)} aria-hidden="true">
+      {markLetter(mark)}
+    </span>
+  );
+}
+
+/**
  * The Designer's "this event script is switched off" marker.
  *
  * A badge rather than dimming the row: dimming is already what an inherited or
@@ -632,9 +709,12 @@ interface RowProps {
   onSelect: (entry: ScriptEntry) => void;
   onDelete?: (entry: ScriptEntry) => void;
   onContext?: FileTreeProps['onContext'];
+  gitMark?: GitMark;
 }
 
-function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete, onContext }: RowProps) {
+function ScriptRow({
+  entry, depth, selectedPath, onSelect, onDelete, onContext, gitMark,
+}: RowProps) {
   const selected = entry.path === selectedPath;
   // Only a script this project OWNS can be deleted. An inherited one has nothing
   // here to remove, and the server 404s it — so the button is absent rather than
@@ -675,6 +755,7 @@ function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete, onContext }
             {entry.origin}
           </span>
         )}
+        {gitMark && <GitBadge mark={gitMark} />}
       </button>
       {deletable && (
         <button

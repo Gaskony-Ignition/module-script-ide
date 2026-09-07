@@ -2,6 +2,98 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.25.0] — 2026-09-07
+
+feat: git status in the tree — which resources differ from the last commit.
+
+Nigel asked for this directly. Read-only, and it stays that way: staging,
+committing and remotes belong to `module-git`, and the decision on 01/09/2026
+that this module is not becoming a second git module still holds. What ships is
+the half a person wants while editing — what have I changed — and nothing that
+writes to a repository.
+
+### How it reads a repository, and why it had to be this way
+
+The rig runs a **stock Ignition image with no `git` binary**, and building a
+custom one is a decision already taken the other way. Shelling out was never
+available, so the gateway reads `.git` with JGit, in pure Java. The repository is
+expected at `<dataDir>/projects/<Project>/.git` — checked against
+`module-git`'s own `GitManager.getProjectFolderPath`, so two modules on one
+gateway cannot disagree about which directory is the repository.
+
+slf4j is **excluded** from the JGit dependency rather than merely absent:
+`ModuleJarPackagingTest` refused the build until it was, and it was right to.
+The Gateway owns the logging facade, and a second copy on a module classloader
+is the same class of fault as a second Jython.
+
+### Two files are one script
+
+A script is `code.py` and `resource.json` in one directory, and the Designer
+rewrites both on every save. The gateway folds file changes into RESOURCE
+changes before sending them, so a save produces one mark rather than two on a
+path the tree does not contain.
+
+The client does the other half. A deleted resource has no row left, so its mark
+walks up to the nearest node that still exists — its package, or the Project
+Library header when it was a top-level script. Without that, deletion would be
+the one change this feature could not show. Folders carry the **worst** mark of
+everything below them, so a collapsed package cannot let a deletion hide behind
+an addition.
+
+### The failure it is shaped around, which was measured rather than assumed
+
+An undecorated tree claims "nothing has changed", so every way of failing has to
+look different from that.
+
+The one that mattered was found by probing JGit rather than reasoning about it:
+**with an unresolvable HEAD, status reports every tracked file as untracked.**
+Nothing is "in HEAD", so a whole committed project renders as newly added — and
+nothing throws, and nothing is logged. The first version of `GitProbe` did
+exactly that. It now checks the branch before asking for status at all, and a
+repository whose HEAD cannot be read says so.
+
+The rest of the states are distinct on the wire: `repo: false` for a project
+that is not version-controlled, `error` for one that cannot be read, `head: null`
+for a repository with no commit yet, where "everything is new" is true and
+useless as hundreds of badges. Changed files with no node in the tree —
+`project.json` and the like — are counted rather than dropped, because a summary
+saying "no changes" over a dirty working tree is the wrong answer to give
+somebody about to commit.
+
+### Cost control
+
+The poll runs only for projects an IDE client actually has open, taken from the
+presence registry rather than a second list of its own. A status call walks a
+working tree, and most projects on a gateway are neither repositories nor being
+looked at. Ten seconds, and an unchanged read does not push — the version
+counter exists so clients do not re-render six times a minute over a tree nobody
+touched.
+
+### Fixed
+
+- `GitSnapshot` wrapped its marks map in an unmodifiable VIEW, which still
+  changes when the map behind it does. It copies now, which is what a snapshot
+  has to do to describe the moment it was taken. (SpotBugs found it; it was
+  right.)
+
+### Verified
+
+`validate_v32_git.py` — 25/25, twice, against a REAL repository built on the
+host and installed into the gateway's project directory, because the container
+has no git. It asserts the fold, the roll-up, the worst-mark rule, the summary
+line, the rendered badges, and that an unreadable HEAD does not mark a whole
+project as new. It removes the repository and its fixtures afterwards, and the
+second run proves it.
+
+**The suite's own first version was a defect worth recording**: it edited and
+then deleted whichever library script happened to be first in the project, and
+three runs permanently removed two real probe scripts from a shared gateway.
+They were restored from the fixture repository's baseline commit. The suite now
+creates the script it destroys. A test that eats other tests' fixtures is a
+worse fault than anything it can catch.
+
+Gate PASS (18 routes, none unmounted). Java 662, Vitest 831.
+
 ## [1.24.0] — 2026-09-07
 
 feat: templates, autosave and crash recovery, console export and timestamps.

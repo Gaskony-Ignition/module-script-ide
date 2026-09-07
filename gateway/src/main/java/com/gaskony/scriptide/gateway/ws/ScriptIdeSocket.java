@@ -82,6 +82,15 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
      */
     private final PresenceRegistry.Listener presenceListener = version -> sendPresence();
 
+    /**
+     * The project this client last reported. Git status is per project, and the
+     * push has to know which one to send without asking the browser again.
+     */
+    private volatile String gitProject;
+
+    private final com.gaskony.scriptide.gateway.git.GitStatusRegistry.Listener gitListener =
+        version -> sendGitStatus();
+
     /** The run in flight, kept so it can be recorded when it finishes. */
     private volatile String runningSource;
     private volatile String runningProject;
@@ -142,6 +151,10 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         if (presenceRegistry != null) {
             presenceRegistry.addListener(presenceListener);
         }
+        var gitRegistry = ScriptIdeSocketRegistry.getGitStatus();
+        if (gitRegistry != null) {
+            gitRegistry.addListener(gitListener);
+        }
         logger.debug("Script IDE socket opened for user '{}' (admin={})", username, administrator);
     }
 
@@ -198,6 +211,16 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
             } catch (RuntimeException e) {
                 logger.debug("exec frame failed for '{}': {}", username, e.toString());
                 sendError("exec", "Execution request failed: " + e.getMessage());
+            }
+            return;
+        }
+
+        if ("git".equals(channel)) {
+            try {
+                handleGit(envelope.getAsJsonObject("msg"));
+            } catch (RuntimeException e) {
+                // Same rule as presence: a decoration is never a gate.
+                logger.debug("git frame failed for '{}': {}", username, e.toString());
             }
             return;
         }
@@ -293,6 +316,65 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         var designer = ScriptIdeSocketRegistry.getDesignerPresence();
         msg.addProperty("designerFeed", designer != null);
         sendOn("presence", msg);
+    }
+
+    /**
+     * A client naming the project it wants git status for.
+     *
+     * <p>The first frame also triggers an immediate read rather than waiting for
+     * the ten-second sweep. Opening a project and seeing an undecorated tree for
+     * ten seconds is indistinguishable from a clean tree, which is the one thing
+     * this indicator must never claim falsely.</p>
+     */
+    private void handleGit(JsonObject msg) {
+        var registry = ScriptIdeSocketRegistry.getGitStatus();
+        if (registry == null) {
+            return;
+        }
+        String project = msg == null ? null : stringOf(msg, "project");
+        if (project != null && !project.isBlank()) {
+            gitProject = project;
+            registry.refresh(project);
+        }
+        sendGitStatus();
+    }
+
+    /**
+     * This client's project, as git sees it.
+     *
+     * <p>Sends even when there is no repository, and even when reading it failed.
+     * A client that receives nothing cannot tell "no repo" from "not answered
+     * yet", and would have to guess — so it is told, and shows nothing on
+     * purpose rather than by accident.</p>
+     */
+    private void sendGitStatus() {
+        var registry = ScriptIdeSocketRegistry.getGitStatus();
+        String project = gitProject;
+        if (registry == null || project == null || project.isBlank()) {
+            return;
+        }
+        sendOn("git", gitJson(registry, project));
+    }
+
+    /** The wire form of one project's status. Package-private so a test can read it. */
+    static JsonObject gitJson(com.gaskony.scriptide.gateway.git.GitStatusRegistry registry,
+                              String project) {
+        var snapshot = registry.statusOf(project);
+        JsonObject msg = new JsonObject();
+        msg.addProperty("version", registry.version());
+        msg.addProperty("project", project);
+        msg.addProperty("repo", snapshot.repo());
+        msg.addProperty("branch", snapshot.branch());
+        msg.addProperty("head", snapshot.head());
+        msg.addProperty("error", snapshot.error());
+        JsonObject marks = new JsonObject();
+        snapshot.marks().forEach((path, mark) -> marks.addProperty(path, mark.wire()));
+        msg.add("marks", marks);
+        // Changed files with no tree node — project.json and the like. A count,
+        // not a list of paths to decorate, so the summary cannot claim "no
+        // changes" while something outside the tree differs.
+        msg.addProperty("others", snapshot.others().size());
+        return msg;
     }
 
     /**
@@ -750,6 +832,12 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
             // other people see, and a name left on a file by a browser that has
             // gone is exactly the stale indicator this feature must not produce.
             presenceRegistry.remove(sessionId);
+        }
+        var gitRegistry = ScriptIdeSocketRegistry.getGitStatus();
+        if (gitRegistry != null) {
+            // The registry outlives this socket, so a listener left behind keeps
+            // a closed connection reachable and every later poll writes to it.
+            gitRegistry.removeListener(gitListener);
         }
         ScriptIdeSocketRegistry.unregister(this);
         logger.debug("Script IDE socket closed for '{}' ({}: {})", username, statusCode, reason);
