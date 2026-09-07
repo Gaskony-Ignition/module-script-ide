@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.23.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.24.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -305,6 +305,44 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   one up in its own discovery; an id it did not discover is a 400. Trusting the
   body would make "run this test" a way to call any function in the project by
   name, through the write gate but past every rule about what a test is.
+
+- **A recovered draft is opened over the gateway's CURRENT copy, never
+  reconstructed from itself.** A draft holds text; a document also needs its
+  type, data key, inheritance state and the signature the next save will send.
+  Building one from the draft hands the write path an etag from a previous
+  session, which is exactly the stale write `If-Match` exists to refuse. So
+  `restoreDrafts` calls `openScript` first and applies the text over it — the
+  tab is then dirty against what the gateway holds NOW, which is the truthful
+  state, and the ordinary conflict machinery is already pointed at the right
+  version. `validate_v31` asserts the gateway's copy is untouched.
+- **Drafts are `localStorage`, and the notice says so.** Per viewer, per
+  browser, invisible to the gateway and to every other machine. Saying "kept in
+  this browser only" is the limit of the promise; implying the work was
+  anywhere else would be a claim this cannot support. A CLEAN buffer is never
+  kept — it is already on the gateway byte for byte, and a store full of
+  unmodified copies pushes the genuinely unsaved ones out against the quota.
+  Every read and write is wrapped: `localStorage` THROWS outright in a private
+  window and under a thumbnail capture.
+- **A template is compiled by the gateway before it ships, and its calls are
+  checked against the live `system.*`.** A template seeds code into somebody's
+  new file, so a plausible-but-wrong call is repeated everywhere anyone starts
+  from it. `validate_v31_authoring.py` compiles every template with the running
+  Jython. Doing this caught `beginNamedQueryTransaction` (which is for
+  `runNamedQuery`) where `runPrepUpdate` needs the id from `beginTransaction`.
+  Templates are library-only: an event script's signature is dictated by its
+  type and already seeded from a measured stub.
+- **A test that greps source for a lint is the false positive the lints avoid.**
+  `templates.test.ts` asserts no template catches `except Exception` — and its
+  first version failed on a COMMENT explaining why not to. Strip comments before
+  a textual assertion, or write it over the AST. This is the same rule
+  `StyleChecks` exists for, and a test that breaks it is no better than a lint
+  that does.
+- **The console's timestamp is rendered OUTSIDE the `<pre>`.** Inside it, a copy
+  of the output carries a column of times somebody then has to strip out of a
+  bug report. The EXPORT stamps every line regardless of the toggle and says
+  the times are the BROWSER's clock — the toggle is about reading the console
+  now, the export is about reading it later, and only one of them can be lined
+  up against a gateway log.
 
 - **Presence is a WARNING, never a lock, and the wording is load-bearing.**
   Nothing in the presence path refuses a save; `If-Match` on the write path is

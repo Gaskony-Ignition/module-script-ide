@@ -90,9 +90,73 @@ interface OutputEntry {
   sourcePath?: string;
   /** Whether a further chunk of the same stream may be appended to this block. */
   open?: boolean;
+  /**
+   * When this block STARTED, epoch millis.
+   *
+   * Started, not finished: a chunk is appended to an open block as it arrives,
+   * so a block's time is when its first byte reached the browser. Re-stamping
+   * on each append would make a loop that prints for a minute claim to have
+   * printed at the end of it.
+   *
+   * Browser clock, not the gateway's. It is the only one available here, and
+   * the two can differ — which matters if anyone lines these up against a
+   * gateway log, so the export says which clock it used.
+   */
+  at: number;
 }
 
 const STARTER = '# Runs on the Gateway. Ctrl+Enter to run, Ctrl+Shift+Enter for the selection.\n';
+
+/**
+ * One block's arrival time, as a 24-hour clock with milliseconds.
+ *
+ * Milliseconds because the reason to turn stamps on is usually to see how long
+ * something took, and second resolution answers that badly for anything that
+ * prints in a loop.
+ */
+export function stampOf(at: number): string {
+  if (!at) return '--:--:--.---';
+  const d = new Date(at);
+  const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    + `.${pad(d.getMilliseconds(), 3)}`;
+}
+
+/**
+ * The whole output as plain text, for the file the Export button hands over.
+ *
+ * ANSI is STRIPPED, not preserved: the point of the export is something you can
+ * paste into a ticket or grep, and escape bytes in a text file render as
+ * mojibake everywhere except a terminal. What is on screen in colour is on the
+ * page in words.
+ *
+ * Every line is stamped regardless of the on-screen toggle, and the header says
+ * whose clock it is. A transcript with no times is much less useful later, and
+ * the toggle is about reading the console now, not about what is worth keeping.
+ */
+export function transcriptOf(entries: OutputEntry[], project: string): string {
+  const header = [
+    `# Script IDE console output`,
+    `# project: ${project}`,
+    `# exported: ${new Date().toISOString()}`,
+    `# times are this BROWSER's clock, not the gateway's`,
+    '',
+  ];
+  const body = entries.map((entry) => {
+    const text = hasAnsi(entry.text)
+      ? parseAnsi(entry.text).map((span) => span.text).join('')
+      : entry.text;
+    const lines = text.split('\n');
+    // The stamp goes on the block, and continuation lines are indented to match
+    // rather than repeating a time they did not each arrive at.
+    const stamp = stampOf(entry.at);
+    const pad = ' '.repeat(stamp.length);
+    return lines
+      .map((line, index) => `${index === 0 ? stamp : pad}  ${line}`)
+      .join('\n');
+  });
+  return `${header.join('\n')}${body.join('\n')}\n`;
+}
 
 /** Where the platform keeps project-library modules. */
 const LIBRARY_ROOT = 'ignition/script-python/';
@@ -178,7 +242,21 @@ export default function ScriptConsole({
   const viewRef = useRef<EditorView | null>(null);
   /** True while the run-history dialog is open. */
   const [historyOpen, setHistoryOpen] = useState(false);
+  /**
+   * Whether each output block is prefixed with the time it arrived.
+   *
+   * Off by default and remembered per viewer. It is genuinely useful when you
+   * are timing something or lining output up against a gateway log, and it is
+   * noise the rest of the time — so it is a choice rather than a default.
+   */
+  const [stamps, setStamps] = useState(
+    () => storedChoice('console.timestamps', ['on', 'off'] as const, 'off') === 'on'
+  );
   const [entries, setEntries] = useState<OutputEntry[]>([]);
+  // Read by the export through a ref: the callback is memoised on `project`,
+  // and closing over `entries` would export whatever was on screen at the last
+  // time that identity changed.
+  const entriesRef = useRef<OutputEntry[]>([]);
   const [running, setRunning] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const outputRef = useRef<HTMLDivElement | null>(null);
@@ -210,15 +288,42 @@ export default function ScriptConsole({
   /** The resource the in-flight run submitted, or undefined for the console. */
   const runSourcePath = useRef<string | undefined>(undefined);
 
+  entriesRef.current = entries;
+
   const exec = useMemo(() => sharedExecClient(), []);
 
-  const append = useCallback((entry: Omit<OutputEntry, 'id'>) => {
+  /**
+   * Hand the output over as a file.
+   *
+   * An object URL and a synthetic click, revoked straight after: a data: URL
+   * carrying a megabyte of output hits the address-length limit in some
+   * browsers, and leaving the object URL alive holds the whole transcript in
+   * memory for the life of the page.
+   */
+  const doExport = useCallback(() => {
+    const text = transcriptOf(entriesRef.current, project);
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    link.download = `script-console-${project}-${now.getFullYear()}`
+      + `${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+      + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [project]);
+
+  const append = useCallback((entry: Omit<OutputEntry, 'id' | 'at'>) => {
     if (!entry.text && !entry.error) {
       return;
     }
     setEntries((previous) => [
       ...previous,
-      { ...entry, id: `e${(nextId.current += 1)}` },
+      { ...entry, id: `e${(nextId.current += 1)}`, at: Date.now() },
     ]);
   }, []);
 
@@ -240,7 +345,8 @@ export default function ScriptConsole({
         const merged = { ...last, text: last.text + text };
         return [...previous.slice(0, -1), merged];
       }
-      return [...previous, { id: `e${(nextId.current += 1)}`, kind, text, open: true }];
+      return [...previous,
+        { id: `e${(nextId.current += 1)}`, kind, text, open: true, at: Date.now() }];
     });
   }, []);
 
@@ -646,6 +752,27 @@ export default function ScriptConsole({
         <button type="button" onClick={() => setHistoryOpen(true)}>
           History
         </button>
+        <button
+          type="button"
+          aria-pressed={stamps}
+          className={stamps ? 'is-on' : undefined}
+          onClick={() => {
+            const next = !stamps;
+            setStamps(next);
+            rememberChoice('console.timestamps', next ? 'on' : 'off');
+          }}
+          title="Show the time each block of output arrived"
+        >
+          Times
+        </button>
+        <button
+          type="button"
+          onClick={doExport}
+          disabled={entries.length === 0}
+          title="Save the output as a text file, with times and without colour codes"
+        >
+          Export
+        </button>
         <button type="button" onClick={() => setEntries([])} disabled={entries.length === 0}>
           Clear output
         </button>
@@ -708,7 +835,12 @@ export default function ScriptConsole({
             </p>
           ) : (
             entries.map((entry) => (
-              <OutputBlock key={entry.id} entry={entry} onOpenFrame={openFrame} />
+              <OutputBlock
+                key={entry.id}
+                entry={entry}
+                stamps={stamps}
+                onOpenFrame={openFrame}
+              />
             ))
           )}
         </div>
@@ -720,13 +852,18 @@ export default function ScriptConsole({
 
 function OutputBlock({
   entry,
+  stamps,
   onOpenFrame,
 }: {
   entry: OutputEntry;
+  stamps: boolean;
   onOpenFrame: (path: string | undefined, line: number) => void;
 }) {
   return (
     <div className={`console-block console-${entry.kind}`}>
+      {/* Outside the <pre>, so a copy of the output does not carry a column of
+          times somebody then has to strip out of a bug report. */}
+      {stamps && <span className="console-stamp muted">{stampOf(entry.at)}</span>}
       <pre>{hasAnsi(entry.text) ? <AnsiText text={entry.text} /> : entry.text}</pre>
       {entry.error && (
         <Traceback error={entry.error} sourcePath={entry.sourcePath} onOpenFrame={onOpenFrame} />

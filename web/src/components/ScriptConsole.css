@@ -329,3 +329,20 @@
      class is here so a suite can select these and a theme can reach them. */
   white-space: inherit;
 }
+
+/* The arrival time, when the Times toggle is on. Sits beside the block rather
+   than inside its <pre>, so selecting the output copies the output. */
+.console-stamp {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-chrome);
+  user-select: none;
+}
+
+/* A pressed toolbar toggle. The console's buttons are otherwise all momentary,
+   so "on" needs to look different from "hovered" or it reads as neither. */
+.console-toolbar button.is-on {
+  background: var(--accent-primary-bg);
+  color: var(--accent-primary);
+}

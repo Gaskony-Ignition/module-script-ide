@@ -29,12 +29,14 @@ Also not portable, and not worth chasing:
 
 ## Progress
 
+**All four groups are complete as of 1.24.0 (07/09/2026).**
+
 | Group | State |
 | --- | --- |
 | 1. Test framework | **Done, 1.21.0** (07/09/2026) — see `docs/TEST-FRAMEWORK.md` |
-| 2. Snippets, templates, organise imports | **Snippets + organise/suggest imports done, 1.22.0.** Templates not started |
+| 2. Snippets, templates, organise imports | **Done.** Snippets + organise/suggest imports 1.22.0; templates 1.24.0 |
 | 3. Tag-path and DB-schema autocomplete | **Done, 1.22.0** (07/09/2026) — `TagBrowser`/`DbSchema` in `gateway/.../lang/`, backed by `SdkTagBrowser`/`SdkDbSchema` |
-| 4. Console and buffer polish | **Style lints + cprint/jsonPrint + ANSI done, 1.22.0.** History UI, autosave and output export not started |
+| 4. Console and buffer polish | **Done.** Lints + cprint/jsonPrint + ANSI 1.22.0; history search + duration 1.23.0 (the history UI itself shipped at 1.16.1); autosave + export + timestamps 1.24.0 |
 
 **The one thing group 1 changed about the brief.** Their mocking mechanism —
 swapping `globals()['system']` in the module under test — is **not safe on a

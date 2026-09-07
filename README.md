@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.23.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.24.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -137,6 +137,19 @@ apart: an error never got far enough to have an opinion.*
   string or a comment.
 - **Colour in the console.** `cprint` and `jsonPrint` are there in every run, and
   output that carries ANSI is rendered rather than shown as escape bytes.
+- **Start from a template.** Six starting points for a new library script — a
+  documented module, a parameterised database read, a transaction, tag
+  read/write, a test module, a module with a logger. Each one is compiled
+  against the gateway's own Jython before it ships.
+
+- **Nothing is lost if the tab dies.** Unsaved buffers are kept in your browser
+  as you type and offered back next time the page loads. Restoring opens the
+  gateway's current copy and puts your text over it, so you can see what you are
+  about to save.
+
+- **Take the console output with you.** Export writes it to a text file with
+  times and without colour codes, and Times stamps each block on screen.
+
 - **See who else has the file open.** A bar above the editor and a badge on the
   tab when somebody else is in the same script — from another browser, or from
   the Ignition Designer, read from the platform's own concurrent-editing feed.

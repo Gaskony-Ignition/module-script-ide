@@ -2,7 +2,29 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.23.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+**Version 1.24.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+
+### 1.24.0 — templates, autosave, console export (07/09/2026)
+
+The last three items of `docs/ECTOBOX-BORROWINGS.md`; **all four groups are now
+done**.
+
+**Autosave.** Every dirty buffer is kept in `localStorage` as you type and
+offered back on the next load. Restore opens the gateway's CURRENT copy and
+applies the recovered text over it, so the tab is dirty against what the gateway
+holds now rather than carrying a signature from a dead session. The notice says
+"kept in this browser only", because that is the limit of the promise.
+
+**Six templates** for a new library script. Library only — an event script's
+signature is dictated by its type. Each obeys the rules it would otherwise teach
+people to break (tabs, `except Throwable`, parameterised SQL), and
+`validate_v31` COMPILES every one of them with the gateway's own Jython. That
+caught the transaction template using `beginNamedQueryTransaction`, which is for
+`runNamedQuery` — `runPrepUpdate` takes the id from `beginTransaction`.
+
+**Console export and timestamps.** Export writes a stamped text file with ANSI
+stripped; Times is an off-by-default toggle, remembered per viewer, rendered
+outside the `<pre>` so copying the output does not copy the times.
 
 ### 1.23.0 — presence: who else has this file open (07/09/2026)
 
