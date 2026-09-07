@@ -2,7 +2,74 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.18.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+**Version 1.19.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+
+### 1.19.0 — a run that printed nothing, and a console you can arrange (07/09/2026)
+
+**The serious one: output was lost from the first project-library import
+onwards.** Nigel: *"it worked but didn't output the print as it was supposed to.
+I then went and ran the exact same thing in the designer script console and it
+outputed the json results as I expected."*
+
+Ignition resolves a project-library import by running that module's code through
+`ScriptManager.runCode`, which moves the calling thread onto the manager's
+`PySystemState` and never moves it back. From that point `print` and an explicit
+`sys.stdout.write` both reach the gateway's own console. The run succeeds, takes
+the time the work really took, and shows nothing.
+
+Two properties are why it survived fifteen releases and eleven live suites, and
+both are now asserted:
+
+- **only an import that EXECUTES code does it.** A standard-library module uses
+  Jython's own importer, and a module already in the manager's registry is copied
+  across by `applyModuleRegistry` and never imported at all — so the same script
+  prints on its SECOND run. That is the part that makes it read as random.
+- **an explicit `sys.stdout.write` is lost too.** So this is not the
+  `print`-versus-write asymmetry `TestHarness` documents: the whole `sys` moved.
+
+The fix is a **private builtins table per run** whose `__import__` restores the
+state in a `finally`. `PrivateStateRunnerImportTest` (5) pins it, and
+`validate_v26_console.py` (23/23) proves it on the gateway across every case in
+the table on `installImportHook`.
+
+**A mistake worth keeping.** The first attempt hooked `__builtins__` in place
+from a console run. There is no namespace-local builtins table in Jython — every
+`PySystemState` gets the same `getDefaultBuiltins()` — so that replaced
+`__import__` **for the whole gateway JVM** with a closure holding a list in one
+console session, which then grew on every import anywhere. Confirmed from an
+unrelated session (`__import__ is <function _si_hook>`), repaired with
+`__builtin__.fillWithBuiltins`, and verified back to
+`<built-in function __import__>`. The rig was the right place for it to happen
+and a production gateway would not have been. It is now a rule in `CLAUDE.md` and
+an assertion in both the unit test and the live suite.
+
+**A save looked like a conflict.** *"When I click save while it is saving to the
+gateway a pull request pops up on the script."* The write lands before its
+signature comes back, so mid-save the listing and the document disagree and every
+staleness check answered yes about the user's own keystroke. Two windows: the
+round trip (a per-document `savingUris` set) and the moment after it, where the
+document is ahead of the listing — closed by awaiting a tree re-read before the
+document leaves the set, because two opaque signatures cannot say which is older.
+The check samples every 25 ms and **was proved able to fail** with the fix
+reverted and redeployed; a timing assertion never seen red is one whose window is
+too narrow to sample.
+
+**The console splits where you want it.** *"I need to be able to adjust the size
+between the script and output windows... I also want to be able to choose to have
+them both horizontal or vertical side by side."* A draggable divider, a
+rows/columns toggle in the toolbar, and both remembered. The split is kept as a
+SHARE rather than a pixel count — the popped-out console is a tab people resize —
+and each orientation keeps its own.
+
+**And the teal corner.** *"When I pop out the script console to a new tab there is
+a tiny bit on the top left that looks teal but the rest looks violet."* Measured
+rather than guessed: both aurora packs share the base `#1a1233`, which IS violet,
+and all the teal lives in `--page-glow`, whose first radial is centred at
+`6% -14%`. The console painted an opaque `--bg-primary` over the glow and the
+popped-out page framed it in `.app-main`'s 32px padding, so the only lit ground
+left was that padding — at the corner where the teal is. `.console` now carries
+the glow with `background-attachment: fixed`, and `.app-main-console` fills its
+tab.
 
 ### 1.18.0 — the compare feature is gone (07/09/2026)
 

@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.18.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.19.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -133,6 +133,18 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   `validate_v19_ruler` counts static problems; and the replace box reused
   `.search-panel-input`, which made `validate_v16_nav`'s `fill` ambiguous the
   moment a search returned hits. A new kind of row gets a new class.
+- **Our own save is not somebody else's change, and staleness has TWO windows.**
+  A write lands on the gateway before its new signature reaches the client, so
+  mid-save the background listing and the open document disagree — and every
+  check that asks "has this moved on?" answers yes about the user's own
+  keystroke, showing the tab marker, the bar and the counted pull button
+  (Nigel, 07/09/2026). `savingUris` covers the round trip; the second window is
+  AFTER it, where the document carries the signature the write returned and the
+  listing still holds the previous one. `isStale` compares for difference and two
+  opaque signatures cannot say which is older, so the tree re-read is awaited on
+  every save BEFORE the document leaves `savingUris` — not left to the poll. A
+  failed or conflicted save leaves the set at once, because that is the one case
+  where the bar is telling the truth.
 - **A history restore LOADS THE BUFFER; it never writes.** `SaveHistory` is a
   side store, and the one write path stays the ordinary save — with its
   If-Match, its inheritance rule and its byte fidelity. A restore that wrote
@@ -158,6 +170,30 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   from inside the harness** — Jython buffers `sys.stdout` and the runner's
   tail-flush does not reach that buffer on a batch run. The script console shows
   none of this, because a socket run has a periodic pump and a batch run does not.
+- **An import moves the thread off our system state, and the runner puts it
+  back.** Ignition resolves a project-library import by running that module
+  through `ScriptManager.runCode`, which calls `Py.setSystemState(manager.sys)`
+  on the CALLING thread and never restores it — so from the first such import
+  onward, `print` AND an explicit `sys.stdout.write` both reach the gateway's own
+  console instead of the run's capture. A script then succeeds, takes the time it
+  really took, and shows nothing. `PrivateStateRunner.installImportHook` wraps
+  `__import__` for the run and restores the state in a `finally`. Two things make
+  the bug hard to see and are asserted rather than described: only an import that
+  EXECUTES code does it (a stdlib module, or one already in the manager's
+  registry, is fine), so the SAME script prints on its second run; and an
+  explicit write is lost too, so asserting only on `print` would pass a half-fix.
+- **There is no namespace-local builtins table in Jython — never write to
+  `__builtins__` in place.** Every `PySystemState` is handed the same
+  `PySystemState.getDefaultBuiltins()`, so `__builtins__['__import__'] = hook`
+  from one console run replaces `__import__` for the whole JVM: every project
+  script, every gateway event script, with a closure belonging to one session.
+  This was done by accident on the rig on 07/09/2026 while diagnosing the bug
+  above, confirmed from an unrelated session and repaired with
+  `__builtin__.fillWithBuiltins`. Copy the table, mutate the copy, and set it on
+  the state AND in the run's globals — the frame reads its builtins from the
+  globals when they name one. Copy from the STATE's builtins, never from the
+  namespace's: the console's namespace outlives a run, so copying forward chains
+  a hook that restores a system state which has already been finished.
 - **A batch run passes NO output listener.** A listener means STREAMING, and a
   stream needs a socket to arrive on; one passed from an HTTP request thread was
   never called once and the output was silently lost. `null` makes the runner

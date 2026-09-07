@@ -19,13 +19,19 @@ export interface ResizerProps {
   min: number;
   max: number;
   /**
-   * Which side the panel being sized is on, relative to this divider.
+   * Which side of this divider the pane being sized is on.
    *
-   * `top` makes the divider horizontal — the bottom panel is sized by the edge
-   * ABOVE it, so dragging up grows it, which is the opposite sign from a
-   * left-hand panel.
+   * All four name THE PANE, never the divider or the drag: `left` and `above`
+   * grow with the pointer, `right` and `below` shrink with it. `above`/`below`
+   * make the divider horizontal.
+   *
+   * Renamed at 1.19.0. It used to be `left | right | top`, where `left` and
+   * `right` named the pane but `top` named the divider's own edge — the bottom
+   * dock is sized from the edge above it. Two conventions in one union is how a
+   * second horizontal divider gets the sign backwards, which is exactly what
+   * the console needed.
    */
-  side: 'left' | 'right' | 'top';
+  side: 'left' | 'right' | 'above' | 'below';
   label: string;
   onChange: (width: number) => void;
 }
@@ -34,6 +40,9 @@ const KEY_STEP = 16;
 
 export default function Resizer({ value, min, max, side, label, onChange }: ResizerProps) {
   const startRef = useRef({ x: 0, width: 0 });
+  const vertical = side === 'above' || side === 'below';
+  /** True when dragging towards larger x/y GROWS the pane. */
+  const growsWithPointer = side === 'left' || side === 'above';
 
   const clamp = useCallback(
     (width: number) => Math.min(max, Math.max(min, width)),
@@ -45,7 +54,7 @@ export default function Resizer({ value, min, max, side, label, onChange }: Resi
     // otherwise start a resize the user cannot see they began.
     if (event.button !== 0) return;
     startRef.current = {
-      x: side === 'top' ? event.clientY : event.clientX,
+      x: vertical ? event.clientY : event.clientX,
       width: value,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -53,10 +62,10 @@ export default function Resizer({ value, min, max, side, label, onChange }: Resi
 
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const delta = (side === 'top' ? event.clientY : event.clientX) - startRef.current.x;
-    // Dragging right grows a left-hand panel and shrinks a right-hand one;
-    // dragging DOWN shrinks a bottom panel, so `top` shares the sign of `right`.
-    const next = side === 'left'
+    const delta = (vertical ? event.clientY : event.clientX) - startRef.current.x;
+    // Dragging right grows a left-hand pane and shrinks a right-hand one, and
+    // dragging down does the same for a pane above and a pane below.
+    const next = growsWithPointer
       ? startRef.current.width + delta
       : startRef.current.width - delta;
     onChange(clamp(next));
@@ -69,8 +78,9 @@ export default function Resizer({ value, min, max, side, label, onChange }: Resi
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    const grow = side === 'top' ? 'ArrowUp' : side === 'left' ? 'ArrowRight' : 'ArrowLeft';
-    const shrink = side === 'top' ? 'ArrowDown' : side === 'left' ? 'ArrowLeft' : 'ArrowRight';
+    const [grow, shrink] = vertical
+      ? (growsWithPointer ? ['ArrowDown', 'ArrowUp'] : ['ArrowUp', 'ArrowDown'])
+      : (growsWithPointer ? ['ArrowRight', 'ArrowLeft'] : ['ArrowLeft', 'ArrowRight']);
     if (event.key === grow) {
       event.preventDefault();
       onChange(clamp(value + KEY_STEP));
@@ -88,9 +98,9 @@ export default function Resizer({ value, min, max, side, label, onChange }: Resi
 
   return (
     <div
-      className={side === 'top' ? 'resizer resizer-horizontal' : 'resizer'}
+      className={vertical ? 'resizer resizer-horizontal' : 'resizer'}
       role="separator"
-      aria-orientation={side === 'top' ? 'horizontal' : 'vertical'}
+      aria-orientation={vertical ? 'horizontal' : 'vertical'}
       aria-label={label}
       aria-valuenow={Math.round(value)}
       aria-valuemin={min}

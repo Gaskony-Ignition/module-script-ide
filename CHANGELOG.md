@@ -2,6 +2,128 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.19.0] — 2026-09-07
+
+fix: output written after an import was going to the gateway's console, not yours — plus a console you can resize and turn.
+
+Nigel, 07/09/2026, on all three: *"In the script console I need to be able to
+adjust the size between the script and output windows... I also want to be able
+to choose to have them both horizontal or vertical side by side"*, a stray teal
+corner in the popped-out console, and — the serious one — *"it worked but didn't
+output the print as it was supposed to. I then went and ran the exact same thing
+in the designer script console and it outputed the json results as I expected."*
+
+### Fixed — a run could succeed and print nothing
+
+**The whole of a script's output was lost from the first import of a project
+library module onwards.** Ignition resolves such an import by running that
+module's code through `ScriptManager.runCode`, which moves the calling thread
+onto the manager's `PySystemState` and never moves it back — so from that point
+`print` and an explicit `sys.stdout.write` alike reached the gateway's own
+console instead of the capture. The run itself succeeded, took the time the work
+really took, and showed nothing.
+
+Two properties made it read as random rather than as a bug, and both are now
+asserted in `validate_v26_console.py`:
+
+- **Only an import that EXECUTES code does it.** `import json` uses Jython's own
+  importer; a module already in the manager's registry is copied across and never
+  imported at all. So the same script prints on its **second** run — which is
+  the most confusing part of the symptom, and the reason it survived fifteen
+  releases and eleven live suites.
+- **An explicit `sys.stdout.write` was lost too**, not just `print`. That rules
+  out the asymmetry `TestHarness` documents at 1.17.0: the whole `sys` had moved,
+  not just what `print` resolves through. A fix that repaired only `print` would
+  have looked right.
+
+The fix gives each run a **private builtins table** whose `__import__` delegates
+to the real one and then puts our system state back, in a `finally` so a failed
+import still leaves a working traceback path.
+
+**Why a private table and not simply a hook.** There is no namespace-local
+builtins table in Jython: every `PySystemState` is handed the same
+`getDefaultBuiltins()`, so writing `__builtins__['__import__']` from a console
+run replaces `__import__` for the whole JVM — every project script and every
+gateway event script — with a closure belonging to one session. That was done by
+accident on the rig while diagnosing this, confirmed from an unrelated session
+and repaired with `__builtin__.fillWithBuiltins`. The table is therefore COPIED
+first, the copy is built fresh from the state's own builtins on every run so
+hooks can never chain onto a finished run's state, and both halves are pinned by
+`PrivateStateRunnerImportTest` and asserted live from outside a run.
+
+### Added — the console splits where you want it
+
+- **A draggable divider between the editor and the output.** They were fixed at
+  45/55.
+- **Rows or columns**, chosen from a segmented control in the console toolbar:
+  output below the editor, or beside it. A wide monitor running a stacked console
+  wastes most of its width.
+- **Both are remembered**, and the split is kept as a SHARE rather than a pixel
+  count — the popped-out console is a tab people resize, and a remembered 620px
+  editor is two thirds of one window and the whole of the next. Each orientation
+  keeps its own share, because a split that reads well stacked is not the one
+  that reads well side by side.
+
+### Fixed — the popped-out console in the glass themes
+
+**"When I pop out the script console to a new tab there is a tiny bit on the top
+left that looks teal but the rest looks violet."** Both aurora packs share the
+same base `#1a1233`, which is violet; the teal in `Glass Aurora — Teal` is
+entirely in `--page-glow`, whose first radial is centred at `6% -14%` — the top
+left. The console painted an opaque `--bg-primary` over that glow, and the
+popped-out page framed the console in `.app-main`'s 32px padding — so the only
+lit ground left showing was that padding, at the corner where the teal is.
+
+- `.console` now carries `background-image: var(--page-glow)` with
+  `background-attachment: fixed`, the same three declarations `.app`, `.panel`
+  and `.code-editor` already had. `fixed` is what makes the docked console and
+  the popped-out one light identically.
+- `.app-main-console` has no padding and fills its tab.
+
+### Fixed — your own save looked like somebody else's edit
+
+**"When I click save while it is saving to the gateway a pull request pops up on
+the script which could be confusing for people. They might think that there is a
+conflict."**
+
+The write lands on the gateway before its new signature comes back, so for the
+length of that round trip the background listing legitimately reports a signature
+the open document does not carry — and every check that asks "has this moved on?"
+answered yes about the user's own keystroke: the tab marker, the bar on the
+document, and the counted `Pull n changes` button, all three.
+
+There were two windows, not one, and the second is the reason this is not simply
+a flag:
+
+- **the round trip**, now covered by a per-document `savingUris` set. A save that
+  FAILS or 409s leaves the set immediately, so the bar returns in the one case
+  where it is telling the truth.
+- **after it**, where the document carries the signature the write returned and
+  the listing still holds the one from before. `isStale` compares for difference,
+  and two opaque signatures cannot say which is older — so the fix is to not be
+  in that state: the tree is re-read and awaited on every save, before the
+  document leaves `savingUris`.
+
+`validate_v18_pull.py` samples every 25 ms across the whole save and keeps the
+worst state seen, rather than looking at the end — and it was **proved able to
+fail**: with the fix reverted and redeployed it reports the marker, the bar and
+the button.
+
+### Changed
+
+- `Resizer`'s `side` is now `left | right | above | below`, all four naming **the
+  pane being sized**. It was `left | right | top`, where `top` named the
+  divider's own edge instead — two conventions in one union, and the console's
+  divider is exactly the second horizontal one that would have got the sign
+  backwards.
+- The layout store (`storedWidth`, `rememberWidth`, and now `storedChoice`) moved
+  out of `Workspace.tsx` into `workspace/layoutStore.ts`. The console needs it and
+  is rendered in two places, one of which has no workspace above it.
+
+Java 487, Vitest 654. deploy_gate PASS (6 checks, 15 routes, none unmounted).
+Live: thirteen suites green — including the new `v26` 23/23 and `v18` 23/23 — and
+the theme sweep with no illegible element.
+
 ## [1.18.0] — 2026-09-07
 
 refactor: the compare-two-gateways feature is removed, and the split button is one you can see.

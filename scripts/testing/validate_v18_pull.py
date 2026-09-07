@@ -258,6 +258,67 @@ with sync_playwright() as p:
         rec("CLOSE: it offers save-and-close, not just discard-or-cancel", False, "no dialog")
         rec("CLOSE: cancelling keeps the buffer", False, "no dialog")
 
+    # ---------- our OWN save is not somebody else's change ----------
+    # Nigel, 07/09/2026: *"when I click save while it is saving to the gateway a
+    # pull request pops up on the script which could be confusing for people.
+    # They might think that there is a conflict."*
+    #
+    # The write lands on the gateway before its new signature comes back, so for
+    # the length of that round trip the listing and the open document disagree —
+    # and every check that asks "has this moved on?" answered yes about the
+    # user's own keystroke. Sampled DURING the save rather than after it: a check
+    # that only looks at the end would pass against the bug, because the state
+    # resolves itself a moment later.
+    page.reload(wait_until="load", timeout=30000)
+    page.wait_for_selector(".file-tree-header", timeout=20000)
+    page.select_option(".workspace-project select", project)
+    page.wait_for_timeout(1500)
+    expand_tree(page)
+    page.locator(f'.file-tree .file-tree-item:has-text("{MODULE.split("/")[-1]}")').first.click()
+    page.wait_for_timeout(2000)
+    page.locator(".cm-content").click()
+    page.keyboard.press("Control+End")
+    page.keyboard.type("\n# save race\n")
+    page.wait_for_timeout(500)
+
+    # Poll fast, from the click until the save has settled, and keep the WORST
+    # thing seen at any point rather than the state at the end.
+    #
+    # Proved able to FAIL, 07/09/2026: with the two halves of the fix reverted
+    # and redeployed, this reports peak {'tab': 1, 'bar': 1, 'toolbar': 1} — the
+    # marker, the bar and the counted pull button, all three during a save
+    # nobody else touched. A timing check that has never been seen red is a
+    # check that passes because the window is too narrow to sample.
+    seen_stale = page.evaluate(r"""async () => {
+      const btn = [...document.querySelectorAll('.workspace-actions button, button')]
+        .find(b => /^Save (script|query)$/.test(b.textContent.trim()));
+      if (!btn) return {error: 'no save button'};
+      let worst = {tab: 0, bar: 0, toolbar: 0};
+      const sample = () => {
+        worst.tab = Math.max(worst.tab, document.querySelectorAll('.tab-stale').length);
+        worst.bar = Math.max(worst.bar, document.querySelectorAll('.workspace-stale').length);
+        worst.toolbar = Math.max(worst.toolbar,
+          [...document.querySelectorAll('button')]
+            .filter(b => /^Pull \d+ change/.test(b.textContent.trim())).length);
+      };
+      btn.click();
+      const started = Date.now();
+      while (Date.now() - started < 6000) {
+        sample();
+        await new Promise(r => setTimeout(r, 25));
+      }
+      return worst;
+    }""")
+    rec("SAVE RACE: no stale marker on the tab at any point during our own save",
+        seen_stale.get("tab") == 0, f"peak {seen_stale}")
+    rec("SAVE RACE: and no bar or pull button offering to overwrite it",
+        seen_stale.get("bar") == 0 and seen_stale.get("toolbar") == 0,
+        f"peak {seen_stale}")
+    rec("SAVE RACE: the save itself still went through",
+        "# save race" in editor_text(page)
+        and page.locator(".tab-dirty").count() == 0,
+        f"dirty={page.locator('.tab-dirty').count()}")
+
     # ---------- clean up ----------
     signature = signature_of(page, project, MODULE)
     api(page, "DELETE", content_url(project, MODULE), csrf, None, signature)

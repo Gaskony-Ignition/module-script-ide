@@ -55,11 +55,21 @@ import java.util.function.Supplier;
  *       thread-local state) while an explicit {@code sys.stderr.write(...)} would
  *       not. So the map is COPIED and the copy's {@code sys} is repointed at our
  *       own state.</li>
+ *   <li><b>An import of a project library module moves the thread off our state
+ *       entirely</b>, and everything written after it is lost. Ignition resolves
+ *       such an import through its own importer, which runs the module's code via
+ *       {@code ScriptManager.runCode} — and that calls {@code setState()} →
+ *       {@code Py.setSystemState(manager.sys)} on the CALLING thread and never
+ *       restores it. From that point {@code print} AND an explicit
+ *       {@code sys.stdout.write} both reach the gateway's own console instead of
+ *       our capture. So this state gets a PRIVATE builtins table whose
+ *       {@code __import__} puts our state back on the way out — see
+ *       {@link #installImportHook}.</li>
  * </ol>
  *
- * <p>Both were found the hard way, one spike iteration each. Removing either
- * breaks isolation silently — and one of the two failure modes is cross-user data
- * leakage, not merely lost output.</p>
+ * <p>All three were found the hard way, and measured rather than reasoned about.
+ * Removing any of them breaks isolation silently — and one of the failure modes
+ * is cross-user data leakage, not merely lost output.</p>
  *
  * <h2>Output is streamed, and the outcome then carries none of it</h2>
  *
@@ -208,6 +218,7 @@ public final class PrivateStateRunner implements ScriptRunner {
         PySystemState mgr = managerState(scriptManager);
         PySystemState state = ScriptManager.createUtf8PySystemState(out, err);
         applyModuleRegistry(state, mgr);
+        installImportHook(state, locals);
 
         PySystemState previous = Py.getSystemState();
         ThreadState ts = Py.getThreadState();
@@ -287,6 +298,117 @@ public final class PrivateStateRunner implements ScriptRunner {
             // A failed flush costs at most a truncated tail; it must never mask the
             // script's own result.
             logger.debug("Flush after execution failed: {}", t.toString());
+        }
+    }
+
+    /**
+     * Put our system state back after every import this run performs.
+     *
+     * <p><b>Measured on 8.3.8, 07/09/2026</b>, from Nigel's report that a script
+     * ran for 6.5 s, succeeded, and printed nothing — while the same script in the
+     * Designer's console printed what he expected. A fresh project-library module
+     * per case, so every import was a FIRST import:</p>
+     *
+     * <table>
+     *   <caption>What survives an import</caption>
+     *   <tr><td>{@code print}, no import at all</td><td>kept</td></tr>
+     *   <tr><td>{@code print} after a first project import</td><td>LOST</td></tr>
+     *   <tr><td>{@code print} before it, in the same run</td><td>kept</td></tr>
+     *   <tr><td>{@code sys.stdout.write} after it</td><td>LOST</td></tr>
+     *   <tr><td>{@code print} after {@code import json}</td><td>kept</td></tr>
+     *   <tr><td>{@code print} after a CACHED project import</td><td>kept</td></tr>
+     * </table>
+     *
+     * <p>Two things that table settles. It is not the {@code print}-versus-write
+     * asymmetry {@code TestHarness} documents — an explicit write is lost too, so
+     * the whole {@code sys} has moved, not just what {@code print} resolves. And
+     * it only happens when the import EXECUTES code: a standard-library module
+     * uses Jython's own importer, and a module already in the manager's registry
+     * is copied across by {@link #applyModuleRegistry} and never imported at all.
+     * That is why the same script prints on its second run, which is the most
+     * confusing part of the symptom.</p>
+     *
+     * <h3>Why a private builtins table, and not a hook in the namespace</h3>
+     *
+     * <p>Because there is no such thing as a namespace-local builtins table by
+     * default. Every {@code PySystemState} is handed the SAME
+     * {@code getDefaultBuiltins()} map, so assigning
+     * {@code __builtins__['__import__']} from a console run replaces
+     * {@code __import__} for the whole JVM — every project script and every
+     * gateway event script — with whatever that one session installed. This was
+     * done by accident while diagnosing the bug, confirmed
+     * ({@code __import__ is &lt;function _si_hook&gt;} from an unrelated session)
+     * and repaired with {@code __builtin__.fillWithBuiltins} on the rig.</p>
+     *
+     * <p>So the table is COPIED first and only the copy is touched. The copy is
+     * built fresh per run from the state's own builtins, which means the delegate
+     * is always the genuine {@code __import__} and hooks can never chain — the
+     * console's namespace survives between runs and would otherwise accumulate one
+     * wrapper per run, each restoring a system state that had already been
+     * discarded.</p>
+     */
+    // Package-private and static so PrivateStateRunnerImportTest can drive it:
+    // createUtf8PySystemState needs a stdlib the jython-ia jar does not carry, so
+    // the runner itself cannot boot in a unit test, but this method can.
+    static void installImportHook(PySystemState state, PyObject locals) {
+        try {
+            PyObject builtins = state.getBuiltins();
+            if (!(builtins instanceof PyStringMap map)) {
+                logger.warn("Builtins is a {}, not a PyStringMap — output written after an "
+                    + "import may be lost.",
+                    builtins == null ? "null" : builtins.getClass().getName());
+                return;
+            }
+            PyStringMap privateBuiltins = map.copy();
+            PyObject real = privateBuiltins.__finditem__("__import__");
+            if (real == null) {
+                logger.warn("No __import__ in the builtins table; output written after an "
+                    + "import may be lost.");
+                return;
+            }
+            privateBuiltins.__setitem__("__import__", new RestoringImport(real, state));
+            state.setBuiltins(privateBuiltins);
+            // The frame takes its builtins from the globals when they name one, so
+            // this has to be set as well: the console's namespace persists between
+            // runs and would otherwise still be pointing at the PREVIOUS run's
+            // table, whose hook restores a state that has already been finished.
+            locals.__setitem__("__builtins__", privateBuiltins);
+        } catch (RuntimeException e) {
+            // Losing the hook costs output; failing here would cost the run.
+            logger.warn("Could not install the import hook ({}); output written after an "
+                + "import may be lost.", e.toString());
+        }
+    }
+
+    /**
+     * {@code __import__}, delegating to the real one and then restoring our state.
+     *
+     * <p>{@code finally}, not a plain sequence: a failed import is exactly when a
+     * user most wants the traceback that follows it, and an import that raises has
+     * still moved the thread's state by then.</p>
+     */
+    private static final class RestoringImport extends PyObject {
+        // PyObject is Serializable. This one never is — it lives for one run and
+        // is reachable only from that run's builtins copy — but the id has to be
+        // declared rather than left to the compiler, which would change it on
+        // every edit.
+        private static final long serialVersionUID = 1L;
+
+        private final PyObject delegate;
+        private final PySystemState state;
+
+        RestoringImport(PyObject delegate, PySystemState state) {
+            this.delegate = delegate;
+            this.state = state;
+        }
+
+        @Override
+        public PyObject __call__(PyObject[] args, String[] keywords) {
+            try {
+                return delegate.__call__(args, keywords);
+            } finally {
+                Py.setSystemState(state);
+            }
         }
     }
 

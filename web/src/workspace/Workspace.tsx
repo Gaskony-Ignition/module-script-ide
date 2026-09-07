@@ -54,6 +54,7 @@ import { IconAlert, IconExternal, IconPlus } from '../components/Icons';
 import LayoutControls, { type LayoutState } from '../components/LayoutControls';
 import Panel from '../components/Panel';
 import Resizer from '../components/Resizer';
+import { rememberWidth, storedHeight, storedWidth } from './layoutStore';
 import TerminalView from '../components/Terminal';
 import WebDevConfigDialog from '../components/WebDevConfigDialog';
 import WebDevTree from '../components/WebDevTree';
@@ -166,29 +167,6 @@ type Notice = { kind: 'error' | 'info'; text: string } | null;
  * so every access is wrapped — a layout preference must never be the thing that
  * stops the IDE loading.
  */
-function storedWidth(key: string, fallback: number): number {
-  try {
-    const raw = window.localStorage.getItem(`scriptide.width.${key}`);
-    const value = raw ? Number(raw) : NaN;
-    return Number.isFinite(value) && value > 0 ? value : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function rememberWidth(key: string, value: number) {
-  try {
-    window.localStorage.setItem(`scriptide.width.${key}`, String(Math.round(value)));
-  } catch {
-    /* not remembered; the session still works */
-  }
-}
-
-/** A remembered panel height, with the same localStorage caution as widths. */
-function storedHeight(key: string, fallback: number): number {
-  return storedWidth(key, fallback);
-}
-
 /**
  * How tall the bottom panel opens when nobody has resized it.
  *
@@ -304,6 +282,33 @@ export default function Workspace({ session }: WorkspaceProps) {
 
   const [attrs, setAttrs] = useState<Record<string, AttrState>>({});
   const [saving, setSaving] = useState(false);
+  /**
+   * Documents with a write in flight, keyed by uri.
+   *
+   * The boolean above drives the Save button's own label; this drives
+   * STALENESS, and the two are not the same question. A save writes the
+   * resource on the gateway before the client has the new signature back, so
+   * for the length of that round trip the background listing legitimately
+   * reports a signature the open document does not carry — and every check that
+   * asks "has this moved on?" answered yes about the user's own keystroke.
+   * Nigel, 07/09/2026: *"when I click save while it is saving to the gateway a
+   * pull request pops up on the script which could be confusing for people. They
+   * might think that there is a conflict."*
+   */
+  const [savingUris, setSavingUris] = useState<ReadonlySet<string>>(() => new Set());
+
+  const beginSaving = useCallback((uri: string) => {
+    setSavingUris((current) => new Set(current).add(uri));
+  }, []);
+
+  const endSaving = useCallback((uri: string) => {
+    setSavingUris((current) => {
+      if (!current.has(uri)) return current;
+      const next = new Set(current);
+      next.delete(uri);
+      return next;
+    });
+  }, []);
   const [savingAttrs, setSavingAttrs] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
@@ -420,10 +425,18 @@ export default function Workspace({ session }: WorkspaceProps) {
     }
     const out = new Set<string>();
     for (const doc of docs) {
+      // A save of our OWN is not someone else's change. The write lands on the
+      // gateway before its signature comes back, so mid-save the listing and the
+      // document disagree for a reason that resolves itself — and offering to
+      // pull then is worse than saying nothing, because it names the user's own
+      // work as a conflict. Suppressed for the round trip only: a save that
+      // fails or 409s takes its uri out of the set and the bar returns, which is
+      // the one case where it is telling the truth.
+      if (savingUris.has(doc.uri)) continue;
       if (isStale(doc, signatures.get(docUri(doc.project, doc.path)))) out.add(doc.uri);
     }
     return out;
-  }, [docs, project, queries, tree]);
+  }, [docs, project, queries, savingUris, tree]);
 
 
   /**
@@ -1231,6 +1244,7 @@ export default function Workspace({ session }: WorkspaceProps) {
       }
       setImpactWarning(null);
       setSaving(true);
+      beginSaving(uri);
       setNotice(null);
       // Capture the text being written: the user can keep typing during the
       // round trip, and baseText must become what the gateway actually stored.
@@ -1260,16 +1274,27 @@ export default function Workspace({ session }: WorkspaceProps) {
         lsp.didSave(lspUri(doc.project, doc.path, doc.scriptKey));
         setConflict(null);
         setNotice({ kind: 'info', text: `Saved ${doc.label}.` });
-        if (wasNew) {
-          // Nothing in `tree` knows this resource exists until now — the row
-          // was a click-to-create placeholder, not a real entry. Re-reading is
-          // what turns the singleton row bold/openable and gives the entry a
-          // real signature for the settings strip and future deletes.
-          try {
-            setTree(await fetchScriptTree(project));
-          } catch {
-            /* the save itself succeeded; a stale tree is cosmetic, not lost work */
-          }
+        // ALWAYS re-read the tree, and always BEFORE this document leaves
+        // `savingUris` — which is why it is awaited here rather than left to the
+        // background poll.
+        //
+        // Two windows would otherwise show the pull affordance over the user's
+        // own save. The first is the round trip, which `savingUris` covers. The
+        // second is after it: the document now carries the signature the write
+        // returned while the listing still holds the one from before, and
+        // `isStale` compares for DIFFERENCE, so a listing that is merely behind
+        // reads exactly like someone else's edit. There is no way to tell those
+        // apart from two opaque signatures, so the fix is to not be in that
+        // state: refresh, then stop suppressing.
+        //
+        // For a 'new' draft this is load-bearing for a second reason that
+        // predates the staleness one — nothing in `tree` knows the resource
+        // exists until now, so the row stays a click-to-create placeholder with
+        // no signature for the settings strip or a later delete.
+        try {
+          setTree(await fetchScriptTree(project));
+        } catch {
+          /* the save itself succeeded; a stale tree is cosmetic, not lost work */
         }
       } catch (e: unknown) {
         // A 'new' draft has no base signature to send, so a create raced by
@@ -1289,9 +1314,11 @@ export default function Workspace({ session }: WorkspaceProps) {
         }
       } finally {
         setSaving(false);
+        endSaving(uri);
       }
     },
-    [commitSaved, lsp, project, raiseConflict, readOnly, saveQueryDoc, session.csrfToken]
+    [beginSaving, commitSaved, endSaving, lsp, project, raiseConflict, readOnly,
+      saveQueryDoc, session.csrfToken]
   );
 
   const resolveReloadTheirs = useCallback(() => {
@@ -2805,7 +2832,7 @@ export default function Workspace({ session }: WorkspaceProps) {
               value={panelHeight}
               min={90}
               max={900}
-              side="top"
+              side="below"
               label="Resize the panel"
               onChange={(height) => {
                 setPanelHeight(height);

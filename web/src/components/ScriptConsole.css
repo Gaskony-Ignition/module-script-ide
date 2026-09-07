@@ -1,11 +1,45 @@
-/* The Script Console. Editor above, output below, both scrolling independently. */
+/* The Script Console. Editor and output scroll independently, in either
+   orientation — rows (editor above) or columns (editor beside). */
 
 .console {
   display: flex;
   flex-direction: column;
   min-height: 0; /* so the children can actually shrink inside a flex parent */
+  min-width: 0;
   height: 100%;
-  background: var(--bg-primary);
+  /* The lit ground, the same three declarations `.app`, `.panel` and
+     `.code-editor` carry. It used to be a bare opaque `--bg-primary`, which on
+     the two glass packs painted out --page-glow over the whole console — so the
+     popped-out console, where the console IS the tab, showed the theme's teal
+     only in the strip of `.app` left visible around it and flat #1a1233 (the
+     base both aurora packs share) everywhere else. Nigel, 07/09/2026: "a tiny
+     bit on the top left looks teal but the rest looks violet". `fixed` is what
+     makes the glow line up with the window rather than with this box, so the
+     docked console and the popped-out one light the same way. */
+  background-color: var(--bg-primary);
+  background-image: var(--page-glow);
+  background-attachment: fixed;
+}
+
+/*
+ * Editor + divider + output. The ONE box the split is measured against, which
+ * is why it exists: the share must not be computed over the toolbar, and it
+ * must not include the "requires Administrator" notice, because neither is
+ * draggable and both change the answer when they appear.
+ */
+.console-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.console-rows .console-body {
+  flex-direction: column;
+}
+
+.console-columns .console-body {
+  flex-direction: row;
 }
 
 .console-toolbar {
@@ -41,19 +75,22 @@
   flex: 0 0 auto;
 }
 
-/* The editor takes the upper share and the output the lower, both able to
-   shrink to nothing — min-height:0 is what allows that inside a flex column. */
+/* The editor's share, overridden inline once the body has been measured. These
+   are the fallback and the first-frame value both — a console with no geometry
+   (no ResizeObserver, or a headless DOM) keeps exactly the split it had before
+   the divider existed. Zero minimums on BOTH axes, because the same rule has to
+   hold when the panes are side by side. */
 .console-editor {
   flex: 1 1 45%;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
 .console-output {
-  flex: 1 1 55%;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  border-top: 1px solid var(--border-light);
   background: var(--bg-secondary);
   padding: var(--space-2) var(--space-3);
   font-family: var(--font-mono);
@@ -147,13 +184,29 @@
  * Output and Terminal views.
  */
 
+/* Always the LEFTOVER pane: the editor is the one carrying a fixed basis, so
+   the output takes whatever the divider leaves and never fights it for a
+   pixel. */
 .console-output-panel {
   display: flex;
   flex-direction: column;
-  flex: 1 1 55%;
+  flex: 1 1 auto;
   min-height: 0;
-  border-top: var(--rule-width) solid var(--border-light);
+  min-width: 0;
   background: var(--bg-secondary);
+}
+
+/* The rule between the panes belongs on the side the divider is on, and the
+   divider supplies its own 1px line — so this is the pane's own edge, drawn
+   only where there is no divider to draw it. Rows get a top rule, columns a
+   left one; carrying the rows rule into columns put a horizontal line above a
+   pane that has nothing above it. */
+.console-rows .console-output-panel {
+  border-top: var(--rule-width) solid var(--border-light);
+}
+
+.console-columns .console-output-panel {
+  border-left: var(--rule-width) solid var(--border-light);
 }
 
 .console-output-head {
@@ -222,4 +275,48 @@
    link — the same weight as the text around it, distinguished by colour. */
 .console-frames li {
   font-family: var(--font-mono);
+}
+
+/*
+ * The rows/columns toggle.
+ *
+ * A segmented pair rather than one button that flips, because a single toggle
+ * has to show either the state or the action and is read as the other one half
+ * the time. Two buttons with `aria-pressed` say both at once: which layout is
+ * on, and what the other one would be.
+ */
+.console-layout-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  border: var(--rule-width) solid var(--border-light);
+  border-radius: var(--radius-row);
+  overflow: hidden;
+}
+
+.console-layout-toggle button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.console-layout-toggle button + button {
+  border-left: var(--rule-width) solid var(--border-light);
+}
+
+.console-layout-toggle button:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.console-layout-toggle button.is-active {
+  background: var(--accent-primary-bg);
+  color: var(--text-primary);
 }

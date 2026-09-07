@@ -73,6 +73,7 @@ function renderConsole(props: Partial<React.ComponentProps<typeof ScriptConsole>
 beforeEach(() => {
   harness.listeners.length = 0;
   harness.sent.length = 0;
+  window.localStorage.clear();
 });
 
 describe('ScriptConsole', () => {
@@ -228,5 +229,63 @@ describe('ScriptConsole', () => {
     renderConsole();
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
     expect(harness.sent[0]).not.toHaveProperty('target');
+  });
+});
+
+describe('the console layout', () => {
+  it('opens in rows, with the editor above the output', () => {
+    renderConsole();
+    expect(document.querySelector('.console')).toHaveClass('console-rows');
+    expect(screen.getByRole('button', { name: 'Output below the editor' }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Output beside the editor' }))
+      .toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('switches to columns and remembers it', () => {
+    const view = renderConsole();
+    fireEvent.click(screen.getByRole('button', { name: 'Output beside the editor' }));
+    expect(document.querySelector('.console')).toHaveClass('console-columns');
+
+    // Remembered across a REMOUNT, which is the case that matters: the console
+    // is unmounted every time the bottom panel closes, and popping it out is a
+    // whole new document.
+    view.unmount();
+    renderConsole();
+    expect(document.querySelector('.console')).toHaveClass('console-columns');
+    expect(screen.getByRole('button', { name: 'Output beside the editor' }))
+      .toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('ignores a stored orientation this build has never heard of', () => {
+    // A value written by a build that no longer exists must read as "not
+    // chosen", not reach the DOM as a class name nothing styles.
+    window.localStorage.setItem('scriptide.choice.console.orientation', 'diagonal');
+    renderConsole();
+    expect(document.querySelector('.console')).toHaveClass('console-rows');
+  });
+
+  it('renders both panes with no geometry, and no divider it could not drive', () => {
+    // jsdom measures everything as zero. The stylesheet's own shares are the
+    // fallback, and the divider is ABSENT rather than present-and-inert: one
+    // that cannot convert a drag into a share would move nothing while looking
+    // like it should.
+    renderConsole();
+    expect(document.querySelector('.console-body')).toBeInTheDocument();
+    expect(document.querySelector('.console-editor')).toBeInTheDocument();
+    expect(screen.getByLabelText('Output')).toBeInTheDocument();
+    expect(document.querySelector('.console-editor')).not.toHaveAttribute('style');
+    expect(document.querySelector('.resizer')).toBeNull();
+  });
+
+  it('keeps a separate share per orientation', () => {
+    window.localStorage.setItem('scriptide.width.console-share-rows', '30');
+    window.localStorage.setItem('scriptide.width.console-share-columns', '70');
+    renderConsole();
+    // Nothing on screen shows the number without geometry, so this asserts the
+    // STORE is keyed per orientation — switching must not overwrite the other.
+    fireEvent.click(screen.getByRole('button', { name: 'Output beside the editor' }));
+    expect(window.localStorage.getItem('scriptide.width.console-share-rows')).toBe('30');
+    expect(window.localStorage.getItem('scriptide.width.console-share-columns')).toBe('70');
   });
 });
