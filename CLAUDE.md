@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.20.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.21.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -171,6 +171,44 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   `ZipInputStream` does NOT throw on data that is not a zip — it yields no
   entries — so check the `PK` magic, or a `.py` uploaded by mistake is reported
   as "holds no resource.json" and sends the reader after the wrong problem.
+- **An imported project-library module object is the GATEWAY's, not the run's,
+  so never write into one.** Measured 07/09/2026 on 8.3.8: `__import__` of a
+  library module returns the manager's own object — the same `id()` from two
+  separate runs, a module global set in one run read back by the next, and
+  `system` living in each module's own globals rather than in builtins. So
+  Ectobox's mocking mechanism, swapping `globals()['system']` in the module under
+  test, would change what every other user's scripts see for as long as the block
+  is open: the same class of mistake as the JVM-wide `__builtins__` edit above.
+  The runner therefore executes each selected test module's SOURCE into a
+  namespace private to the run. That is what makes a mock safe, and it also stops
+  module state carrying from one run to the next. **The interlock is load-bearing
+  and must not be removed as a formality**: when the source cannot be read the
+  runner falls back to importing, sets `private = False`, and a mock then REFUSES
+  rather than quietly writing into the shared copy.
+- **A mock reaches the TEST module only, and the docs say so.** Production code
+  the test calls has its own module globals, untouched, so it still reaches the
+  real gateway. Mocking that too means writing into shared modules, which is the
+  thing above. A test framework that quietly half-mocked would be worse than one
+  that mocks nothing.
+- **The helpers exist only during a run, and that has a visible consequence.**
+  `scriptide` is seeded into the run's own copy of `sys.modules`; a helper
+  ordinary gateway code could import would be a second script library nobody
+  administers. So a test module that imports it at the TOP is not importable
+  outside a run — from the Designer's console or by another module. The runner
+  never imports a test module, so this costs a run nothing, and a module that must
+  stay importable imports inside the function. Both halves are asserted in
+  `validate_v28_tests.py` so neither is reported later as a bug.
+- **`@timeout` is a budget, not an interrupt, and the message says so.** The test
+  is allowed to finish and then fails if it took longer. Interrupting a running
+  Jython call needs the mechanism that stops the whole execution, which would end
+  the run rather than the test; the run-wide timeout is still what saves you from
+  a hang. An existing failure is left alone — it is the more useful of the two
+  facts.
+- **A decorator widens which FUNCTIONS count, never which MODULES are looked
+  at.** `@test` in a module the naming convention does not admit discovers
+  nothing. Everything the rule below says about `plc.diagnostics.test_connection`
+  survives the decorators unchanged, and the live suite asserts it as the
+  load-bearing case it is.
 - **Test discovery is narrow on purpose, and widening it is a production
   incident.** `def test_*` anywhere in a project would put
   `plc.diagnostics.test_connection` under a Run All button — a function whose job

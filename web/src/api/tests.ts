@@ -16,12 +16,20 @@ export interface TestCase {
   class?: string;
   /** 0-based line of the `def`, for click-to-open. */
   line: number;
+  /** Found by `@test` rather than by the `test_*` naming convention. */
+  decorated: boolean;
+  /** Carries `@skip` — discovered, but the runner will not execute it. */
+  skipped: boolean;
 }
 
 export interface TestModule {
   module: string;
   hasSetUp: boolean;
   hasTearDown: boolean;
+  hasBeforeAll: boolean;
+  hasAfterAll: boolean;
+  hasBeforeEach: boolean;
+  hasAfterEach: boolean;
   tests: TestCase[];
 }
 
@@ -31,9 +39,11 @@ export interface TestListing {
   modules: TestModule[];
   /** The discovery rule, in words, so an empty panel can show it. */
   convention: string;
+  /** A one-line example of the import a test module writes, for the empty state. */
+  helperImport: string;
 }
 
-export type TestStatus = 'pass' | 'fail' | 'error';
+export type TestStatus = 'pass' | 'fail' | 'error' | 'skip';
 
 export interface TestResult {
   id: string;
@@ -45,6 +55,14 @@ export interface TestResult {
   output: string;
   outputTruncated: boolean;
   elapsedMs: number;
+  /**
+   * The discovered test this row came from. Equal to `id` for an ordinary
+   * test; differs for a parameterised case, which is not separately runnable
+   * — a re-run always targets the parent id.
+   */
+  parentId: string;
+  /** The case label, e.g. `"(2, 3) -> 5"`, or null for an ordinary test. */
+  case: string | null;
 }
 
 export interface TestRun {
@@ -53,6 +71,7 @@ export interface TestRun {
   passed: number;
   failed: number;
   errored: number;
+  skipped: number;
   elapsedMs: number;
 }
 

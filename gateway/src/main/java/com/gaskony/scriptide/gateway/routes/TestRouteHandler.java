@@ -63,11 +63,24 @@ import java.util.function.Supplier;
  * what makes module-level state behave the way people expect. It also means one
  * pool slot, one audit line and one Stop for a run of two hundred.</p>
  *
- * <p>The cost is that tests are isolated from other USERS, not from each other.
- * A test that leaves a module global set has affected the next one. That is
- * stated in the panel rather than fixed, because fixing it means a fresh
- * interpreter per test — and paying a full Jython module-registry copy per test
- * would turn a two-second run into a two-minute one.</p>
+ * <p>The cost is that within one run the tests are isolated from other USERS,
+ * not from each other: a test that leaves a module global set has affected the
+ * next one in the same run. That is stated in the panel rather than fixed,
+ * because fixing it means a fresh interpreter per test — and paying a full Jython
+ * module-registry copy per test would turn a two-second run into a two-minute
+ * one. Between runs is a different matter; see below.</p>
+ *
+ * <h2>The test module is executed, not imported</h2>
+ *
+ * <p>Since 1.21.0 the runner is handed each selected module's SOURCE and executes
+ * it into a fresh namespace per run. Measured on 8.3.8, 07/09/2026:
+ * {@code __import__} of a project-library module hands back the manager's own
+ * module object — the same {@code id()} from two separate runs, and a global set
+ * in one read back by the next, for every user. Two things follow. Module-level
+ * state no longer carries from one run to the next, which the panel used to have
+ * to warn about. And a mock can replace {@code system} in that namespace without
+ * changing what any other script on the gateway sees, which is the only reason
+ * mocking is offered at all.</p>
  */
 public class TestRouteHandler {
 
@@ -123,6 +136,8 @@ public class TestRouteHandler {
                     item.addProperty("class", test.className());
                 }
                 item.addProperty("line", test.line());
+                item.addProperty("decorated", test.decorated());
+                item.addProperty("skipped", test.skipped());
                 tests.add(item);
                 total++;
             }
@@ -130,6 +145,10 @@ public class TestRouteHandler {
             entry.addProperty("module", module.module());
             entry.addProperty("hasSetUp", module.hasSetUp());
             entry.addProperty("hasTearDown", module.hasTearDown());
+            entry.addProperty("hasBeforeAll", module.hasBeforeAll());
+            entry.addProperty("hasAfterAll", module.hasAfterAll());
+            entry.addProperty("hasBeforeEach", module.hasBeforeEach());
+            entry.addProperty("hasAfterEach", module.hasAfterEach());
             entry.add("tests", tests);
             items.add(entry);
         }
@@ -142,6 +161,10 @@ public class TestRouteHandler {
         // the word "none" — a discovery convention nobody can see reads as a
         // broken feature.
         out.addProperty("convention", TestDiscovery.CONVENTION);
+        // The helpers are only importable while a run is executing, so nothing
+        // in the editor can lead somebody to them. One line in the panel is the
+        // whole of their discoverability.
+        out.addProperty("helperImport", TestHarness.HELPER_IMPORT);
         return out;
     }
 
@@ -262,6 +285,22 @@ public class TestRouteHandler {
             }
             locals.__setitem__(TestHarness.VAR_TESTS, Py.java2py(specs));
             locals.__setitem__(TestHarness.VAR_MARKER, Py.newStringOrUnicode(marker));
+            // Each test module's SOURCE, so the runner can execute it into a
+            // namespace private to this run rather than import the gateway's
+            // shared module object. A module whose source cannot be read is
+            // simply absent, and the runner imports it instead — with mocks
+            // refusing, because that namespace is not ours to write to.
+            Map<String, String> sources = new LinkedHashMap<>();
+            for (TestDiscovery.TestCase test : selected) {
+                sources.computeIfAbsent(test.module(),
+                    name -> projectIndex.source(project, name).orElse(null));
+            }
+            sources.values().removeIf(java.util.Objects::isNull);
+            locals.__setitem__(TestHarness.VAR_SOURCES, Py.java2py(sources));
+            locals.__setitem__(TestHarness.VAR_HELPER_SOURCE,
+                Py.newStringOrUnicode(TestHarness.HELPER_SOURCE));
+            locals.__setitem__(TestHarness.VAR_RUNNER_SOURCE,
+                Py.newStringOrUnicode(TestHarness.RUNNER_SOURCE));
         } catch (RuntimeException e) {
             logger.warn("Could not prepare a namespace for a test run in {}: {}",
                 project, e.toString());
@@ -380,6 +419,7 @@ public class TestRouteHandler {
         int passed = 0;
         int failed = 0;
         int errored = 0;
+        int skipped = 0;
         for (JsonElement element : results) {
             JsonObject item = element.getAsJsonObject();
             String text = output.getOrDefault(item.get("id").getAsString(), "");
@@ -391,6 +431,8 @@ public class TestRouteHandler {
                 passed++;
             } else if ("fail".equals(status)) {
                 failed++;
+            } else if ("skip".equals(status)) {
+                skipped++;
             } else {
                 errored++;
             }
@@ -402,6 +444,7 @@ public class TestRouteHandler {
         out.addProperty("passed", passed);
         out.addProperty("failed", failed);
         out.addProperty("errored", errored);
+        out.addProperty("skipped", skipped);
         out.addProperty("elapsedMs", elapsedMs);
         return out;
     }

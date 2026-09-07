@@ -56,6 +56,14 @@ describe('fetchTests', () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: 'nope' }, 500));
     await expect(fetchTests('P')).rejects.toBeInstanceOf(ApiError);
   });
+
+  it('passes the helper import example through unchanged', async () => {
+    const helperImport = 'from scriptide import test, assertEquals, mockTags';
+    fetchMock.mockResolvedValue(
+      jsonResponse({ project: 'P', total: 0, convention: 'x', helperImport, modules: [] })
+    );
+    expect((await fetchTests('P')).helperImport).toBe(helperImport);
+  });
 });
 
 describe('runTests', () => {
@@ -87,5 +95,19 @@ describe('runTests', () => {
   it('surfaces a 403 rather than reporting zero tests run', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: 'execution disabled' }, 403));
     await expect(runTests('P', [], 'tok')).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('passes a parameterised case result through with its parentId and case label', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      results: [{
+        id: 'orders.test_totals.test_sums[0]', module: 'orders.test_totals',
+        function: 'test_sums', status: 'fail', message: '', traceback: '', output: '',
+        outputTruncated: false, elapsedMs: 1,
+        parentId: 'orders.test_totals.test_sums', case: '(2, 3) -> 5',
+      }],
+    }));
+    const { results } = await runTests('P', ['orders.test_totals.test_sums'], 'tok');
+    expect(results[0].parentId).toBe('orders.test_totals.test_sums');
+    expect(results[0].case).toBe('(2, 3) -> 5');
   });
 });

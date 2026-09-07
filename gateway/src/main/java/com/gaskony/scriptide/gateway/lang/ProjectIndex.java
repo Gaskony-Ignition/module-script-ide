@@ -60,6 +60,37 @@ public final class ProjectIndex {
         return out;
     }
 
+    /**
+     * One module's SOURCE, read on demand.
+     *
+     * <p>Not cached: the index deliberately keeps names and positions only,
+     * because holding every script's body in memory is the difference between a
+     * few hundred kilobytes and a project's whole library. This is called for the
+     * handful of modules a test run is about to execute, and the runner falls
+     * back to importing whatever it does not get.</p>
+     *
+     * <p>Blank comes back empty rather than as an empty string. A read that
+     * failed and a module that is genuinely empty look the same from here, and
+     * executing an empty namespace would report every test in it as a missing
+     * attribute — the import fallback fails with the real reason instead.</p>
+     */
+    public Optional<String> source(String project, String moduleName) {
+        Optional<RuntimeResourceCollection> collection = projectManager.find(project);
+        if (collection.isEmpty() || moduleName == null) {
+            return Optional.empty();
+        }
+        for (Resource resource : collection.get().getResources()) {
+            var type = resource.getResourcePath().getResourceType();
+            if (ScriptResourceTypes.IGNITION_MODULE.equals(type.moduleId())
+                && ScriptResourceTypes.TYPE_SCRIPT_PYTHON.equals(type.typeId())
+                && moduleName.equals(moduleNameOf(resource))) {
+                String source = readSource(resource);
+                return source.isBlank() ? Optional.empty() : Optional.of(source);
+            }
+        }
+        return Optional.empty();
+    }
+
     /** The symbols of one module, or empty if the project has no such module. */
     public Optional<ModuleSymbols> module(String project, String moduleName) {
         return Optional.ofNullable(modules(project).get(moduleName));

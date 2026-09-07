@@ -269,8 +269,11 @@ with sync_playwright() as p:
     else:
         rec("UI: a failure explains itself on demand", False, "no toggle rendered")
 
-    rec("UI: the panel says a run shares one interpreter",
-        "share an interpreter" in page.locator(".tests-panel").inner_text(),
+    # 1.21.0 changed what the caveat SAYS, because it changed what is true:
+    # module state no longer carries between runs, but the tests within one run
+    # still share the namespace. The assertion follows the fact.
+    rec("UI: the panel says what the tests in one run share",
+        "share one interpreter" in page.locator(".tests-panel").inner_text(),
         "the caveat is on screen")
 
     # =================== clean up ===================

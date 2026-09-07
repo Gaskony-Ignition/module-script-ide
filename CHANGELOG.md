@@ -2,6 +2,98 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.21.0] — 2026-09-07
+
+feat: a test framework — decorators, assertions, mocks, and a namespace per run.
+
+The first of four groups of ideas taken from Ectobox's Script IDE
+(`docs/ECTOBOX-BORROWINGS.md`). Their runner cannot execute on the gateway at
+all, so what is portable is the shape of the test framework, not the mechanism —
+and the mechanism they use for mocking turns out to be unsafe here. That is the
+substance of this release.
+
+### The measurement it rests on
+
+`__import__` of a project-library module hands back the **manager's own module
+object**, shared with every script on the gateway. Measured on 8.3.8, 07/09/2026:
+the same `id()` came back from two separate runs, a module global set in one run
+was read by the next, and `system` lives in each module's own globals rather than
+in builtins.
+
+So swapping `globals()['system']` — how their mocks work — would change what every
+other user's scripts see for as long as the block is open. That is the same class
+of mistake as the JVM-wide `__builtins__` edit recorded in `CLAUDE.md` at 1.19.0.
+
+The runner is therefore handed each selected module's **source** and executes it
+into a namespace private to the run. Three things follow, and all three are
+asserted on the gateway by `validate_v28_tests.py`:
+
+- a mock replaces `system` in that namespace, and the shared module is untouched
+  while it is open;
+- **module-level state no longer carries from one run to the next** — a cost the
+  panel used to have to warn about;
+- when the source cannot be read the runner imports instead and a mock **refuses**
+  rather than quietly writing into the gateway's copy.
+
+### Added
+
+- **Decorators.** `@test` marks a function whose name does not begin `test_`.
+  `@skip` / `@skip('why')` lists it and does not call it. `@cases(...)` runs one
+  function once per row, each row reporting as its own result so a failing row
+  names itself. `@beforeAll` / `@afterAll` / `@beforeEach` / `@afterEach` bracket
+  a module's tests; `setUp` and `tearDown` keep working and are the fallback.
+- **`@timeout(seconds)` — a budget, not an interrupt**, and it says so. The test
+  is allowed to finish and then fails if it took longer. Interrupting a running
+  Jython call needs the mechanism that stops the whole execution, which would end
+  the run rather than the test; the run-wide timeout is still what saves you from
+  a hang.
+- **Twelve assertions**: `assertEquals`, `assertNotEquals`, `assertTrue`,
+  `assertFalse`, `assertNone`, `assertNotNone`, `assertIn`, `assertNotIn`,
+  `assertAlmostEquals`, `assertRaises` (both the `with` and the callable form),
+  `assertTagValue`, `assertDbRowCount`. A failure says what it wanted and what it
+  got.
+- **`mockTags` and `mockQuery`.** Answer tag reads from a dict and `system.db`
+  queries by SQL fragment, and record every write and every call. A read or a
+  query the mock was not given **raises**, rather than answering `None` — a quiet
+  `None` turns a missing fixture into a puzzling assertion failure three lines
+  later.
+- **A fourth outcome, `skip`**, counted in the tally and shown on the row before
+  a run as well as after it.
+- **Re-run failed only.** The button carries the live count and sends the parent
+  ids, because a parameterised case is not separately runnable.
+
+### Two consequences, said out loud rather than left to be discovered
+
+`scriptide` exists only while a run is executing — a helper ordinary gateway code
+could import would be a second script library nobody administers. **So a test
+module that imports it at the top is not importable outside a run**, from the
+Designer's console or by another module. The runner never imports a test module,
+so this costs a run nothing; a test module that must stay importable imports
+inside the function. `validate_v28_tests.py` asserts both halves.
+
+### The limit, stated plainly
+
+A mock replaces `system` in the **test module's** namespace. Production code the
+test calls lives in its own module, whose `system` is untouched, so it still
+reaches the real gateway. Mocking that too would mean writing into shared
+modules, which is the thing this design refuses to do.
+
+### Changed
+
+- `scriptide.py` and `runner.py` are **resources in the module jar**, not Java
+  string constants — they are Python, and they are read, linted and parsed as
+  Python. `ModuleJarPackagingTest` asserts both reach the built `.modl`, because
+  this estate has already shipped a green build of a `.modl` missing a file
+  nobody had asserted was in it.
+- `ModuleSymbols.Symbol` carries the names of a `def`'s decorators. `@test`,
+  `@skip('why')` and `@scriptide.test` all record `test` / `skip`: the last
+  segment, which is what a reader means however the module was imported.
+- **The decorator widens which FUNCTIONS count, never which modules are looked
+  at.** `@test` in a module the naming convention does not admit still discovers
+  nothing — the rule that keeps `plc.diagnostics.test_connection` off a Run All
+  button is untouched, and the live suite asserts it as the load-bearing case it
+  is.
+
 ## [1.20.0] — 2026-09-07
 
 feat: export and import code, in the Designer's own format.

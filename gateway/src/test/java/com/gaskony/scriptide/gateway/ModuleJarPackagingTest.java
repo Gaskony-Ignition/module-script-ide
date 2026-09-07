@@ -153,4 +153,42 @@ class ModuleJarPackagingTest {
         assertThat(foundIndex).as("mounted/index.html missing from the .modl").isTrue();
         assertThat(foundAsset).as("no hashed mounted/assets/*.js in the .modl").isTrue();
     }
+
+    @Test
+    @EnabledIf("modlExists")
+    @DisplayName("the .modl bundles both Jython test-harness resources")
+    void shipsTestHarnessResources() throws IOException {
+        // TestHarness reads these with getResourceAsStream at class-init and fails
+        // loudly if either is missing — but only ONCE something actually runs a
+        // test. This is the same failure class already recorded for this estate: a
+        // green build that ships a .modl missing a file nobody had asserted was in
+        // it, caught here instead of by the first user to run a test.
+        Path modl = builtModl();
+        List<String> jars = entriesOf(modl).stream().filter(n -> n.endsWith(".jar")).toList();
+
+        Path tmp = Files.createTempDirectory("scriptide-modl-testharness");
+        boolean foundScriptide = false;
+        boolean foundRunner = false;
+        try (ZipFile outer = new ZipFile(modl.toFile())) {
+            for (String jarName : jars) {
+                Path extracted = tmp.resolve(jarName.replace('/', '_'));
+                try (var in = outer.getInputStream(outer.getEntry(jarName))) {
+                    Files.copy(in, extracted);
+                }
+                try (ZipFile inner = new ZipFile(extracted.toFile())) {
+                    for (ZipEntry e : inner.stream().toList()) {
+                        if ("com/gaskony/scriptide/gateway/testing/scriptide.py".equals(e.getName())) {
+                            foundScriptide = true;
+                        }
+                        if ("com/gaskony/scriptide/gateway/testing/runner.py".equals(e.getName())) {
+                            foundRunner = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        assertThat(foundScriptide).as("scriptide.py missing from the .modl").isTrue();
+        assertThat(foundRunner).as("runner.py missing from the .modl").isTrue();
+    }
 }
