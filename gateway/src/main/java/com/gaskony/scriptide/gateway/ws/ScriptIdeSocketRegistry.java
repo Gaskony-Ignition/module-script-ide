@@ -45,6 +45,8 @@ public final class ScriptIdeSocketRegistry {
     private static volatile com.gaskony.scriptide.gateway.presence.DesignerPresenceListener
         designerPresence;
     private static volatile java.util.concurrent.ScheduledExecutorService presenceSweeper;
+    private static volatile com.gaskony.scriptide.gateway.git.GitStatusRegistry gitStatus;
+    private static volatile java.util.concurrent.ScheduledExecutorService gitSweeper;
 
     /**
      * Background pool for {@link SdkTagBrowser} and {@link SdkDbSchema}'s
@@ -77,6 +79,7 @@ public final class ScriptIdeSocketRegistry {
         tagBrowser = new SdkTagBrowser(ctx.getTagManager(), pool);
         dbSchema = new SdkDbSchema(ctx.getDatasourceManager(), pool);
         startPresence(ctx);
+        startGitStatus(ctx);
         logger.debug("Script IDE socket registry initialised");
     }
 
@@ -114,6 +117,68 @@ public final class ScriptIdeSocketRegistry {
             com.gaskony.scriptide.gateway.presence.PresenceSweep.PERIOD_SECONDS,
             TimeUnit.SECONDS);
         presenceSweeper = sweeper;
+    }
+
+    /**
+     * Start the git status poll.
+     *
+     * <p>The set of projects to watch comes from the PRESENCE registry rather
+     * than from a list of its own: an IDE peer already carries the project its
+     * client is looking at, so the two features agree by construction and a
+     * project nobody has open is never walked.</p>
+     *
+     * <p>Read-only, and deliberately so. Nigel's decision on 01/09/2026 is that
+     * this module is not becoming a git module — {@code module-git} exists. What
+     * is here is the VS Code-shaped half: which resources differ from the last
+     * commit, and nothing that changes a repository.</p>
+     */
+    private static void startGitStatus(GatewayContext ctx) {
+        var projects = ctx.getSystemManager().getDataDir().toPath().resolve("projects");
+        var registry = new com.gaskony.scriptide.gateway.git.GitStatusRegistry(
+            projects::resolve);
+        gitStatus = registry;
+        var sweeper = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "scriptide-git-status");
+            t.setDaemon(true);
+            return t;
+        });
+        sweeper.scheduleWithFixedDelay(
+            new com.gaskony.scriptide.gateway.git.GitStatusSweep(registry,
+                ScriptIdeSocketRegistry::watchedProjects),
+            3,
+            com.gaskony.scriptide.gateway.git.GitStatusSweep.PERIOD_SECONDS,
+            TimeUnit.SECONDS);
+        gitSweeper = sweeper;
+    }
+
+    /** Projects that an IDE client currently has open, from the presence feed. */
+    private static Set<String> watchedProjects() {
+        var registry = presence;
+        if (registry == null) {
+            return Set.of();
+        }
+        Set<String> open = new java.util.HashSet<>();
+        for (var peer : registry.peers()) {
+            String project = peer.project();
+            if (project != null && !project.isBlank()) {
+                open.add(project);
+            }
+        }
+        return open;
+    }
+
+    /** Stop the git poll. Nothing is registered on a platform bus here. */
+    private static void stopGitStatus() {
+        var sweeper = gitSweeper;
+        if (sweeper != null) {
+            sweeper.shutdownNow();
+        }
+        gitSweeper = null;
+        gitStatus = null;
+    }
+
+    public static com.gaskony.scriptide.gateway.git.GitStatusRegistry getGitStatus() {
+        return gitStatus;
     }
 
     /**
@@ -258,6 +323,7 @@ public final class ScriptIdeSocketRegistry {
         }
         completionRefreshPool = null;
         stopPresence();
+        stopGitStatus();
         context = null;
         if (count > 0) {
             logger.info("Closed {} Script IDE socket(s) during shutdown", count);

@@ -94,6 +94,7 @@ import {
   type Peer,
   type PresenceState,
 } from '../api/presence';
+import { NO_GIT, decorate, gitClient, summarise, type GitState } from '../api/git';
 import {
   FIND_REFERENCES_EVENT,
   OPEN_LOCATION_EVENT,
@@ -462,6 +463,21 @@ export default function Workspace({ session }: WorkspaceProps) {
   useEffect(() => presenceClient().subscribe(setPresence), []);
 
   /**
+   * What git says has changed in this project since the last commit.
+   *
+   * Read-only. `module-git` does the staging and committing; this is the half a
+   * person wants while editing — which of these files have I touched — and it
+   * stops there (Nigel, 01/09/2026).
+   */
+  const [git, setGit] = useState<GitState>(NO_GIT);
+
+  useEffect(() => gitClient().subscribe(setGit), []);
+
+  useEffect(() => {
+    if (project) gitClient().watch(project);
+  }, [project]);
+
+  /**
    * Tell the gateway what this browser has open.
    *
    * Keyed on the resource PATH, not the tab uri: a Web Dev endpoint is one
@@ -485,6 +501,36 @@ export default function Workspace({ session }: WorkspaceProps) {
     }
     return map;
   }, [docs, presence]);
+
+  /**
+   * Git marks placed on paths this tree can actually render.
+   *
+   * The node set includes every ANCESTOR of every script, so a collapsed package
+   * carries the worst mark of what is inside it, and a mark for a resource that
+   * no longer exists — a deletion — lands on the nearest folder that does. See
+   * `decorate` for why the roll-up cannot happen in the tree component.
+   */
+  const gitMarks = useMemo(() => {
+    if (!git.repo || git.error || git.head === null) {
+      // No repo, unreadable, or nothing committed yet. In the last case every
+      // file genuinely IS new, and marking all of them says less than the one
+      // line `summarise` puts above the tree.
+      return undefined;
+    }
+    const nodes = new Set<string>();
+    for (const entry of tree?.scripts ?? []) {
+      nodes.add(entry.path);
+      let parent = entry.path;
+      while (parent.includes('/')) {
+        parent = parent.slice(0, parent.lastIndexOf('/'));
+        nodes.add(parent);
+      }
+    }
+    return decorate(git.marks, nodes);
+  }, [git, tree]);
+
+  /** The one line above the tree, or null when there is nothing honest to say. */
+  const gitSummary = useMemo(() => summarise(git), [git]);
 
   /** Peers on the document actually on screen, for the bar above it. */
   const activePresence = useMemo(
@@ -3102,6 +3148,7 @@ export default function Workspace({ session }: WorkspaceProps) {
               ) : tree ? (
                 <FileTree
                   scripts={tree.scripts}
+                  gitMarks={gitMarks}
                   selectedPath={activeDoc?.path ?? null}
                   onSelect={(entry) => void openScript(entry)}
                   // Create and delete are offered only when the session can
@@ -3125,6 +3172,21 @@ export default function Workspace({ session }: WorkspaceProps) {
                     {treeError ? treeError : 'Loading scripts…'}
                   </p>
                 </nav>
+              )}
+              {/* Only when there is something to say. A permanent "0 changes"
+                  line is chrome, and chrome in this spot is what teaches people
+                  to stop reading it. */}
+              {gitSummary && (
+                <p
+                  className={`git-summary${git.error ? ' is-error' : ''}`}
+                  title={
+                    git.error
+                      ? 'The project has a .git directory that could not be read.'
+                      : 'Changes since the last commit. Read-only — commit from the command line.'
+                  }
+                >
+                  {gitSummary}
+                </p>
               )}
               <StatusFooter scripts={tree?.scripts ?? []} transport={transport} />
             </div>

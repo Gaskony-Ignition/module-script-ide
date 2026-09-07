@@ -40,6 +40,24 @@ dependencies {
     // JsonObject is serialised by calling toString() on it — classloader-agnostic.
     modlImplementation(libs.gson)
 
+    // JGit, read-only. The gateway bundles none and the rig's image has no
+    // `git` binary, so a status indicator has to read .git in pure Java.
+    //
+    // slf4j is EXCLUDED, not merely absent: JGit depends on it, and shipping a
+    // second copy of a logging facade the Gateway already owns is exactly what
+    // ModuleJarPackagingTest exists to refuse. JGit binds to the platform's own
+    // slf4j at runtime, which is what puts its warnings in the gateway log
+    // rather than nowhere.
+    // slf4j is excluded, not merely absent: JGit depends on slf4j-api 1.7.36
+    // and would ship it, which ModuleJarPackagingTest refuses — the Gateway owns
+    // the logging facade, and a second copy on a module classloader is the same
+    // class of fault as a second Jython. The exclusion is on the DEPENDENCY, not
+    // the configuration: modlImplementation feeds the compile classpath too, and
+    // excluding there took slf4j away from this module's own loggers.
+    modlImplementation(libs.jgit) {
+        exclude(group = "org.slf4j")
+    }
+
     // The Vite SPA bundle.
     modlImplementation(projects.web)
 
@@ -53,6 +71,7 @@ dependencies {
     testImplementation(libs.jetty.websocket.api)
     testImplementation(libs.jython)
     testImplementation(libs.gson)
+    testImplementation(libs.jgit)
 
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)

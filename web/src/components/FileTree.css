@@ -287,3 +287,72 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+/* ---- git marks ----------------------------------------------------------
+   One letter per row saying how the resource differs from the last commit.
+
+   `margin-left: auto` is deliberately NOT set here, unlike .badge: a row can
+   carry an origin badge AND a mark, and both claiming the free space put the
+   mark under the delete button. The mark sits after whatever else is there and
+   reserves a fixed width so a column of them lines up. */
+.git-mark {
+  flex: none;
+  width: 12px;
+  margin-left: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+}
+
+/* A row with no origin badge has nothing pushing the mark right, so the mark
+   takes the space itself. With a badge present the badge already did. */
+.file-tree-item > .git-mark:not(.badge + .git-mark),
+.file-tree-package > .git-mark {
+  margin-left: auto;
+}
+
+/* Colours are git's conventions, on this palette's existing four. Nothing new
+   is invented: an undefined custom property fails silently and inherits, which
+   is how a mark ends up the same colour as the row it is meant to stand out
+   from. */
+.git-mark-modified {
+  color: var(--warning);
+}
+
+.git-mark-added {
+  color: var(--success);
+}
+
+.git-mark-deleted {
+  color: var(--error);
+}
+
+/* Conflicted uses the error colour too, and earns its distinct look from the
+   glyph — "!" against "D" — rather than from a fifth colour nobody would learn.
+   Bolder because it is the one state that blocks work. */
+.git-mark-conflicted {
+  color: var(--error);
+  font-weight: 700;
+}
+
+/* The branch and change count, under the tree and above the footer. Muted:
+   it is context for what the tree is showing, not a control. */
+.git-summary {
+  flex: none;
+  margin: 0;
+  padding: 4px 12px;
+  overflow: hidden;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An unreadable repository is the one thing here that must not read as chrome:
+   a clean tree and an unreadable one otherwise look identical. */
+.git-summary.is-error {
+  color: var(--error);
+}

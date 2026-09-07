@@ -43,6 +43,7 @@ public class ScriptIdeRouteRegistrar {
     private final NamedQueryTestRouteHandler namedQueryTestRouteHandler;
     private final HistoryRouteHandler historyRouteHandler;
     private final PresenceRouteHandler presenceRouteHandler;
+    private final GitStatusRouteHandler gitStatusRouteHandler;
     private final RuntimeErrorsRouteHandler runtimeErrorsRouteHandler;
     private final TestRouteHandler testRouteHandler;
     private final TransferRouteHandler transferRouteHandler;
@@ -72,6 +73,7 @@ public class ScriptIdeRouteRegistrar {
             new ScriptResourceRouteHandler(projectManager, saveHistory, index);
         this.historyRouteHandler = new HistoryRouteHandler(saveHistory);
         this.presenceRouteHandler = new PresenceRouteHandler();
+        this.gitStatusRouteHandler = new GitStatusRouteHandler();
         this.runtimeErrorsRouteHandler = new RuntimeErrorsRouteHandler(context);
         this.scriptAttributesRouteHandler =
             new ScriptAttributesRouteHandler(projectManager, scriptResourceRouteHandler);
@@ -305,6 +307,12 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_JSON)
             .accessControl(authed)
             .handler(presenceRouteHandler::presence)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_GIT_STATUS)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(gitStatusRouteHandler::status)
             .mount();
 
         routes.newRoute(ScriptIdePaths.ROUTE_RUNTIME_ERRORS)

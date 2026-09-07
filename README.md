@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.24.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.25.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -155,6 +155,12 @@ apart: an error never got far enough to have an opinion.*
   the Ignition Designer, read from the platform's own concurrent-editing feed.
   It names them and says where they are working from, and it never blocks a
   save: the point is to find out before the clash, not to be stopped after it.
+
+- **See what you have changed since the last commit.** If the project is a git
+  working tree on the gateway, the tree marks each script `M`, `A` or `D`, a
+  package carries the worst mark of what is inside it, and the side bar names
+  the branch and the count. Read-only — commit from the command line, or with
+  the git module. A project that is not a repository shows none of this.
 
 - **A VS Code-shaped shell**: activity bar, resizable side bar and outline, a
   bottom panel holding the console, the problems list and the terminal, and the
