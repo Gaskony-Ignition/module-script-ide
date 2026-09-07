@@ -15,6 +15,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { validateScriptName, type ScriptTypeId } from '../api/scripts';
+import { EMPTY_TEMPLATE, TEMPLATES, templateById } from '../api/templates';
 import './NewScriptDialog.css';
 
 export interface NewScriptDialogProps {
@@ -25,7 +26,15 @@ export interface NewScriptDialogProps {
   typeLabel: string;
   busy?: boolean;
   error?: string | null;
-  onCreate: (name: string) => void;
+  /**
+   * The second argument is the chosen template's source.
+   *
+   * Passed up rather than written here so there is still ONE create path: the
+   * dialog decides the starting text, `doCreate` writes it through the same
+   * route as an empty script and gets the same signature, the same tree refresh
+   * and the same error handling.
+   */
+  onCreate: (name: string, source?: string) => void;
   onCancel: () => void;
 }
 
@@ -40,6 +49,15 @@ export default function NewScriptDialog({
 }: NewScriptDialogProps) {
   const isLibrary = typeId === 'script-python';
   const [name, setName] = useState('');
+  /**
+   * Library scripts only.
+   *
+   * An event script's body is not a free choice — its handler signature is
+   * dictated by the type, and it is already seeded from the measured stub. A
+   * template picker there would offer to replace a correct answer with a
+   * guess.
+   */
+  const [templateId, setTemplateId] = useState(EMPTY_TEMPLATE.id);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -66,7 +84,7 @@ export default function NewScriptDialog({
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (canCreate) {
-      onCreate(name);
+      onCreate(name, isLibrary ? templateById(templateId).source : undefined);
     }
   }
 
@@ -107,7 +125,7 @@ export default function NewScriptDialog({
           {isLibrary ? (
             <>
               Use <code>/</code> for packages — <code>util/helpers</code> becomes{' '}
-              <code>project.util.helpers</code>. The script starts empty.
+              <code>project.util.helpers</code>.
             </>
           ) : (
             <>
@@ -126,6 +144,28 @@ export default function NewScriptDialog({
           <p className="newscript-problem" role="alert">
             {error}
           </p>
+        )}
+
+        {isLibrary && (
+          <>
+            <label className="newscript-label" htmlFor="newscript-template">
+              Start from
+            </label>
+            <select
+              id="newscript-template"
+              className="newscript-input"
+              value={templateId}
+              disabled={busy}
+              onChange={(event) => setTemplateId(event.target.value)}
+            >
+              {TEMPLATES.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.label}
+                </option>
+              ))}
+            </select>
+            <p className="newscript-hint muted">{templateById(templateId).hint}</p>
+          </>
         )}
 
         <div className="newscript-actions">

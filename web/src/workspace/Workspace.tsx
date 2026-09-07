@@ -86,6 +86,7 @@ import type { ActiveSource } from '../components/ScriptConsole';
 import StatusFooter from '../components/StatusFooter';
 import TabStrip from '../components/TabStrip';
 import { PresenceBar } from '../components/Presence';
+import { allDrafts, dropDraft, putDraft, type Draft } from './drafts';
 import {
   EMPTY_PRESENCE,
   peersOn,
@@ -490,6 +491,69 @@ export default function Workspace({ session }: WorkspaceProps) {
     () => (activeDoc ? peersOn(presence, activeDoc.project, activeDoc.path) : []),
     [activeDoc, presence]
   );
+
+  /**
+   * Unsaved buffers left behind by a previous session.
+   *
+   * Read ONCE, on mount, and deliberately not refreshed: this is a list of what
+   * was already lost when the page loaded. Re-reading it would fold in the
+   * drafts this session is writing as you type, and the notice would never go
+   * away.
+   */
+  const [recoverable, setRecoverable] = useState<Draft[]>([]);
+
+  useEffect(() => {
+    setRecoverable(allDrafts());
+  }, []);
+
+  /**
+   * Keep every dirty script buffer, so a closed tab is not lost work.
+   *
+   * Debounced rather than written per keystroke: this is `localStorage`, which
+   * is synchronous and on the main thread, and a write per character in a
+   * 60 KB file is felt.
+   *
+   * Scripts only. A named query's dirtiness includes its SETTINGS, which a
+   * draft does not carry, so a recovered query would come back with its SQL and
+   * somebody else's connection — a half-restore that looks whole.
+   */
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      for (const doc of docsRef.current) {
+        if (doc.kind !== 'script') continue;
+        if (isDirty(doc)) {
+          putDraft({
+            uri: doc.uri,
+            project: doc.project,
+            path: doc.path,
+            scriptKey: doc.scriptKey,
+            label: doc.label,
+            text: doc.text,
+            baseText: doc.baseText,
+            etag: doc.etag,
+            at: Date.now(),
+          });
+        } else {
+          // Saved, or edited back to what the gateway holds. Either way it is
+          // no longer at risk and must not be offered as recovered work.
+          dropDraft(doc.uri);
+        }
+      }
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [docs]);
+
+  /** Drafts for the project on screen — the only ones that can be opened here. */
+  const myDrafts = useMemo(
+    () => recoverable.filter((draft) => draft.project === project
+      && !docs.some((doc) => doc.uri === draft.uri)),
+    [recoverable, project, docs]
+  );
+
+  const forgetDrafts = useCallback(() => {
+    for (const draft of myDrafts) dropDraft(draft.uri);
+    setRecoverable((current) => current.filter((d) => !myDrafts.includes(d)));
+  }, [myDrafts]);
 
   /**
    * Open documents whose gateway copy has moved on since they were opened.
@@ -1064,6 +1128,47 @@ export default function Workspace({ session }: WorkspaceProps) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [pendingClose]);
+
+  /**
+   * Put recovered buffers back into tabs.
+   *
+   * Through `openScript`, not by constructing a document from the draft: the
+   * draft holds text, and a document also needs its type, its data key, its
+   * inheritance state and the CURRENT signature. Building one from the draft
+   * would hand the next save an etag from a previous session, which is exactly
+   * the stale-write this module's If-Match exists to refuse.
+   *
+   * So the gateway's copy is opened first and the draft text applied over it.
+   * The tab is then dirty against what the gateway holds NOW, which is the
+   * truthful state — and if somebody saved that resource in the meantime, the
+   * ordinary conflict machinery is already pointed at the right version.
+   */
+  const restoreDrafts = useCallback(async () => {
+    const missing: string[] = [];
+    for (const draft of myDrafts) {
+      const entry = tree?.scripts.find(
+        (candidate) => candidate.path === draft.path
+          && (candidate.scriptKey ?? '') === (draft.scriptKey ?? '')
+      );
+      if (!entry) {
+        // The script was deleted while the draft sat in a closed browser. Say
+        // so by name: silently skipping it looks like the recovery failed.
+        missing.push(draft.label);
+        continue;
+      }
+      await openScript(entry);
+      setDocs((current) => current.map(
+        (doc) => (doc.uri === draft.uri ? { ...doc, text: draft.text } : doc)
+      ));
+    }
+    setRecoverable((current) => current.filter((d) => !myDrafts.includes(d)));
+    if (missing.length > 0) {
+      setNotice({
+        kind: 'error',
+        text: `Could not restore ${missing.join(', ')} — no longer on the gateway.`,
+      });
+    }
+  }, [myDrafts, openScript, tree]);
 
   const closeDoc = useCallback((uri: string) => {
     const doc = docsRef.current.find((d) => d.uri === uri);
@@ -1787,7 +1892,7 @@ export default function Workspace({ session }: WorkspaceProps) {
   // ---- create ----------------------------------------------------------
 
   const doCreate = useCallback(
-    async (name: string) => {
+    async (name: string, template?: string) => {
       const typeId = creating ?? 'script-python';
       setCreateBusy(true);
       setCreateError(null);
@@ -1800,7 +1905,9 @@ export default function Workspace({ session }: WorkspaceProps) {
         await createScript({
           project,
           path,
-          source: handlerStub(typeId),
+          // A chosen template wins; without one it is the measured stub, which
+          // for a library script is the empty file the Designer writes.
+          source: template ?? handlerStub(typeId),
           csrfToken: session.csrfToken,
         });
         setCreating(null);
@@ -2487,6 +2594,31 @@ export default function Workspace({ session }: WorkspaceProps) {
    */
   const paneChrome = (
     <>
+              {/* First of all the bars, and the only one about something that
+                  has ALREADY happened. Everything below it is about what is
+                  about to happen. */}
+              {myDrafts.length > 0 && (
+                <div className="workspace-recover" role="status">
+                  <IconAlert size={16} />
+                  <div className="workspace-signedout-text">
+                    <strong>
+                      {myDrafts.length === 1
+                        ? `Unsaved work in ${myDrafts[0].label} from a previous session.`
+                        : `Unsaved work in ${myDrafts.length} scripts from a previous session.`}
+                    </strong>{' '}
+                    {/* Says where it was kept, because that is the limit of the
+                        promise: this browser, on this machine. None of it was
+                        ever sent to the gateway. */}
+                    Kept in this browser only — {myDrafts.map((d) => d.label).join(', ')}.
+                  </div>
+                  <button type="button" className="button" onClick={() => void restoreDrafts()}>
+                    Restore
+                  </button>
+                  <button type="button" className="button button-quiet" onClick={forgetDrafts}>
+                    Discard
+                  </button>
+                </div>
+              )}
               {/* Above every other bar here: the others are about what YOU are
                   about to do, this one is about somebody else already doing it. */}
               <PresenceBar peers={activePresence} designerFeed={presence.designerFeed} />
@@ -3322,7 +3454,7 @@ export default function Workspace({ session }: WorkspaceProps) {
           }
           busy={createBusy}
           error={createError}
-          onCreate={(name) => void doCreate(name)}
+          onCreate={(name, source) => void doCreate(name, source)}
           onCancel={() => setCreating(null)}
         />
       )}
@@ -3476,6 +3608,10 @@ export default function Workspace({ session }: WorkspaceProps) {
                 type="button"
                 className="danger"
                 onClick={() => {
+                  // An explicit discard is a decision, so the draft goes too.
+                  // Keeping it would offer the work back at the next reload,
+                  // having just been told to throw it away.
+                  dropDraft(pendingClose.uri);
                   forceCloseDoc(pendingClose.uri);
                   setPendingClose(null);
                 }}

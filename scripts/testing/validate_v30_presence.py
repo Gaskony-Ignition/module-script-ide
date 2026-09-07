@@ -38,8 +38,13 @@ SPA = CONFIG.get("spa_path", "/data/scriptide/")
 PROJECT = os.environ.get("SI_EDIT_PROJECT", "Mining_Demo")
 
 PKG = "_si_v30"
-ALPHA = f"ignition/script-python/{PKG}/alpha"
-BETA = f"ignition/script-python/{PKG}/beta"
+# Leaf names carry the suite's own prefix, and that is not decoration. This
+# project has held a fixture called `beta` from two suites at once — an earlier
+# crashed v27 run left its package behind — and a tree click that matched on the
+# leaf alone opened somebody else's file. The suite then failed an assertion
+# about a script it had never opened, which reads as a product bug.
+ALPHA = f"ignition/script-python/{PKG}/v30_alpha"
+BETA = f"ignition/script-python/{PKG}/v30_beta"
 FOLDER = f"ignition/script-python/{PKG}"
 FIXTURES = (ALPHA, BETA, FOLDER)
 
@@ -149,13 +154,16 @@ def expand_tree(page):
 
 
 def open_named(page, name):
-    """Click a script by its leaf name, as a person would."""
+    """Click a script by its leaf name, as a person would.
+
+    The name must be unique in the project — see the note on ALPHA/BETA. An
+    exact-text match on a name that is not unique silently opens whichever row
+    came first.
+    """
     expand_tree(page)
     row = page.locator(
         f'.file-tree .file-tree-item:has(.file-tree-name:text-is("{name}"))')
-    if row.count() == 0:
-        row = page.locator('.file-tree .file-tree-item').filter(has_text=name)
-    if row.count() == 0:
+    if row.count() != 1:
         return False
     row.first.click()
     page.wait_for_timeout(1800)
@@ -207,7 +215,7 @@ with sync_playwright() as p:
 
         # ================= one client alone =================
 
-        rec("FIXTURE: alpha opens in the first client", open_named(page, "alpha"))
+        rec("FIXTURE: alpha opens in the first client", open_named(page, "v30_alpha"))
         page.wait_for_timeout(1500)
 
         state = presence(page)
@@ -222,7 +230,7 @@ with sync_playwright() as p:
         # ================= a second browser =================
 
         second = open_ide(context)
-        rec("FIXTURE: alpha opens in the second client", open_named(second, "alpha"))
+        rec("FIXTURE: alpha opens in the second client", open_named(second, "v30_alpha"))
         page.wait_for_timeout(2000)
 
         first_bar = page.locator(".presence-bar").count()
@@ -244,7 +252,7 @@ with sync_playwright() as p:
 
         # ================= scoping =================
 
-        rec("FIXTURE: the second client also opens beta", open_named(second, "beta"))
+        rec("FIXTURE: the second client also opens beta", open_named(second, "v30_beta"))
         page.wait_for_timeout(2000)
 
         state = presence(page)

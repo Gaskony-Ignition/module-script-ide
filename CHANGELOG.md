@@ -2,6 +2,67 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.24.0] — 2026-09-07
+
+feat: templates, autosave and crash recovery, console export and timestamps.
+
+The last three items of `the borrowed-ideas brief`. All four groups are now
+done.
+
+### Autosave and crash recovery
+
+Every unsaved buffer is kept in this browser as you type, and offered back when
+the page comes up again — after a crash, an accidental close, or a laptop that
+slept and reloaded. `SaveHistory` could never help here: it only ever sees text
+that was successfully written, which is exactly the text that was not at risk.
+
+**Restore loads the buffer; it never writes.** The gateway's CURRENT copy is
+opened first and the recovered text applied over it, so the tab is dirty against
+what the gateway holds now — not against a signature from a previous session,
+which is precisely the stale write `If-Match` exists to refuse. Verified: the
+gateway's copy is untouched until you save.
+
+The notice says the work was kept **in this browser only**, because that is the
+limit of the promise. Nothing is sent to the gateway, and a draft is invisible
+from any other machine. A buffer edited back to what the gateway holds stops
+being a draft; an explicit "Discard changes" forgets it.
+
+### "New from…" templates
+
+Six starting points for a new library script — a documented module, a
+parameterised database read, a transaction, tag read/write, a test module, and a
+module with a logger. Library scripts only: an event script's signature is
+dictated by its type and already seeded from a measured stub, so a picker there
+would offer to replace a correct answer with a guess.
+
+Each one obeys the house rules it would otherwise teach people to break: tabs
+never spaces, `except Throwable` never `except Exception` around a platform
+call, and parameterised SQL rather than a formatted string.
+
+**Verified on the gateway rather than by reading them.** `validate_v31` compiles
+every template with the running Jython, and the calls they make were checked
+against the live 8.3.8 `system.*` before shipping. That caught one: the
+transaction template said `beginNamedQueryTransaction`, which is for
+`runNamedQuery`; `runPrepUpdate` takes the id from `beginTransaction`.
+
+### Console: export and timestamps
+
+**Export** saves the output as a text file, stamped, with ANSI stripped — the
+point is something you can paste into a ticket or grep, and escape bytes are
+mojibake outside a terminal. The header says the times are the browser's clock,
+not the gateway's, which matters the moment anyone lines them up against a
+gateway log.
+
+**Times** is a toggle, off by default and remembered per viewer. The stamp is
+rendered outside the `<pre>`, so copying the output copies the output and not a
+column of times somebody then has to strip out.
+
+### Fixed
+
+- A stale `web-<old version>.jar` left in `build/moduleContent` fails
+  `zipModule` with "Library 'web' exists in multiple versions". A clean build
+  clears it; noted here because the message does not say that.
+
 ## [1.23.0] — 2026-09-07
 
 feat: presence — who else has this file open, and where they are working from.
