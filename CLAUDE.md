@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.19.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.20.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -153,6 +153,24 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   of a history path are HASHES of the username and the resource path, never the
   names: both are attacker-influenced strings that would otherwise become
   directories.
+- **The export zip's entry paths come from `HandlerSupport.encodePath`, never
+  `ResourcePath.getPath()`.** The latter drops the module and type, so an entry
+  is `MyPackage/helpers/code.py` instead of
+  `ignition/script-python/MyPackage/helpers/code.py`. In the Designer's format
+  the PATHS ARE THE INDEX — there is no manifest listing the resources — so a zip
+  missing the prefix imports as nothing, in the Designer as much as here, while
+  looking entirely reasonable in a listing. Measured 07/09/2026 by importing our
+  own file into the real Designer; a round trip through our own import passes
+  either way, which is exactly why it is not the test.
+- **An uploaded archive is checked DECOMPRESSED, and traversal is refused rather
+  than sanitised.** Per-entry, per-archive and TOTAL caps (the last is what a zip
+  bomb defeats the first two with), an entry count, and a resource-type
+  allowlist. A `..`, an absolute path or a backslash is an error naming the
+  entry: these become `ResourcePath`s, not filenames, so the reflex of stripping
+  the `..` leaves something that still resolves somewhere. Also:
+  `ZipInputStream` does NOT throw on data that is not a zip — it yields no
+  entries — so check the `PK` magic, or a `.py` uploaded by mistake is reported
+  as "holds no resource.json" and sends the reader after the wrong problem.
 - **Test discovery is narrow on purpose, and widening it is a production
   incident.** `def test_*` anywhere in a project would put
   `plc.diagnostics.test_connection` under a Run All button — a function whose job

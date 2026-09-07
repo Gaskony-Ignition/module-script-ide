@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.19.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.20.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -100,6 +100,11 @@ apart: an error never got far enough to have an opinion.*
 - **Guards on the way out.** A save that does not parse asks once first. A save
   that removes or re-declares a function names its call sites before the write.
   Neither refuses — both make it deliberate.
+- **Export and import code**, in the Designer's own resource-zip format — so a
+  file written here opens there and the other way round, which was proved by
+  doing it rather than assumed. Right-click a script or a package to export;
+  import lists what an archive holds and says which scripts it would replace
+  before you commit to it.
 - **Two scripts side by side.** Split the editor and read one script while
   editing another — the thing the Designer cannot do at all. Either pane takes
   any open document, the divider is draggable and its width is remembered.
