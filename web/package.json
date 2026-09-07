@@ -1,6 +1,6 @@
 {
   "name": "script-ide-web",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "private": true,
   "type": "module",
   "description": "Browser IDE SPA for the Ignition Script IDE module",

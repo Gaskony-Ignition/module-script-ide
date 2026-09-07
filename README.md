@@ -2,7 +2,7 @@
 
 Write Ignition scripts in a real editor, in the browser, against the live gateway.
 
-**Version**: 1.22.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
+**Version**: 1.23.0 · **Module ID**: `com.gaskony.scriptide` · Ignition 8.3+
 
 ---
 
@@ -137,6 +137,12 @@ apart: an error never got far enough to have an opinion.*
   string or a comment.
 - **Colour in the console.** `cprint` and `jsonPrint` are there in every run, and
   output that carries ANSI is rendered rather than shown as escape bytes.
+- **See who else has the file open.** A bar above the editor and a badge on the
+  tab when somebody else is in the same script — from another browser, or from
+  the Ignition Designer, read from the platform's own concurrent-editing feed.
+  It names them and says where they are working from, and it never blocks a
+  save: the point is to find out before the clash, not to be stopped after it.
+
 - **A VS Code-shaped shell**: activity bar, resizable side bar and outline, a
   bottom panel holding the console, the problems list and the terminal, and the
   four layout glyphs in the title bar.

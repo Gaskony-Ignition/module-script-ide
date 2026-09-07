@@ -2,7 +2,44 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.22.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+**Version 1.23.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+
+### 1.23.0 — presence: who else has this file open (07/09/2026)
+
+Nigel asked whether we could detect that somebody else has a script open, from
+another browser or from the Designer. We can, and the gateway was already keeping
+the answer.
+
+**Two feeds, one registry.** Browser clients report their open paths over the
+socket they already hold. Designers are read from Ignition's own concurrent-editing
+feed: the platform posts `DesignerResourceSessionEvent` on the Guava `EventBus`
+that `CommonContext.getEventBus()` returns — public SDK — carrying session id,
+username, hostname, IP, start time and the exact `ResourcePath`s open. The module
+registers on the same bus the platform's own manager uses. Everything is pushed;
+only departure is swept, because there is no event for a session that went away
+without saying so.
+
+**Verified against a REAL Designer on 8.3.8, not off the bytecode.** Opening
+`MiningDemo.config` in the Designer put `ignition/script-python/MiningDemo/config`
+in the module's list within seconds, and the browser showed *"admin in the
+Designer on 172.31.0.2 also has this open."* Closing the script cleared the path;
+exiting the Designer cleared the peer.
+
+**The caveat that will matter later:** `DesignerResourceSessionEvent` is in
+`gateway.jar`, NOT the SDK's `gateway-api` — checked on 8.3.6 and 8.3.8. It is
+internal and may change in a patch. Everything it carries is public SDK, the
+reflection is confined to reaching the accessor, and `PresenceSweep`
+(`GatewaySessionManager`, fully supported) is the floor: a shape change costs
+specificity, never the feature or the startup. `GET /api/presence` reports
+`designerFeed` and `designerEventSeen` so it fails visibly.
+
+**It is a warning, not a lock.** `If-Match` is what prevents a lost update.
+Presence exists so two people find out about each other before the conflict, and
+the bar says so. It says "has it open", never "is editing" — that is what both
+feeds actually report.
+
+Also: run history is searchable (over source AND output) and records how long
+each run took.
 
 ### 1.22.0 — authoring: snippets, imports, live completion, lints, colour (07/09/2026)
 

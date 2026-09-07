@@ -16,6 +16,10 @@ dependencies {
     compileOnly(libs.ignition.gateway.api)
     compileOnly(libs.jakarta.servlet)
 
+    // Guava, only for CommonContext.getEventBus(). compileOnly and pinned to the
+    // platform's own copy — see the note in gradle/libs.versions.toml.
+    compileOnly(libs.guava)
+
     // Jetty-12 WebSocket API for the LSP/exec socket. compileOnly — the Gateway
     // provides Jetty at runtime; a second Jetty on the module classpath breaks GAN.
     compileOnly(libs.jetty.ee10.websocket.server)
@@ -44,6 +48,7 @@ dependencies {
     testImplementation(libs.ignition.common)
     testImplementation(libs.ignition.gateway.api)
     testImplementation(libs.jakarta.servlet)
+    testImplementation(libs.guava)
     testImplementation(libs.jetty.ee10.websocket.server)
     testImplementation(libs.jetty.websocket.api)
     testImplementation(libs.jython)

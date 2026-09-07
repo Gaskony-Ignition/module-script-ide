@@ -9,7 +9,10 @@ import com.gaskony.scriptide.gateway.lang.LanguageServer;
 import com.gaskony.scriptide.gateway.lang.ProjectIndex;
 import com.gaskony.scriptide.gateway.term.TerminalPolicy;
 import com.gaskony.scriptide.gateway.term.TerminalService;
+import com.gaskony.scriptide.gateway.presence.Presence;
+import com.gaskony.scriptide.gateway.presence.PresenceRegistry;
 import com.gaskony.scriptide.gateway.term.TerminalSession;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.python.core.PyObject;
@@ -46,6 +49,9 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
     /** Stable id for this connection — the per-session execution limit keys on it. */
     private final String sessionId = java.util.UUID.randomUUID().toString();
 
+    /** When this connection opened, shown as "since" beside a peer's name. */
+    private final long connectedAt = System.currentTimeMillis();
+
     private volatile Session session;
 
     /**
@@ -67,10 +73,21 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
      */
     private volatile String currentExecutionId;
 
+    /**
+     * Told when anyone, anywhere, opens or closes a script.
+     *
+     * <p>Held as a field only so it can be REMOVED on close: the registry is
+     * static and outlives this connection, so a listener left behind holds a
+     * closed socket and sends into it for the life of the gateway.</p>
+     */
+    private final PresenceRegistry.Listener presenceListener = version -> sendPresence();
+
     /** The run in flight, kept so it can be recorded when it finishes. */
     private volatile String runningSource;
     private volatile String runningProject;
     private volatile StringBuilder runningOutput;
+    /** When the running execution was dispatched, for its kept duration. */
+    private volatile long runningStartedAt;
 
     /** Stop accumulating output for the history past this — see RunHistory. */
     private static final int RUN_OUTPUT_CAP = 32 * 1024;
@@ -121,6 +138,10 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
     public void onWebSocketOpen(Session session) {
         this.session = session;
         ScriptIdeSocketRegistry.register(this);
+        PresenceRegistry presenceRegistry = ScriptIdeSocketRegistry.getPresence();
+        if (presenceRegistry != null) {
+            presenceRegistry.addListener(presenceListener);
+        }
         logger.debug("Script IDE socket opened for user '{}' (admin={})", username, administrator);
     }
 
@@ -181,8 +202,97 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
             return;
         }
 
+        if ("presence".equals(channel)) {
+            try {
+                handlePresence(envelope.getAsJsonObject("msg"));
+            } catch (RuntimeException e) {
+                // Presence is an indicator, never a gate. A malformed frame costs
+                // this client its badges and nothing else.
+                logger.debug("presence frame failed for '{}': {}", username, e.toString());
+            }
+            return;
+        }
+
         // "lsp" arrives in P3.
         sendError("error", "unknown channel: " + channel);
+    }
+
+    /**
+     * This client saying which scripts it has open.
+     *
+     * <p>Declared by the client rather than inferred from what it has READ,
+     * because they are different facts: a go-to-definition reads a file nobody
+     * has open, and a tab left open reads nothing for hours. The tab strip is the
+     * honest source, and it is the thing the person on the other end is looking
+     * at.</p>
+     *
+     * <p>An empty list is a legitimate message, not a no-op — it is what a client
+     * sends when the last tab closes, and dropping it would leave a name on a
+     * file nobody has.</p>
+     */
+    private void handlePresence(JsonObject msg) {
+        PresenceRegistry registry = ScriptIdeSocketRegistry.getPresence();
+        if (registry == null) {
+            return;
+        }
+        if (msg == null) {
+            sendPresence();
+            return;
+        }
+        String project = stringOf(msg, "project");
+        java.util.List<String> open = new java.util.ArrayList<>();
+        if (msg.has("open") && msg.get("open").isJsonArray()) {
+            for (var element : msg.getAsJsonArray("open")) {
+                if (element != null && element.isJsonPrimitive()) {
+                    open.add(element.getAsString());
+                }
+            }
+        }
+        registry.put(new Presence.Peer(sessionId, username, remoteHost,
+            Presence.Kind.IDE, project, open, connectedAt));
+        // Answer this client directly as well as through the broadcast: its own
+        // update does not change the peer list it is shown (it is excluded from
+        // it), so without this a first frame from a lone client gets no reply and
+        // the panel sits on "connecting".
+        sendPresence();
+    }
+
+    /**
+     * Everyone except this connection, as the client renders them.
+     *
+     * <p>Self-exclusion happens HERE rather than in the browser: the session id is
+     * the only reliable way to tell your own tab from a second tab you opened
+     * yourself, and it is deliberately never sent to the client.</p>
+     */
+    private void sendPresence() {
+        PresenceRegistry registry = ScriptIdeSocketRegistry.getPresence();
+        if (registry == null) {
+            return;
+        }
+        JsonArray peers = new JsonArray();
+        for (Presence.Peer peer : registry.peers()) {
+            if (peer.sessionId().equals(sessionId)) {
+                continue;
+            }
+            JsonObject item = new JsonObject();
+            item.addProperty("username", peer.username());
+            item.addProperty("host", peer.host());
+            item.addProperty("kind", peer.kind() == Presence.Kind.DESIGNER ? "designer" : "ide");
+            item.addProperty("project", peer.project());
+            item.addProperty("since", peer.since());
+            JsonArray resources = new JsonArray();
+            peer.resources().forEach(resources::add);
+            item.add("resources", resources);
+            peers.add(item);
+        }
+        JsonObject msg = new JsonObject();
+        msg.addProperty("version", registry.version());
+        msg.add("peers", peers);
+        // Whether per-file Designer presence is actually working on THIS gateway,
+        // so the client can say "sessions only" instead of quietly showing less.
+        var designer = ScriptIdeSocketRegistry.getDesignerPresence();
+        msg.addProperty("designerFeed", designer != null);
+        sendOn("presence", msg);
     }
 
     /**
@@ -380,6 +490,7 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         runningSource = source;
         runningProject = project;
         runningOutput = new StringBuilder();
+        runningStartedAt = System.currentTimeMillis();
         try {
             service.submit(executionId, project, source, fileName, locals, username, sessionId,
                 () -> sendStarted(executionId),
@@ -476,8 +587,13 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         var history = ScriptIdeSocketRegistry.getRunHistory();
         String source = runningSource;
         StringBuilder output = runningOutput;
+        // Wall time, taken here rather than inside the runner: what the user
+        // waited for includes the dispatch and the streaming, and the runner
+        // knows about neither.
+        long elapsed = runningStartedAt == 0 ? 0 : System.currentTimeMillis() - runningStartedAt;
         runningSource = null;
         runningOutput = null;
+        runningStartedAt = 0;
         if (history == null || source == null) {
             return;
         }
@@ -487,7 +603,7 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         try {
             history.record(username, runningProject, source,
                 output == null ? "" : output.toString(),
-                outcome.succeeded(), error);
+                outcome.succeeded(), error, elapsed);
         } catch (RuntimeException e) {
             logger.debug("Could not record run history: {}", e.toString());
         }
@@ -626,6 +742,14 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
         TerminalService terminals = ScriptIdeSocketRegistry.getTerminalService();
         if (terminals != null) {
             terminals.closeAllFor(sessionId);
+        }
+        PresenceRegistry presenceRegistry = ScriptIdeSocketRegistry.getPresence();
+        if (presenceRegistry != null) {
+            presenceRegistry.removeListener(presenceListener);
+            // Remove BEFORE unregistering the socket: the peer entry is what
+            // other people see, and a name left on a file by a browser that has
+            // gone is exactly the stale indicator this feature must not produce.
+            presenceRegistry.remove(sessionId);
         }
         ScriptIdeSocketRegistry.unregister(this);
         logger.debug("Script IDE socket closed for '{}' ({}: {})", username, statusCode, reason);

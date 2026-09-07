@@ -15,7 +15,7 @@
  * one-click re-run of something you wrote an hour ago, against a live gateway,
  * with no chance to read it first, is not a convenience.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchRuns, type PastRun } from '../api/scripts';
 import './RunHistoryDialog.css';
 
@@ -44,10 +44,47 @@ export function firstLine(source: string): string {
   return line.length > 70 ? `${line.slice(0, 70)}…` : line;
 }
 
+/**
+ * How long a run took, in the coarsest unit that still says something.
+ *
+ * An empty string for zero, which means "kept before durations were" rather
+ * than "instant" — a blank column is honest where `0 ms` is a claim.
+ */
+export function durationLabel(ms: number): string {
+  if (!ms || ms < 0) return '';
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.round((ms % 60000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
+/**
+ * Does this run match what was typed?
+ *
+ * Over the SOURCE and the OUTPUT both, because the two questions people bring
+ * to a run history are "where did I write that query" and "which run printed
+ * that error", and only one of them is answerable from the code. Case-folded,
+ * substring, no regex: a stray `(` in a search box that threw would be a worse
+ * answer than a literal match nobody expected.
+ */
+export function runMatches(run: PastRun, needle: string): boolean {
+  const query = needle.trim().toLowerCase();
+  if (!query) return true;
+  return (
+    run.source.toLowerCase().includes(query)
+    || run.output.toLowerCase().includes(query)
+    || (run.error ?? '').toLowerCase().includes(query)
+    || run.project.toLowerCase().includes(query)
+  );
+}
+
 export default function RunHistoryDialog({ onClose, onLoad }: RunHistoryDialogProps) {
   const [runs, setRuns] = useState<PastRun[] | null>(null);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
+  const [filter, setFilter] = useState('');
+  const filterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +102,29 @@ export default function RunHistoryDialog({ onClose, onLoad }: RunHistoryDialogPr
     };
   }, []);
 
-  const current = runs?.find((run) => run.id === selected) ?? null;
+  // The search box takes focus, not the list: with fifty runs kept, finding one
+  // is the reason this dialog is open more often than browsing is.
+  useEffect(() => {
+    filterRef.current?.focus();
+  }, []);
+
+  const shown = useMemo(
+    () => (runs ?? []).filter((run) => runMatches(run, filter)),
+    [runs, filter]
+  );
+
+  // Selecting the first match keeps the right-hand pane in step with the list:
+  // a filter that hid the selected run would otherwise leave its source on
+  // screen beside a list that no longer contains it.
+  useEffect(() => {
+    if (shown.length === 0) {
+      setSelected(null);
+    } else if (!shown.some((run) => run.id === selected)) {
+      setSelected(shown[0].id);
+    }
+  }, [shown, selected]);
+
+  const current = shown.find((run) => run.id === selected) ?? null;
 
   return (
     <div className="runhist-backdrop" role="presentation" onClick={onClose}>
@@ -85,6 +144,26 @@ export default function RunHistoryDialog({ onClose, onLoad }: RunHistoryDialogPr
 
         <div className="runhist-body">
           <div className="runhist-list">
+            <div className="runhist-search">
+              <input
+                ref={filterRef}
+                type="search"
+                className="runhist-filter"
+                placeholder="Search source and output"
+                aria-label="Search the run history"
+                spellCheck={false}
+                autoComplete="off"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+              />
+              {runs !== null && (
+                <span className="runhist-count muted">
+                  {filter.trim()
+                    ? `${shown.length} of ${runs.length}`
+                    : `${runs.length} run${runs.length === 1 ? '' : 's'}`}
+                </span>
+              )}
+            </div>
             {error ? (
               <p className="runhist-empty muted">Could not read the run history: {error}</p>
             ) : runs === null ? (
@@ -94,9 +173,14 @@ export default function RunHistoryDialog({ onClose, onLoad }: RunHistoryDialogPr
                 Nothing run from this console yet. Every run is kept from now on, with its
                 output, and survives a gateway restart.
               </p>
+            ) : shown.length === 0 ? (
+              <p className="runhist-empty muted">
+                No run here matches “{filter.trim()}”. The search reads the source and the
+                output, and only the last {runs.length} runs are kept.
+              </p>
             ) : (
               <ul>
-                {runs.map((run) => (
+                {shown.map((run) => (
                   <li key={run.id}>
                     <button
                       type="button"
@@ -111,6 +195,9 @@ export default function RunHistoryDialog({ onClose, onLoad }: RunHistoryDialogPr
                         </span>
                         {runLabel(run.at)}
                         {run.project ? ` · ${run.project}` : ''}
+                        {durationLabel(run.durationMs)
+                          ? ` · ${durationLabel(run.durationMs)}`
+                          : ''}
                       </span>
                       <span className="runhist-first">{firstLine(run.source)}</span>
                     </button>

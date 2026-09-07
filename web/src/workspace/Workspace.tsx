@@ -85,6 +85,14 @@ import ScriptConsole from '../components/ScriptConsole';
 import type { ActiveSource } from '../components/ScriptConsole';
 import StatusFooter from '../components/StatusFooter';
 import TabStrip from '../components/TabStrip';
+import { PresenceBar } from '../components/Presence';
+import {
+  EMPTY_PRESENCE,
+  peersOn,
+  presenceClient,
+  type Peer,
+  type PresenceState,
+} from '../api/presence';
 import {
   FIND_REFERENCES_EVENT,
   OPEN_LOCATION_EVENT,
@@ -440,6 +448,47 @@ export default function Workspace({ session }: WorkspaceProps) {
   const activeDoc = useMemo(
     () => docs.find((d) => d.uri === activeUri) ?? null,
     [docs, activeUri]
+  );
+
+  /**
+   * Who else has these files open — other browsers, and Ignition Designers.
+   *
+   * The gateway pushes this whenever it changes, so nothing here polls. See
+   * `api/presence.ts` for why it is a warning rather than a lock.
+   */
+  const [presence, setPresence] = useState<PresenceState>(EMPTY_PRESENCE);
+
+  useEffect(() => presenceClient().subscribe(setPresence), []);
+
+  /**
+   * Tell the gateway what this browser has open.
+   *
+   * Keyed on the resource PATH, not the tab uri: a Web Dev endpoint is one
+   * resource holding up to eight scripts, so two tabs on `doGet` and `doPost`
+   * are one file as far as anybody else is concerned — and as far as the
+   * Designer, which has no concept of our data keys, can possibly report.
+   */
+  useEffect(() => {
+    const open = [...new Set(docs.map((doc) => doc.path))];
+    presenceClient().report(project, open);
+  }, [docs, project]);
+
+  /** Peers per open tab, so the strip can badge each one. */
+  const presenceByUri = useMemo(() => {
+    const map = new Map<string, Peer[]>();
+    for (const doc of docs) {
+      const others = peersOn(presence, doc.project, doc.path);
+      if (others.length > 0) {
+        map.set(doc.uri, others);
+      }
+    }
+    return map;
+  }, [docs, presence]);
+
+  /** Peers on the document actually on screen, for the bar above it. */
+  const activePresence = useMemo(
+    () => (activeDoc ? peersOn(presence, activeDoc.project, activeDoc.path) : []),
+    [activeDoc, presence]
   );
 
   /**
@@ -2438,6 +2487,9 @@ export default function Workspace({ session }: WorkspaceProps) {
    */
   const paneChrome = (
     <>
+              {/* Above every other bar here: the others are about what YOU are
+                  about to do, this one is about somebody else already doing it. */}
+              <PresenceBar peers={activePresence} designerFeed={presence.designerFeed} />
               {/* A bar on the document itself, not only a marker in the strip.
                   The tab's arrow and the toolbar count were both missable
                   (Nigel, 04/09/2026: "a bit to easy to miss"), and neither is
@@ -2982,6 +3034,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                   docs={leftDocs}
                   activeUri={leftActive}
                   staleUris={staleUris}
+                  presence={presenceByUri}
                   onSelect={selectDoc}
                   onClose={closeDoc}
                   onPull={(uri) => void pullDoc(uri)}
@@ -3041,6 +3094,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                     docs={rightDocs}
                     activeUri={rightActive}
                     staleUris={staleUris}
+                    presence={presenceByUri}
                     onSelect={selectDoc}
                     onClose={closeDoc}
                     onPull={(uri) => void pullDoc(uri)}

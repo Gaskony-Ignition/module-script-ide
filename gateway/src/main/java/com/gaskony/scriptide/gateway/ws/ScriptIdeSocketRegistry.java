@@ -41,6 +41,10 @@ public final class ScriptIdeSocketRegistry {
     private static volatile com.gaskony.scriptide.gateway.history.RunHistory runHistory;
     private static volatile TagBrowser tagBrowser;
     private static volatile DbSchema dbSchema;
+    private static volatile com.gaskony.scriptide.gateway.presence.PresenceRegistry presence;
+    private static volatile com.gaskony.scriptide.gateway.presence.DesignerPresenceListener
+        designerPresence;
+    private static volatile java.util.concurrent.ScheduledExecutorService presenceSweeper;
 
     /**
      * Background pool for {@link SdkTagBrowser} and {@link SdkDbSchema}'s
@@ -72,7 +76,86 @@ public final class ScriptIdeSocketRegistry {
         completionRefreshPool = pool;
         tagBrowser = new SdkTagBrowser(ctx.getTagManager(), pool);
         dbSchema = new SdkDbSchema(ctx.getDatasourceManager(), pool);
+        startPresence(ctx);
         logger.debug("Script IDE socket registry initialised");
+    }
+
+    /**
+     * Start both presence feeds.
+     *
+     * <p>Registering on the gateway's own event bus is the ONE thing here that
+     * touches a platform internal, so it is wrapped: a gateway that answered
+     * differently must cost this module its presence indicator, never its
+     * startup. The sweep is registered either way, because it is what keeps the
+     * list from going stale and it uses only supported API.</p>
+     */
+    private static void startPresence(GatewayContext ctx) {
+        var registry = new com.gaskony.scriptide.gateway.presence.PresenceRegistry();
+        presence = registry;
+        try {
+            var listener =
+                new com.gaskony.scriptide.gateway.presence.DesignerPresenceListener(registry);
+            ctx.getEventBus().register(listener);
+            designerPresence = listener;
+        } catch (RuntimeException | LinkageError e) {
+            logger.info(
+                "Designer per-file presence is unavailable on this gateway ({}). The IDE still "
+                    + "shows its own clients, and Designer sessions at project level.",
+                e.toString());
+        }
+        var sweeper = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "scriptide-presence-sweep");
+            t.setDaemon(true);
+            return t;
+        });
+        sweeper.scheduleWithFixedDelay(
+            new com.gaskony.scriptide.gateway.presence.PresenceSweep(ctx, registry),
+            2,
+            com.gaskony.scriptide.gateway.presence.PresenceSweep.PERIOD_SECONDS,
+            TimeUnit.SECONDS);
+        presenceSweeper = sweeper;
+    }
+
+    /**
+     * Stop both presence feeds.
+     *
+     * <p>Unregistering from the gateway's bus matters more than most shutdown
+     * steps: the bus outlives this module, so a listener left on it holds a
+     * reference to a registry belonging to a module that has gone, and every
+     * later gateway event runs code from an unloaded classloader.</p>
+     */
+    private static void stopPresence() {
+        var sweeper = presenceSweeper;
+        if (sweeper != null) {
+            sweeper.shutdownNow();
+        }
+        presenceSweeper = null;
+        var listener = designerPresence;
+        GatewayContext ctx = context;
+        if (listener != null && ctx != null) {
+            try {
+                ctx.getEventBus().unregister(listener);
+            } catch (RuntimeException | LinkageError e) {
+                logger.debug("Could not unregister the presence listener: {}", e.toString());
+            }
+        }
+        designerPresence = null;
+        var registry = presence;
+        if (registry != null) {
+            registry.clear();
+        }
+        presence = null;
+    }
+
+    /** Who has what open, across this IDE and the Designer. Never null once started. */
+    public static com.gaskony.scriptide.gateway.presence.PresenceRegistry getPresence() {
+        return presence;
+    }
+
+    /** The Designer feed, or null where it could not be registered. */
+    public static com.gaskony.scriptide.gateway.presence.DesignerPresenceListener
+        getDesignerPresence() {
+        return designerPresence;
     }
 
     /** The execution pool, or null when the module is not started. */
@@ -174,6 +257,7 @@ public final class ScriptIdeSocketRegistry {
             }
         }
         completionRefreshPool = null;
+        stopPresence();
         context = null;
         if (count > 0) {
             logger.info("Closed {} Script IDE socket(s) during shutdown", count);

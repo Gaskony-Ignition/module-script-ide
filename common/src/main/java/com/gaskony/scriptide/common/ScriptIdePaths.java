@@ -197,6 +197,17 @@ public final class ScriptIdePaths {
     public static final String ROUTE_RUNS = "/api/runs";
 
     /**
+     * Who has a script open right now, across this IDE and the Designer.
+     *
+     * <p>A route as well as a socket broadcast, for two reasons that are not the
+     * same. The socket is how a client stays current; this is how anything that
+     * is not a client — a diagnostic, an operator asking "why is my badge not
+     * showing", the live suite — can read the same answer without holding a
+     * WebSocket open.</p>
+     */
+    public static final String ROUTE_PRESENCE = "/api/presence";
+
+    /**
      * {@code GET /api/scripts/export?project=X&path=A&path=B} — a resource zip.
      *
      * <p>Repeated {@code path} parameters rather than one delimited value: a

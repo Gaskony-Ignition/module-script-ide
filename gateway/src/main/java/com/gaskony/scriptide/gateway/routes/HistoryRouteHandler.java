@@ -116,6 +116,9 @@ public class HistoryRouteHandler {
                 item.addProperty("output", run.output());
                 item.addProperty("ok", run.ok());
                 item.addProperty("outputTruncated", run.outputTruncated());
+                // Zero means a record kept before durations were, and the
+                // client shows nothing rather than "0 ms".
+                item.addProperty("durationMs", run.durationMs());
                 if (run.error() != null) {
                     item.addProperty("error", run.error());
                 }
