@@ -44,6 +44,7 @@ public class ScriptIdeRouteRegistrar {
     private final HistoryRouteHandler historyRouteHandler;
     private final RuntimeErrorsRouteHandler runtimeErrorsRouteHandler;
     private final TestRouteHandler testRouteHandler;
+    private final TransferRouteHandler transferRouteHandler;
 
     public ScriptIdeRouteRegistrar(GatewayContext context) {
         this.spaAssetRouteHandler = new SpaAssetRouteHandler();
@@ -65,6 +66,7 @@ public class ScriptIdeRouteRegistrar {
         this.scriptAttributesRouteHandler =
             new ScriptAttributesRouteHandler(projectManager, scriptResourceRouteHandler);
         this.webDevConfigRouteHandler = new WebDevConfigRouteHandler(projectManager);
+        this.transferRouteHandler = new TransferRouteHandler(projectManager);
         this.namedQueryRouteHandler = new NamedQueryRouteHandler(projectManager, context);
         // The execution service and the audit recorder are SUPPLIERS, not values.
         // Both are published by the hook into ScriptIdeSocketRegistry at startup
@@ -291,6 +293,33 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_JSON)
             .accessControl(authed)
             .handler(runtimeErrorsRouteHandler::errors)
+            .mount();
+
+        // ==================== Export / import ====================
+        // The Designer's own resource-zip format, measured rather than inferred
+        // (docs/EXPORT-FORMAT.md). Export is a READ and takes the authenticated
+        // gate; both import routes take the write gate — inspect included,
+        // because it accepts an uploaded archive from the browser and a reader
+        // who cannot write has nothing to inspect one for.
+
+        routes.newRoute(ScriptIdePaths.ROUTE_SCRIPTS_EXPORT)
+            .type(RouteGroup.TYPE_PLAIN_TEXT)
+            .accessControl(authed)
+            .handler(transferRouteHandler::export)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_SCRIPTS_IMPORT_INSPECT)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(transferRouteHandler::inspect)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_SCRIPTS_IMPORT)
+            .method(HttpMethod.POST)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(admin)
+            .handler(transferRouteHandler::apply)
             .mount();
 
         // ==================== Tests ====================

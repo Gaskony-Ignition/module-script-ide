@@ -2,7 +2,37 @@
 
 **Read this first each session.** Single source of truth for where the module is.
 
-**Version 1.19.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+**Version 1.20.0 · deployed on `ignition-module-testing` (8.3.8) 07/09/2026.**
+
+### 1.20.0 — export and import, in the Designer's format (07/09/2026)
+
+Nigel: *"there is no export/import code options like in the designer"*, choosing
+the **Designer-compatible resource zip** over plain `.py` files, on the tree's
+right-click menu. Both are built; the tree has a right-click menu for the first
+time.
+
+**The format was measured and the round trip finished.** `docs/EXPORT-FORMAT.md`
+records what the Designer actually writes, captured by driving it. A zip written
+by this module was then opened in the real Designer, imported, and the script
+afterwards was byte-identical. Two findings came out of finishing that rather
+than stopping when it looked right:
+
+- **a defect our own round trip could never have caught.** Entry paths were built
+  from `ResourcePath.getPath()`, which drops the module and type. In this format
+  the paths ARE the index, so the zip imported as nothing — in the Designer and
+  here — while looking perfectly reasonable in a listing.
+- **a correction to the note written an hour earlier.** It claimed the Designer
+  does not warn about overwriting and offers no rename, from watching the
+  selection dialog and cancelling before pressing Import. `Import` raises a modal
+  **Resolve Conflicts** with Overwrite / Skip / Rename. Both claims were wrong,
+  and both flattered the design being built against them.
+
+**The security surface is the upload.** Traversal refused rather than sanitised;
+per-entry, per-archive and total size caps checked on the DECOMPRESSED stream; an
+entry count; and a resource-type allowlist so a Designer export's Perspective
+views are listed but never written. All in `TransferRouteHandlerTest`, one of
+whose tests found that `ZipInputStream` yields no entries rather than throwing on
+non-zip data — so a `.py` uploaded by mistake blamed the wrong thing.
 
 ### 1.19.0 — a run that printed nothing, and a console you can arrange (07/09/2026)
 

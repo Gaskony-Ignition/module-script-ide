@@ -54,6 +54,16 @@ import { IconAlert, IconExternal, IconPlus } from '../components/Icons';
 import LayoutControls, { type LayoutState } from '../components/LayoutControls';
 import Panel from '../components/Panel';
 import Resizer from '../components/Resizer';
+import ContextMenu from '../components/ContextMenu';
+import ImportDialog from '../components/ImportDialog';
+import {
+  applyImport,
+  exportScripts,
+  inspectImport,
+  saveBlob,
+  type ImportInspection,
+  type ImportOutcome,
+} from '../api/transfer';
 import { rememberWidth, storedHeight, storedWidth } from './layoutStore';
 import TerminalView from '../components/Terminal';
 import WebDevConfigDialog from '../components/WebDevConfigDialog';
@@ -296,6 +306,26 @@ export default function Workspace({ session }: WorkspaceProps) {
    * might think that there is a conflict."*
    */
   const [savingUris, setSavingUris] = useState<ReadonlySet<string>>(() => new Set());
+
+  /** The tree's right-click menu: where it is, and what it acts on. */
+  const [treeMenu, setTreeMenu] = useState<
+    { x: number; y: number; label: string; paths: string[] } | null
+  >(null);
+  /**
+   * An import in progress, from the file chosen to the report.
+   *
+   * The FILE is kept, not just what was read out of it: the server holds nothing
+   * between inspect and apply, so the second call needs the same bytes. Holding
+   * the browser's own File object costs nothing and means the two calls cannot
+   * disagree about what was inspected.
+   */
+  const [importing, setImporting] = useState<
+    { file: File; inspection: ImportInspection } | null
+  >(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState<string | undefined>(undefined);
+  const [importOutcome, setImportOutcome] = useState<ImportOutcome | undefined>(undefined);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const beginSaving = useCallback((uri: string) => {
     setSavingUris((current) => new Set(current).add(uri));
@@ -799,6 +829,76 @@ export default function Workspace({ session }: WorkspaceProps) {
       }
     },
     [project]
+  );
+
+
+  // ---- export / import ---------------------------------------------------
+
+  /** Download the selection as a Designer-compatible resource zip. */
+  const doExport = useCallback(
+    async (paths: string[], label: string) => {
+      if (paths.length === 0) {
+        setNotice({ kind: 'info', text: `${label} holds no scripts to export.` });
+        return;
+      }
+      try {
+        const { blob, filename } = await exportScripts(project, paths);
+        saveBlob(blob, filename);
+        setNotice({
+          kind: 'info',
+          text: `Exported ${paths.length} script${paths.length === 1 ? '' : 's'} `
+            + `as ${filename}.`,
+        });
+      } catch (e: unknown) {
+        setNotice({ kind: 'error', text: `Could not export ${label}: ${describe(e)}` });
+      }
+    },
+    [project]
+  );
+
+  /**
+   * Read a chosen file and open the import dialog on what it holds.
+   *
+   * Nothing is written here. The user has not yet seen what is in the file, and
+   * an import that acted on the file chooser's OK button would be a write with
+   * no confirmation step at all.
+   */
+  const beginImport = useCallback(
+    async (file: File) => {
+      setImportOutcome(undefined);
+      setImportError(undefined);
+      try {
+        const inspection = await inspectImport(project, file, session.csrfToken);
+        setImporting({ file, inspection });
+      } catch (e: unknown) {
+        setNotice({ kind: 'error', text: `Could not read ${file.name}: ${describe(e)}` });
+      }
+    },
+    [project, session.csrfToken]
+  );
+
+  const doImport = useCallback(
+    async (paths: string[]) => {
+      if (!importing) return;
+      setImportBusy(true);
+      setImportError(undefined);
+      try {
+        const outcome = await applyImport(project, paths, importing.file, session.csrfToken);
+        setImportOutcome(outcome);
+        // The tree has new rows in it now, and an import that left the tree
+        // showing the state from before would read as having done nothing.
+        try {
+          setTree(await fetchScriptTree(project));
+        } catch {
+          /* the import succeeded; a stale tree is cosmetic */
+        }
+      } catch (e: unknown) {
+        setImportError(describe(e));
+      } finally {
+        setImportBusy(false);
+      }
+    },
+    [importing, project, session.csrfToken]
   );
 
   const handleChange = useCallback((uri: string, text: string) => {
@@ -2691,6 +2791,7 @@ export default function Workspace({ session }: WorkspaceProps) {
                       : (typeId) => { setCreateError(null); setCreating(typeId); }
                   }
                   onDelete={readOnly ? undefined : (entry) => setPendingDelete(entry)}
+                  onContext={(event) => setTreeMenu(event)}
                   onCreateSingleton={
                     readOnly ? undefined : (typeId) => openSingletonDraft(typeId)
                   }
@@ -3030,6 +3131,75 @@ export default function Workspace({ session }: WorkspaceProps) {
           error={createError}
           onCreate={(name) => void doCreate(name)}
           onCancel={() => setCreating(null)}
+        />
+      )}
+
+      {treeMenu && (
+        <ContextMenu
+          x={treeMenu.x}
+          y={treeMenu.y}
+          heading={treeMenu.label}
+          onClose={() => setTreeMenu(null)}
+          items={[
+            {
+              label: treeMenu.paths.length === 1
+                ? 'Export…'
+                : `Export ${treeMenu.paths.length} scripts…`,
+              // A package with nothing in it has nothing to export. Disabled
+              // and saying so beats a download of an empty zip.
+              enabled: treeMenu.paths.length > 0,
+              title: treeMenu.paths.length > 0
+                ? 'Download as a Designer-compatible resource zip'
+                : 'This package holds no scripts',
+              onSelect: () => void doExport(treeMenu.paths, treeMenu.label),
+            },
+            {
+              label: 'Import…',
+              // The Designer keeps Import on the File menu and not on the tree.
+              // It is here as well because a first import needs something to
+              // click, and the tree is where somebody looks for it.
+              enabled: !readOnly,
+              title: readOnly
+                ? 'Importing writes resources, which needs the Administrator role'
+                : 'Read a resource zip and choose what to write',
+              onSelect: () => importInputRef.current?.click(),
+            },
+          ]}
+        />
+      )}
+
+      {/* Off-screen rather than hidden: a `display:none` input cannot be
+          clicked programmatically in every browser, and `.click()` on it is the
+          only way to open a file chooser from a menu item. */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip,application/zip"
+        className="visually-hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          // Cleared so choosing the SAME file twice fires change again —-
+          // otherwise a failed import cannot be retried without picking a
+          // different file first.
+          event.target.value = '';
+          if (file) void beginImport(file);
+        }}
+      />
+
+      {importing && (
+        <ImportDialog
+          project={project}
+          fileName={importing.file.name}
+          inspection={importing.inspection}
+          busy={importBusy}
+          outcome={importOutcome}
+          error={importError}
+          onImport={(paths) => void doImport(paths)}
+          onClose={() => {
+            setImporting(null);
+            setImportOutcome(undefined);
+            setImportError(undefined);
+          }}
         />
       )}
 

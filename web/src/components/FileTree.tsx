@@ -53,6 +53,15 @@ export interface FileTreeProps {
   onCreate?: (typeId: ScriptTypeId) => void;
   onDelete?: (entry: ScriptEntry) => void;
   /**
+   * Right-click on a row. Absent leaves the browser's own menu alone.
+   *
+   * The tree hands up WHERE the pointer was and WHAT was under it, and the
+   * workspace owns the menu itself — one menu, one piece of state, and Escape
+   * and click-away work without every row subscribing to a document listener.
+   * `paths` is what the row covers: one script, or every script under a package.
+   */
+  onContext?: (event: { x: number; y: number; label: string; paths: string[] }) => void;
+  /**
    * Create a singleton that does not exist yet.
    *
    * Separate from {@link onCreate}, which opens a name dialog — a singleton has
@@ -202,6 +211,7 @@ export default function FileTree({
   onSelect,
   onCreate,
   onDelete,
+  onContext,
   onCreateSingleton,
 }: FileTreeProps) {
   /**
@@ -335,6 +345,7 @@ export default function FileTree({
                             selectedPath={selectedPath}
                             onSelect={onSelect}
                             onDelete={onDelete}
+                            onContext={onContext}
                           />
                         ))}
                     </ul>
@@ -400,6 +411,7 @@ export default function FileTree({
               selectedPath={selectedPath}
               onSelect={onSelect}
               onDelete={onDelete}
+              onContext={onContext}
             />
           ))}
       </section>
@@ -430,6 +442,7 @@ export default function FileTree({
                     selectedPath={selectedPath}
                     onSelect={onSelect}
                     onDelete={onDelete}
+                    onContext={onContext}
                   />
                 ))}
               </ul>
@@ -442,12 +455,21 @@ export default function FileTree({
   );
 }
 
+/** Every script under a package node, at any depth. What a folder's menu acts on. */
+function pathsUnder(node: PackageNode): string[] {
+  return [
+    ...node.scripts.map((s) => s.path),
+    ...node.children.flatMap(pathsUnder),
+  ];
+}
+
 interface BranchProps {
   node: PackageNode;
   depth: number;
   /** Keys of the branches that are OPEN; everything else is shut. */
   expanded: Set<string>;
   onToggle: (key: string) => void;
+  onContext?: FileTreeProps['onContext'];
   selectedPath: string | null;
   onSelect: (entry: ScriptEntry) => void;
   onDelete?: (entry: ScriptEntry) => void;
@@ -461,6 +483,7 @@ function PackageBranch({
   selectedPath,
   onSelect,
   onDelete,
+  onContext,
 }: BranchProps) {
   return (
     <ul className="file-tree-list">
@@ -475,6 +498,18 @@ function PackageBranch({
               style={{ paddingLeft: indent(depth + 1) }}
               aria-expanded={!isCollapsed}
               onClick={() => onToggle(key)}
+              // A package's menu acts on every script UNDER it, at any depth —
+              // which is what "export this package" means, and it works whether
+              // the branch is open or shut.
+              onContextMenu={onContext && ((event) => {
+                event.preventDefault();
+                onContext({
+                  x: event.clientX,
+                  y: event.clientY,
+                  label: child.name,
+                  paths: pathsUnder(child),
+                });
+              })}
             >
               <Chevron open={!isCollapsed} />
               <IconFolder size={14} className="file-tree-icon" />
@@ -489,6 +524,7 @@ function PackageBranch({
                 selectedPath={selectedPath}
                 onSelect={onSelect}
                 onDelete={onDelete}
+                onContext={onContext}
               />
             )}
           </li>
@@ -502,6 +538,7 @@ function PackageBranch({
           selectedPath={selectedPath}
           onSelect={onSelect}
           onDelete={onDelete}
+          onContext={onContext}
         />
       ))}
     </ul>
@@ -594,9 +631,10 @@ interface RowProps {
   selectedPath: string | null;
   onSelect: (entry: ScriptEntry) => void;
   onDelete?: (entry: ScriptEntry) => void;
+  onContext?: FileTreeProps['onContext'];
 }
 
-function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete }: RowProps) {
+function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete, onContext }: RowProps) {
   const selected = entry.path === selectedPath;
   // Only a script this project OWNS can be deleted. An inherited one has nothing
   // here to remove, and the server 404s it — so the button is absent rather than
@@ -616,6 +654,15 @@ function ScriptRow({ entry, depth, selectedPath, onSelect, onDelete }: RowProps)
         style={{ paddingLeft: indent(depth) }}
         aria-current={selected ? 'true' : undefined}
         onClick={() => onSelect(entry)}
+        onContextMenu={onContext && ((event) => {
+          event.preventDefault();
+          onContext({
+            x: event.clientX,
+            y: event.clientY,
+            label: entry.name || entry.typeLabel,
+            paths: [entry.path],
+          });
+        })}
       >
         {iconForType(entry.typeId, { size: 14, className: 'file-tree-icon' })}
         <span className="file-tree-name">{entry.name || entry.typeLabel}</span>

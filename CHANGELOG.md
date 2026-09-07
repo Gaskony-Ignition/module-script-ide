@@ -2,6 +2,87 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.20.0] — 2026-09-07
+
+feat: export and import code, in the Designer's own format.
+
+Nigel, 07/09/2026: *"there is no export/import code options like in the
+designer"*, choosing the **Designer-compatible resource zip** over plain `.py`
+files, on the tree's right-click menu.
+
+### Added
+
+- **Right-click a script or a package → `Export…`.** Downloads a `.zip` in the
+  Designer's own format — `project.json` at the root, each resource at its real
+  path as `resource.json` plus its data files — named the way the Designer names
+  its own (`Mining_Demo_2026-09-07_0330.zip`). A package exports every script
+  under it, at any depth, open or shut.
+- **`Import…` on the same menu**, which the Designer keeps on the File menu.
+  It is here as well because a first import needs something to click, and the
+  tree is where people look. A dialog lists what the archive holds, ticked and
+  ready, and says **which resources already exist** so a replacement is a choice
+  rather than a discovery.
+- **A right-click menu on the tree at all.** Every action until now was a hover
+  button on the row, and a hover button that appears only for a package would
+  have been a fourth thing competing for the same eighteen pixels.
+
+### The format was measured, and the round trip was finished
+
+`docs/EXPORT-FORMAT.md` is the record: the Designer was driven, an export
+captured, and the file this module writes was then **opened in the real Designer
+and imported**, arriving byte-identical. Two things came out of finishing that
+round trip rather than stopping when it looked right:
+
+- **A defect the round trip through our own import could never have found.** The
+  first implementation built entry paths from `ResourcePath.getPath()`, which
+  drops the module and type — `MyPackage/helpers/code.py` instead of
+  `ignition/script-python/MyPackage/helpers/code.py`. In this format the paths
+  ARE the index, so that zip imported as nothing, here and in the Designer
+  alike, while looking entirely reasonable in a listing.
+- **A correction to the note in the same commit.** The first pass of
+  `EXPORT-FORMAT.md` said the Designer does not warn about overwriting and
+  offers no rename — written after watching its selection dialog and cancelling
+  before pressing Import. Both were wrong: `Import` raises a modal **Resolve
+  Conflicts** per clash with Overwrite / Overwrite All / Skip / Skip All /
+  Rename / Cancel. Both were wrong in the direction that flattered this design.
+  What is left is a real but smaller difference: this module shows `exists` in
+  the selection list, so the choice is visible before committing rather than as
+  a dialog afterwards, and it has no Rename.
+
+### What it refuses, and why each check is there
+
+An uploaded zip is attacker-controlled input that becomes code in a running
+gateway. Every limit is checked against the DECOMPRESSED stream, because each is
+trivial to satisfy in a compressed one — a traversal entry is refused outright
+rather than sanitised (these become `ResourcePath`s, not filenames, so stripping
+the `..` leaves something that still resolves somewhere); per-entry, per-archive
+and TOTAL size caps, the last being what a zip bomb defeats the first two with;
+an entry count; and a resource-type allowlist, so a Designer export carrying
+Perspective views is read and LISTED — saying "this file contains things I will
+not import" beats refusing the file — but those entries cannot be selected.
+`TransferRouteHandlerTest` pins all of it, and one of those tests found a real
+defect: `ZipInputStream` does not throw on data that is not a zip, it simply
+yields no entries, so a `.py` file uploaded by mistake came back as "it holds no
+resource.json" and sent the reader after the wrong problem.
+
+### Notes
+
+- **Import is two calls and the file is uploaded twice.** Inspect reads and
+  writes nothing; apply writes the ticked subset. Keeping the archive
+  server-side against a token would put user-supplied zips on a gateway between
+  two requests, keyed by something guessable, for a feature whose job is writing
+  code into it. A few hundred kilobytes twice is the cheaper mistake.
+- **One push per resource, not one for all of them.** A single atomic
+  PushOperation sounds better and is not: a twenty-script import failing on the
+  last would roll back nineteen good writes with no way to tell which was bad.
+  Every path is reported individually, including the ones that did nothing.
+- **`lastModification` is not carried across.** The platform stamps it for the
+  actor doing the push, and importing the exporting gateway's would make this
+  project's history say a change happened before it did.
+
+Java 501 (14 new), Vitest 675 (21 new). deploy_gate PASS (6 checks, 16 routes,
+none unmounted). Live: `v27` 33/33 plus every existing suite.
+
 ## [1.19.0] — 2026-09-07
 
 fix: output written after an import was going to the gateway's console, not yours — plus a console you can resize and turn.

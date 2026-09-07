@@ -197,6 +197,30 @@ public final class ScriptIdePaths {
     public static final String ROUTE_RUNS = "/api/runs";
 
     /**
+     * {@code GET /api/scripts/export?project=X&path=A&path=B} — a resource zip.
+     *
+     * <p>Repeated {@code path} parameters rather than one delimited value: a
+     * resource path already contains slashes and dots, and every delimiter tried
+     * in this module has turned out to be a character some real path contains.
+     * The response is {@code application/zip} with a Content-Disposition naming
+     * it the way the Designer names its own — see {@code docs/EXPORT-FORMAT.md}.</p>
+     */
+    public static final String ROUTE_SCRIPTS_EXPORT = "/api/scripts/export";
+
+    /**
+     * {@code POST /api/scripts/import/inspect?project=X} — what is in this zip.
+     *
+     * <p>Writes nothing. Its own route rather than a flag on the import: a route
+     * that writes when a parameter is present and does not when it is absent is
+     * one typo away from an unintended write, and this one takes an uploaded
+     * archive from a browser.</p>
+     */
+    public static final String ROUTE_SCRIPTS_IMPORT_INSPECT = "/api/scripts/import/inspect";
+
+    /** {@code POST /api/scripts/import?project=X&path=A} — write the selection. */
+    public static final String ROUTE_SCRIPTS_IMPORT = "/api/scripts/import";
+
+    /**
      * {@code GET /api/tests?project=X} — the tests this project declares.
      *
      * <p>Discovery only; it runs nothing, so it takes the authenticated gate.
