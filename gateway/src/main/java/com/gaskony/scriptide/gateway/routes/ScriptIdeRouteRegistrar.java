@@ -42,6 +42,7 @@ public class ScriptIdeRouteRegistrar {
     private final NamedQueryRouteHandler namedQueryRouteHandler;
     private final NamedQueryTestRouteHandler namedQueryTestRouteHandler;
     private final HistoryRouteHandler historyRouteHandler;
+    private final PresenceRouteHandler presenceRouteHandler;
     private final RuntimeErrorsRouteHandler runtimeErrorsRouteHandler;
     private final TestRouteHandler testRouteHandler;
     private final TransferRouteHandler transferRouteHandler;
@@ -70,6 +71,7 @@ public class ScriptIdeRouteRegistrar {
         this.scriptResourceRouteHandler =
             new ScriptResourceRouteHandler(projectManager, saveHistory, index);
         this.historyRouteHandler = new HistoryRouteHandler(saveHistory);
+        this.presenceRouteHandler = new PresenceRouteHandler();
         this.runtimeErrorsRouteHandler = new RuntimeErrorsRouteHandler(context);
         this.scriptAttributesRouteHandler =
             new ScriptAttributesRouteHandler(projectManager, scriptResourceRouteHandler);
@@ -297,6 +299,12 @@ public class ScriptIdeRouteRegistrar {
             .type(RouteGroup.TYPE_JSON)
             .accessControl(authed)
             .handler(historyRouteHandler::runs)
+            .mount();
+
+        routes.newRoute(ScriptIdePaths.ROUTE_PRESENCE)
+            .type(RouteGroup.TYPE_JSON)
+            .accessControl(authed)
+            .handler(presenceRouteHandler::presence)
             .mount();
 
         routes.newRoute(ScriptIdePaths.ROUTE_RUNTIME_ERRORS)

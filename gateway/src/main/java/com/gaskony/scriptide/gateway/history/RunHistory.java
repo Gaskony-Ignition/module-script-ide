@@ -65,9 +65,18 @@ public final class RunHistory {
         this.root = dataDir.resolve(ROOT_DIR);
     }
 
-    /** One kept execution. */
+    /**
+     * One kept execution.
+     *
+     * <p>{@code durationMs} is WALL time from the run being dispatched to its
+     * finished frame — the same span the console's own clock shows, not the
+     * interpreter's CPU time. A run that spent nine of its ten seconds blocked on
+     * a database is ten seconds to the person who waited for it, and that is the
+     * number worth keeping. Zero means a record written before 1.23.0, which had
+     * no duration: shown as blank rather than as an implausibly fast run.</p>
+     */
     public record Run(String id, long at, String project, String source, String output,
-                      boolean ok, String error, boolean outputTruncated) {
+                      boolean ok, String error, boolean outputTruncated, long durationMs) {
     }
 
     /**
@@ -79,7 +88,7 @@ public final class RunHistory {
      * worst possible trade.</p>
      */
     public void record(String user, String project, String source, String output,
-                       boolean ok, String error) {
+                       boolean ok, String error, long durationMs) {
         if (user == null || user.isBlank() || source == null) {
             return;
         }
@@ -108,6 +117,7 @@ public final class RunHistory {
             record.addProperty("output", kept);
             record.addProperty("ok", ok);
             record.addProperty("outputTruncated", truncated);
+            record.addProperty("durationMs", Math.max(0, durationMs));
             if (error != null && !error.isBlank()) {
                 record.addProperty("error", error);
             }
@@ -168,7 +178,8 @@ public final class RunHistory {
                 record.has("output") ? record.get("output").getAsString() : "",
                 !record.has("ok") || record.get("ok").getAsBoolean(),
                 record.has("error") ? record.get("error").getAsString() : null,
-                record.has("outputTruncated") && record.get("outputTruncated").getAsBoolean()));
+                record.has("outputTruncated") && record.get("outputTruncated").getAsBoolean(),
+                record.has("durationMs") ? record.get("durationMs").getAsLong() : 0));
         } catch (IOException | RuntimeException e) {
             // A half-written or hand-edited record is skipped, not fatal.
             return Optional.empty();

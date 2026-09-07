@@ -12,6 +12,14 @@ gson = "2.14.0"
 # lib/core/gateway on 8.3.x).
 jakarta-servlet = "6.0.0"
 
+# Guava, for ONE thing: CommonContext.getEventBus() returns a Guava EventBus,
+# and Designer presence is delivered on it. compileOnly and pinned to what the
+# gateway actually bundles (lib/core/common/guava-32.0.1-jre.jar on 8.3.8) —
+# the platform's copy is what loads, so a newer declaration compiles and then
+# throws at runtime. Never modlImplementation: the EventBus instance is handed
+# to us by the platform, so it is a boundary type in the strictest sense.
+guava = "32.0.1-jre"
+
 # Jetty 12 WebSocket API for the LSP/exec socket. compileOnly ONLY — the gateway
 # provides Jetty at runtime, and a second Jetty on the module classpath breaks
 # GAN. 12.0.34 is what the live 8.3.8 test gateway runs.
@@ -53,6 +61,7 @@ ignition-common = { module = "com.inductiveautomation.ignitionsdk:ignition-commo
 ignition-gateway-api = { module = "com.inductiveautomation.ignitionsdk:gateway-api", version.ref = "ignition" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 jakarta-servlet = { module = "jakarta.servlet:jakarta.servlet-api", version.ref = "jakarta-servlet" }
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
 jetty-ee10-websocket-server = { module = "org.eclipse.jetty.ee10.websocket:jetty-ee10-websocket-jetty-server", version.ref = "jetty" }
 jetty-websocket-api = { module = "org.eclipse.jetty.websocket:jetty-websocket-jetty-api", version.ref = "jetty" }
 jython = { module = "org.python:jython-ia", version.ref = "jython" }

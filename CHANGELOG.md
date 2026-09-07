@@ -2,6 +2,81 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.23.0] — 2026-09-07
+
+feat: presence — who else has this file open, and where they are working from.
+
+Nigel asked whether we could detect that somebody else has a script open, from
+another browser or from the Designer, the way the Designer shows it. We can, and
+the gateway was already keeping the answer.
+
+### Two feeds, one list
+
+**Other browsers.** Each IDE client reports the paths it has open over the socket
+it already holds. The gateway keeps one registry and pushes it back to everyone
+when it changes, so nothing polls and a badge appears as fast as a keystroke
+travels.
+
+**Ignition Designers.** An 8.3 Designer tells the gateway which resources it has
+open, so that other Designers can show their own "also being edited" banner. The
+gateway posts that as `DesignerResourceSessionEvent` on the Guava `EventBus` that
+`CommonContext.getEventBus()` returns — a public SDK accessor — carrying a
+`ResourceSession`: session id, username, hostname, IP, start time, and the exact
+`ResourcePath`s open. Registering on the same bus gets the same events the
+platform's own manager gets. Nothing is injected, wrapped or replaced.
+
+Verified end to end on 8.3.8 against a REAL Designer, not off the bytecode:
+opening `MiningDemo.config` in the Designer put
+`ignition/script-python/MiningDemo/config` in the module's list within seconds,
+and the browser showed *"admin in the Designer on 172.31.0.2 also has this open."*
+Closing the script in the Designer cleared it again.
+
+### The caveat, stated because it will matter later
+
+`DesignerResourceSessionEvent` lives in `gateway.jar`, **not** in the SDK's
+`gateway-api` — checked on both 8.3.6 and 8.3.8. It is an internal type: present
+at runtime, absent at compile time, and free to change in any patch release.
+Everything it *carries* is public SDK, so the reflection is confined to reaching
+the accessor and the values are strongly typed the moment they are in hand.
+
+If a future Ignition renames it, the listener stops matching and says so once,
+and presence falls back to session level from `GatewaySessionManager`, which is
+fully supported. The module never fails to start over it. `GET /api/presence`
+reports `designerFeed` (the listener is attached) and `designerEventSeen` (a real
+event has actually been read) so the failure is visible rather than silent, and
+`validate_v30_presence.py` asserts both whenever a Designer is connected.
+
+### It is a warning, not a lock
+
+Nothing here refuses a save. The write path already has optimistic concurrency
+through `If-Match`, and that is what prevents a lost update. Presence exists so
+two people find out about each other BEFORE the conflict rather than after it,
+and the bar says so out loud: *"Saving is not blocked — talk to them first."*
+
+The wording is "has it open", never "is editing". That is what the Designer
+reports and what we can honestly claim — a tab left open over lunch counts.
+
+### Where it shows
+
+- **A bar above the editor** for the file you are in, naming everyone and where
+  they are. Absent when the file is yours alone.
+- **A badge on the tab**, because the file that costs you an hour is the one open
+  in a background tab you have not looked at.
+- **`GET /api/presence`**, for diagnostics and for anything that is not a client.
+
+### Also
+
+- **Run history is searchable, and records how long a run took.** Fifty runs are
+  kept and finding one was scrolling. The search reads the source AND the output,
+  because "which run printed that error" is not answerable from the code.
+  Duration is wall time; a record kept before this release shows none rather than
+  claiming `0 ms`.
+
+### Fixed
+
+- Two redundant null checks SpotBugs was right about, on `findSessions()` and
+  `ResourcePath.getPath()`, both declared non-null by the SDK.
+
 ## [1.22.0] — 2026-09-07
 
 feat: snippets, organise imports, live tag and schema completion, style lints,

@@ -1,6 +1,6 @@
 # Script IDE — module instructions
 
-**Version**: 1.22.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
+**Version**: 1.23.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
 Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
@@ -305,6 +305,49 @@ or `test-all.sh`, and never on the public portal.** Build with its own `./gradle
   one up in its own discovery; an id it did not discover is a 400. Trusting the
   body would make "run this test" a way to call any function in the project by
   name, through the write gate but past every rule about what a test is.
+
+- **Presence is a WARNING, never a lock, and the wording is load-bearing.**
+  Nothing in the presence path refuses a save; `If-Match` on the write path is
+  what actually prevents a lost update, and adding a second gate would be a
+  worse mechanism wearing a friendlier face. The bar says "Saving is not blocked
+  — talk to them first" for that reason. It also says **has it open**, never "is
+  editing": that is what a Designer reports and what this module reports, and a
+  tab left open over lunch counts. Claiming "editing" would be a statement
+  neither feed can support.
+- **The Designer feed reaches an INTERNAL platform type, and the fallback is not
+  optional.** `DesignerResourceSessionEvent` lives in `gateway.jar`, not in the
+  SDK's `gateway-api` — checked on 8.3.6 and 8.3.8 — so it is reached by class
+  name and could stop matching after any patch release with nothing failing
+  anywhere. Everything it CARRIES is public SDK (`ResourceSession`,
+  `ConcurrencySessionInfo`, `ResourcePath`), so the reflection is confined to
+  reaching the accessor. `PresenceSweep` is the floor under it and uses only
+  `GatewaySessionManager`, so a shape change costs specificity, never the
+  feature. `GET /api/presence` reports `designerFeed` AND `designerEventSeen` —
+  attached, versus a real event actually read — so the failure is visible rather
+  than silent. Verified against a REAL Designer on 8.3.8 (07/09/2026), never off
+  the bytecode alone.
+- **`ConcurrencySessionInfo.id()` IS `ClientReqSession.getPublicId()`**, measured
+  off 8.3.8's bytecode. The destroy event carries only that id, so if the two
+  ever diverge a closed Designer is never removed and the indicator only grows.
+  The session attribute keys are literally `userName`, `remoteHost`,
+  `remoteAddr`.
+- **A presence subscriber sees the WHOLE gateway's event bus.** Guava dispatches
+  by the subscriber's parameter type and the event type cannot be named at
+  compile time, so the listener subscribes to `Object` — every event on the
+  gateway, on the poster's own thread. The handler is two string comparisons and
+  a return for anything else, and it must never throw: an exception there
+  propagates a module's problem into the platform's dispatch.
+- **The presence registry is keyed on the resource PATH, and the session id is
+  never sent to the browser.** A Web Dev endpoint is one resource holding up to
+  eight scripts, so two tabs on `doGet` and `doPost` are one file to everybody
+  else — and to a Designer, which has no concept of our data keys. The session id
+  stays server-side: it addresses a live platform session, and name, host and
+  project are all a person needs to go and talk to a colleague.
+- **A session-level sweep must never blank resources the event feed found.** The
+  two feeds race by construction — the sweep sees a Designer every 15 seconds,
+  its resource list arrives on the bus — so `putSessionLevel` refuses to
+  overwrite a peer that has resources. A plain `put` there makes the file
+  indicator flicker on a fifteen-second cycle.
 
 - **This module is not becoming a git module** (Nigel, 01/09/2026).
   `Gaskony-Ignition/module-git` exists. git is driven from the terminal's command

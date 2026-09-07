@@ -67,6 +67,34 @@
     </Match>
 
     <!--
+        EI_EXPOSE_REP2 / MS_EXPOSE_REP on the presence registry — sharing the one
+        mutable registry by reference is the entire mechanism, not an oversight.
+
+        Every socket, the Designer event listener and the sweep all WRITE to the
+        same PresenceRegistry; that is how one person opening a file becomes a
+        badge in somebody else's tab strip. A defensive copy would give each
+        caller a private registry that nobody else can see, which does not
+        weaken the feature — it removes it.
+
+        Asked before excluded, per the rule at the top of this file. The other
+        two findings on these classes were FIXED rather than excluded: both
+        redundant null checks (on findSessions() and on ResourcePath.getPath(),
+        each declared non-null by the SDK) were deleted.
+    -->
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.presence.PresenceSweep" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.presence.DesignerPresenceListener" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry" />
+        <Bug pattern="MS_EXPOSE_REP" />
+    </Match>
+
+    <!--
         EI_EXPOSE_REP / EI_EXPOSE_REP2 on Outcome.failure — the record carries the
         Throwable the user's script threw, so that the traceback can be formatted
         from it. A Throwable cannot be defensively copied, and cloning one would

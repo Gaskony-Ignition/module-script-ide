@@ -777,6 +777,13 @@ export interface PastRun {
   ok: boolean;
   error?: string;
   outputTruncated: boolean;
+  /**
+   * Wall milliseconds the run took, or 0 for a record kept before 1.23.0.
+   *
+   * Zero is "not known", not "instant" — the dialog leaves the column blank
+   * rather than claiming a run that took a second finished in none.
+   */
+  durationMs: number;
 }
 
 export interface PastRuns {

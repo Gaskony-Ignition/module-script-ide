@@ -7,6 +7,8 @@
  */
 import type { ReactNode } from 'react';
 import { IconSplit } from './Icons';
+import { PresenceBadge } from './Presence';
+import type { Peer } from '../api/presence';
 import { isDirty, readOnlyReason, type OpenDoc } from '../workspace/documents';
 import './TabStrip.css';
 
@@ -42,13 +44,22 @@ export interface TabStripProps {
    * nobody can see is not discoverable by being present.
    */
   splitText?: string;
+  /**
+   * Who else has each document open, keyed by uri.
+   *
+   * On the TAB rather than only above the editor because the case that costs
+   * you an hour is the file you have open in a background tab and have not
+   * looked at — by the time you switch to it and read a bar, you have already
+   * typed into it.
+   */
+  presence?: ReadonlyMap<string, Peer[]>;
   /** Rendered when this pane has no documents, in place of nothing at all. */
   empty?: ReactNode;
 }
 
 export default function TabStrip({
   docs, activeUri, staleUris, onSelect, onClose, onPull, onSplit, splitLabel, splitText,
-  empty,
+  presence, empty,
 }: TabStripProps) {
   if (docs.length === 0) return empty ? <>{empty}</> : null;
 
@@ -85,6 +96,7 @@ export default function TabStrip({
                   •
                 </span>
               )}
+              <PresenceBadge peers={presence?.get(doc.uri) ?? []} />
             </button>
             {/* Stale is a DIFFERENT state from dirty and gets its own marker:
                 dirty is "you have edits the gateway has not seen", stale is
