@@ -169,6 +169,22 @@ apart: an error never got far enough to have an opinion.*
 Breakpoint debugging is deliberately **not** included: the only serious Ignition
 debugger requires a running Designer, which defeats the point of a browser IDE.
 
+## How to use it
+
+Download the signed `.modl` from the
+[latest release](https://github.com/Gaskony-Ignition/module-script-ide/releases),
+install it through the gateway's **Config → Modules → Install or Upgrade Module**,
+and restart the gateway — a newly installed module reports
+`INACTIVE. PENDING RESTART` until you do.
+
+Then open **Script IDE** from the gateway's left-hand navigation. Sign in with an
+account holding the Administrator role to edit and run; any authenticated user
+gets navigation, completion and the problems list without the Run button.
+
+What you edit are the gateway's own project library scripts, saved byte for byte
+as the Designer saves them, so the two can be used on the same project without
+either one making noise in the other's diffs.
+
 ## Byte fidelity
 
 A script saved here is byte-identical to one saved by the Designer — tabs stay
@@ -221,4 +237,4 @@ configured; see `gradle.properties.template`.
 
 ## Licence
 
-Internal. Not published to the module portal.
+Apache-2.0 — see [LICENSE](LICENSE).
