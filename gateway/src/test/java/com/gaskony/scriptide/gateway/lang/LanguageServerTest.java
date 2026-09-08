@@ -185,7 +185,7 @@ class LanguageServerTest {
     }
 
     // ==================== Group 3: tag-path / DB-schema completion ====================
-    // the borrowed-ideas brief §3, tested against FAKES so these stay unit
+    // the borrowed-ideas brief, tested against FAKES so these stay unit
     // tests rather than needing a real gateway.
 
     /** A fixed two-provider, one-folder tag tree, just deep enough to test the branches. */

@@ -42,7 +42,7 @@ it destroys.
 
 ### 1.24.0 — templates, autosave, console export (07/09/2026)
 
-The last three items of `the borrowed-ideas brief`; **all four groups are now
+The last three items of the borrowed-ideas brief; **all four groups are now
 done**.
 
 **Autosave.** Every dirty buffer is kept in `localStorage` as you type and
@@ -101,7 +101,7 @@ each run took.
 
 ### 1.22.0 — authoring: snippets, imports, live completion, lints, colour (07/09/2026)
 
-Groups 2 and 3 of `the borrowed-ideas brief`, and the first part of group 4.
+Groups 2 and 3 of the borrowed-ideas brief, and the first part of group 4.
 Eighteen tab-stop snippets; organise-imports and suggested imports on the open
 buffer; live tag-path completion inside a string literal and table/column
 completion inside SQL; seven style lints; and `cprint` / `jsonPrint` with a
@@ -133,7 +133,7 @@ same shape — something asserted from recall rather than read off the repo:
 - the console's ANSI reset turned bold off and left the text coloured, because
   `Object.assign` cannot copy keys that are not there.
 
-**The lints are structural, not textual.** the alternative ships the same seven checks as
+**The lints are structural, not textual.** The same seven checks are often shipped as
 regular expressions because they have no parser. Half of `StyleChecksTest` is
 negative cases a regex fails: `except:` inside a string, `== None` in a docstring.
 
@@ -141,8 +141,7 @@ Gate PASS. `validate_v29_authoring.py` 20/20.
 
 ### 1.21.0 — the test framework (07/09/2026)
 
-The first of the four groups of ideas taken from the alternative's Script IDE
-(`the borrowed-ideas brief`, Nigel approved all four). What is portable from
+The first of the four groups of ideas from a review of the alternatives. What is portable from
 their runner is the SHAPE of a test framework, not its mechanism — theirs cannot
 execute on the gateway at all — and the mechanism they use for mocking turns out
 to be unsafe here. That is the substance of the release. `docs/TEST-FRAMEWORK.md`
@@ -408,13 +407,14 @@ are failing, how often, and when.
 
 **R5 (two gateways) and R6 (a test runner) are untouched**, and are not small:
 R5 is a cross-gateway authentication surface, R6 a product in its own right.
-F1 is now DECIDED: **private, and staying private** (Nigel, 08/09/2026) — "keep
-it a private github repo until I have used it enough to be confident in its
-ability". He had said "public, like project-themes" the evening before and
-reversed it the next morning; the later word is the one that stands. Do not
-re-raise it, and do not do publication work — a stranger-facing README, a
-licence pass, portal wiring — until he asks. F2 (prove it on a second gateway)
-is environment rather than code and is still open.
+F1 is now DECIDED: **public, Apache-2.0, on the modules portal** (Nigel,
+08/09/2026, afternoon). He went public on the evening of 07/09, private the next
+morning — "keep it a private github repo until I have used it enough to be
+confident in its ability" — and public again that afternoon, which is the word
+that stands. The publication work is done: licence, portal card, release.sh
+wiring, and the the alternative brief and product review stripped from history first.
+F2 (prove it on a second gateway) is environment rather than code and is still
+open.
 
 ### Superseded header — 1.15.3 (05/09/2026)
 
@@ -426,7 +426,7 @@ is environment rather than code and is still open.
 
 ### 1.15.x — five things the IDE knew and never said (05/09/2026)
 
-Nigel, 05/09/2026, having read `docs/PRODUCT-REVIEW.md`: *"Please do all 5."*
+Nigel, 05/09/2026, having read the product review: *"Please do all 5."*
 They are one release because they are one idea. The deprecation flag was already
 in the hint index and only ever reached a hover card; the gateway's log already
 knew which scripts were failing and nothing asked it; search could find a string
@@ -1331,7 +1331,7 @@ the listing the CLIENT holds — searching for a name changed through the API is
 testing the 20 s watch interval, not the palette.
 
 **The review against purpose — DONE, 05/09/2026**, in
-`docs/PRODUCT-REVIEW.md`. The brief is met and the module is past the Designer
+the product review. The brief is met and the module is past the Designer
 in four places; six recommendations are ranked by leverage per unit of work, and
 four findings are decisions rather than features.
 

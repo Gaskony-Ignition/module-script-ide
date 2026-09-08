@@ -3,9 +3,7 @@ package com.gaskony.scriptide.gateway.lang;
 import java.util.List;
 
 /**
- * What {@link LanguageServer} needs to offer live tag-path completion —
- * the alternative borrowing #3, {@code TagPathCompletionHelper.browseTagChildren}
- * (the borrowed-ideas brief §3).
+ * What {@link LanguageServer} needs to offer live tag-path completion.
  *
  * <p>A pure interface, deliberately: {@link LanguageServer} depends on this
  * and never on the Ignition SDK's tag types directly, so it stays unit-testable

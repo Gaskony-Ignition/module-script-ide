@@ -29,10 +29,10 @@ import java.util.Set;
  *
  * <h2>Over the AST, not over the text</h2>
  *
- * <p>the alternative's Script IDE ships the same idea as seven regular expressions
- * (`the borrowed-ideas brief` §4). It has to: it has no parser. This module
- * does — it runs the interpreter's own — so every check that CAN be structural is
- * structural, and the difference is not cosmetic. A regex for {@code == None}
+ * <p>The same checks can be written as regular expressions over the text, and
+ * have to be by anything without a parser. This module has one — it runs the
+ * interpreter's own — so every check that CAN be structural is structural, and
+ * the difference is not cosmetic. A regex for {@code == None}
  * fires inside a docstring that explains why you should not write {@code == None};
  * a regex for a bare {@code except:} fires on the string {@code "except:"} in a log
  * message. The bar for a diagnostic in this module is ZERO false positives, and a

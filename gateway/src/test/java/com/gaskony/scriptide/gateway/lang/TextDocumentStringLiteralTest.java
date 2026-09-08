@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * {@link TextDocument#stringLiteralAt} — the trigger for Group 3's live
- * tag-path and database completion (the borrowed-ideas brief §3), so wrong
+ * tag-path and database completion, so wrong
  * detection here means the whole feature fires in the wrong place or not at
  * all. Exhaustive on purpose.
  */

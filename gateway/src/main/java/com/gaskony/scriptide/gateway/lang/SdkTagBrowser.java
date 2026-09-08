@@ -37,7 +37,7 @@ public final class SdkTagBrowser implements TagBrowser {
 
     private static final Logger logger = LoggerFactory.getLogger(SdkTagBrowser.class);
 
-    /** the alternative borrowing #3 (the borrowed-ideas brief §3) names this figure. */
+    /** Long enough that typing a tag path does not re-browse per keystroke. */
     private static final long TAG_TTL_MILLIS = 60_000;
 
     private static final int MAX_CACHE_ENTRIES = 500;

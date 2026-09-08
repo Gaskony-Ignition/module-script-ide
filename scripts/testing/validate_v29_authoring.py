@@ -1,6 +1,6 @@
 """1.22.0 — snippets, organise imports, style lints, and colour in the console.
 
-Groups 2 and part of 4 of `the borrowed-ideas brief`, on the real gateway.
+Groups 2 and part of 4 of the borrowed-ideas brief, on the real gateway.
 
 The one in here that is not a new feature is the most important. **A PEP 263
 coding declaration made the whole file a syntax error** — measured 07/09/2026.

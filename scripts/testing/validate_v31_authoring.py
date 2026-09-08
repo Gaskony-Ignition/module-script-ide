@@ -1,6 +1,6 @@
 """1.24.0 — templates, autosave/recovery, and console export.
 
-The three remaining items from `the borrowed-ideas brief`. Each is checked on
+The three remaining items from the borrowed-ideas brief. Each is checked on
 the real gateway, because the interesting claim in each is one a unit test
 cannot reach:
 

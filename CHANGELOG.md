@@ -98,8 +98,7 @@ Gate PASS (18 routes, none unmounted). Java 662, Vitest 831.
 
 feat: templates, autosave and crash recovery, console export and timestamps.
 
-The last three items of `the borrowed-ideas brief`. All four groups are now
-done.
+The last three items of the borrowed-ideas brief. All four groups are now done.
 
 ### Autosave and crash recovery
 
@@ -235,7 +234,7 @@ reports and what we can honestly claim — a tab left open over lunch counts.
 feat: snippets, organise imports, live tag and schema completion, style lints,
 and colour in the console.
 
-Groups 2 and 3 of `the borrowed-ideas brief`, and the first part of group 4.
+Groups 2 and 3 of the borrowed-ideas brief, and the first part of group 4.
 
 ### The bug this release also fixes, which nobody was looking for
 
@@ -287,8 +286,8 @@ three: parsed, run, and the console left alone.
 
 ### The lints are over the AST, not over the text
 
-the alternative ships the same idea as seven regular expressions; they have to, having no
-parser. This module runs the interpreter's own, and the difference is not
+The same idea can be shipped as seven regular expressions, and has to be by
+anything without a parser. This module runs the interpreter's own, and the difference is not
 cosmetic: a regex for `== None` fires inside a docstring that explains why you
 should not write `== None`, and a regex for a bare `except:` fires on the string
 `"except:"` in a log message. Half of `StyleChecksTest` is those negative cases.
@@ -316,10 +315,10 @@ metadata on the completion thread would make typing wait on a database.
 
 feat: a test framework — decorators, assertions, mocks, and a namespace per run.
 
-The first of four groups of ideas taken from the alternative's Script IDE
-(`the borrowed-ideas brief`). Their runner cannot execute on the gateway at
-all, so what is portable is the shape of the test framework, not the mechanism —
-and the mechanism they use for mocking turns out to be unsafe here. That is the
+The first of four groups of ideas from a review of the alternatives. A
+Designer-side runner cannot execute on the gateway at all, so what is portable is
+the shape of the test framework, not the mechanism — and the usual mechanism for
+mocking turns out to be unsafe here. That is the
 substance of this release.
 
 ### The measurement it rests on

@@ -59,14 +59,14 @@ public final class LanguageServer {
 
     /**
      * Live tag-path completion inside a {@code [...]} string literal.
-     * Group 3 (the borrowed-ideas brief §3). Null offers none — a fake in a
+     * Group 3. Null offers none — a fake in a
      * unit test, or a gateway with no context yet, both take this path.
      */
     private final TagBrowser tagBrowser;
 
     /**
      * Live database-schema completion inside a SQL string literal.
-     * Group 3 (the borrowed-ideas brief §3). Null offers none, same as
+     * Group 3. Null offers none, same as
      * {@link #tagBrowser}.
      */
     private final DbSchema dbSchema;
@@ -98,7 +98,7 @@ public final class LanguageServer {
 
     /**
      * @param tagBrowser live tag-path completion inside {@code [...]} string
-     *                   literals (Group 3, the borrowed-ideas brief §3);
+     *                   literals;
      *                   {@code null} offers none
      * @param dbSchema   live database-schema completion inside SQL string
      *                   literals (same group); {@code null} offers none
@@ -221,7 +221,7 @@ public final class LanguageServer {
         // "[" opens a tag-path string; "/" descends one more level once inside
         // one. Neither is a word character, so without an explicit trigger
         // the client would only offer a completion here on an explicit
-        // Ctrl+Space (Group 3, the borrowed-ideas brief §3).
+        // Ctrl+Space.
         triggers.add("[");
         triggers.add("/");
         completionProvider.add("triggerCharacters", triggers);
@@ -303,7 +303,7 @@ public final class LanguageServer {
         int line = position.get("line").getAsInt();
         int character = position.get("character").getAsInt();
 
-        // Group 3 (the borrowed-ideas brief §3): a tag path and a piece of
+        // Group 3: a tag path and a piece of
         // SQL both live INSIDE a string literal, which is a different
         // question from the dotted-name walk below and takes over completion
         // entirely when it answers - offering `system.tag.read` as a
@@ -363,7 +363,7 @@ public final class LanguageServer {
     }
 
     // ==================== Group 3: tag-path / DB-schema completion ====================
-    // the borrowed-ideas brief §3. Both fire only inside a string literal
+    // the borrowed-ideas brief. Both fire only inside a string literal
     // (see the branch in completion() above) and both answer nothing when
     // their provider is null - a fake in a unit test, or a gateway with no
     // context wired up yet.

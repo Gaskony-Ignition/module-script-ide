@@ -4,9 +4,7 @@ import java.util.List;
 
 /**
  * What {@link LanguageServer} needs to offer live database-schema completion
- * inside a SQL string literal — the alternative borrowing #3,
- * {@code DatabaseCompletionHelper.getColumnCompletions}
- * (the borrowed-ideas brief §3).
+ * inside a SQL string literal.
  *
  * <p>A pure interface, deliberately: {@link LanguageServer} depends on this
  * and never on JDBC or the Ignition datasource SDK directly, so it stays

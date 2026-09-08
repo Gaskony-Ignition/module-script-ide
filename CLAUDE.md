@@ -16,12 +16,17 @@ that executes on the Gateway with its output streamed as it is produced. Since
 (Ctrl+P, `#` for symbols), a Search view over project-wide text search, name-based
 references (Shift+F12), and a Problems panel over every open document.
 
-**Internal, and staying internal, like web-designer and playwright: NOT in
-`modules/release.sh` or `test-all.sh`, and never on the public portal.** Build
-with its own `./gradlew`. Nigel decided this again on 08/09/2026 after briefly
-choosing to publish it — he wants to use it enough to be confident in it first.
-The private `Gaskony-Ignition/module-script-ide` repo and its releases are the
-whole distribution.
+**PUBLIC under Apache-2.0 since 08/09/2026, and on the modules portal.** In
+`modules/release.sh` (release it with `./release.sh ignition-module-script-ide`);
+still built with its own `./gradlew` and still outside `test-all.sh`. Nigel had
+decided the opposite twice that day — public on the evening of 07/09, private
+again on the morning of 08/09 ("until I have used it enough to be confident in its
+ability"), and public that afternoon. The last word stands; do not re-litigate it.
+
+The the alternative brief and the internal product review were **removed from history**
+before publication (`git-filter-repo`, 08/09/2026) and the references to them in
+source comments, the changelog and this file were rewritten. Do not reintroduce
+either document, or a citation of one, into this repo.
 
 ## Entry points
 
@@ -194,8 +199,8 @@ whole distribution.
   `TestRouteHandler` as well, and the console path is deliberately left alone.
   `validate_v29_authoring.py` asserts all three, the last one so nobody "fixes" a
   path that was never broken.
-- **A style lint goes over the AST, never over the text.** the alternative ships the same
-  seven checks as regular expressions because they have no parser; this module
+- **A style lint goes over the AST, never over the text.** The same seven checks
+  are commonly written as regular expressions, for want of a parser; this module
   runs the interpreter's own. A regex for `== None` fires inside a docstring
   explaining why not to write `== None`, and one for a bare `except:` fires on the
   string `"except:"` in a log message. The bar for a diagnostic here is ZERO false
@@ -221,7 +226,7 @@ whole distribution.
   library module returns the manager's own object — the same `id()` from two
   separate runs, a module global set in one run read back by the next, and
   `system` living in each module's own globals rather than in builtins. So
-  the alternative's mocking mechanism, swapping `globals()['system']` in the module under
+  The usual mocking mechanism, swapping `globals()['system']` in the module under
   test, would change what every other user's scripts see for as long as the block
   is open: the same class of mistake as the JVM-wide `__builtins__` edit above.
   The runner therefore executes each selected test module's SOURCE into a

@@ -50,7 +50,7 @@ public final class ScriptIdeSocketRegistry {
 
     /**
      * Background pool for {@link SdkTagBrowser} and {@link SdkDbSchema}'s
-     * cache refreshes (Group 3, the borrowed-ideas brief §3) — a dedicated,
+     * cache refreshes — a dedicated,
      * bounded, own pool, same reasoning as {@link ExecutionService}'s: never
      * {@code ctx.getExecutorService()}, because a tag browse or a JDBC schema
      * read wedged against a dead provider must not cost the Gateway's own

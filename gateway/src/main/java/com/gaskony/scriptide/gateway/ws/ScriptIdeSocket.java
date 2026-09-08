@@ -426,7 +426,7 @@ public class ScriptIdeSocket implements Session.Listener.AutoDemanding {
                         ? ctx.getScriptManager()
                         : ctx.getProjectManager().getProjectScriptManager(target);
                 }, index, target.isEmpty() ? null : target,
-                    // Group 3 (the borrowed-ideas brief §3): live tag-path
+                    // Group 3: live tag-path
                     // and database-schema completion. Read from the registry
                     // rather than captured once, same reasoning as the
                     // ScriptManager supplier above — both are rebuilt if the

@@ -6,8 +6,8 @@ Jython behaves inside Ignition, and none of it can be checked from a unit test.
 The design rests on one measurement, taken 07/09/2026 and re-asserted below.
 `__import__` of a project-library module hands back the manager's OWN module
 object: the same `id()` came back from two separate runs, and a module global set
-in one run was read by the next, on every user's behalf. So the mock the alternative's
-runner uses — swapping `globals()['system']` in the module under test — would
+in one run was read by the next, on every user's behalf. So the usual mock — swapping
+`globals()['system']` in the module under test — would
 change what every script on the gateway sees for as long as the block is open.
 That is the same class of mistake as the JVM-wide `__builtins__` edit recorded in
 CLAUDE.md, and it is refused here.
