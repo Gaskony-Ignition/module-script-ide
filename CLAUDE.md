@@ -2,7 +2,7 @@
 
 **Version**: 1.25.0 · Module ID `com.gaskony.scriptide` · Repo `Gaskony-Ignition/module-script-ide`
 
-Read `/home/nigel/Ignition-Work/modules/CLAUDE.md` first — the suite-wide rules
+Read the workspace's `modules/CLAUDE.md` first — the suite-wide rules
 (signing, dependency boundaries, Gradle/Java versions, skills) all apply here.
 This file covers only what is specific to this module.
 
@@ -32,7 +32,6 @@ either document, or a citation of one, into this repo.
 
 | Need | Read |
 | --- | --- |
-| The plan and its phasing | `~/.claude/plans/i-m-interested-in-the-golden-wozniak.md` |
 | What was measured, and what it changed | `docs/spikes/S1.md` + `S1-harness/` |
 | Current state | `docs/STATE.md` |
 
