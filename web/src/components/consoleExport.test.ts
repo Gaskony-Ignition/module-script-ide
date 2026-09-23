@@ -60,6 +60,15 @@ describe('transcriptOf', () => {
     expect(text.match(/14:05:09\.042/g)).toHaveLength(1);
   });
 
+  it('keeps the run divider as it always read, and exports a folded run in full', () => {
+    const text = transcriptOf([
+      entry({ kind: 'note', text: 'run 1 · 14:05:09', runHeader: true }),
+      entry({ id: 'e2', text: 'inside', run: 'e1' }),
+    ], 'P');
+    expect(text).toContain('14:05:09.042  ▸ run 1 · 14:05:09');
+    expect(text).toContain('inside');
+  });
+
   it('is still a valid file with no output at all', () => {
     const text = transcriptOf([], 'P');
     expect(text).toContain('# project: P');

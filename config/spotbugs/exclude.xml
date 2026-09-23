@@ -169,4 +169,16 @@
         <Bug pattern="EQ_DOESNT_OVERRIDE_EQUALS" />
     </Match>
 
+    <!--
+        EQ_DOESNT_OVERRIDE_EQUALS on the routed stdout/stderr file — the same
+        reasoning as the import hook. It is a file object, equal only to itself,
+        which is what PyObject.equals already answers; the field it adds (the
+        platform's original file, kept to put back on shutdown) is identity, not
+        value.
+    -->
+    <Match>
+        <Class name="com.gaskony.scriptide.gateway.exec.RunOutputRouter$RoutedFile" />
+        <Bug pattern="EQ_DOESNT_OVERRIDE_EQUALS" />
+    </Match>
+
 </FindBugsFilter>

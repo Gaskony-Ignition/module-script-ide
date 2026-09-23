@@ -98,7 +98,7 @@ describe('ScriptConsole', () => {
   it('separates runs with a divider and closes each with its verdict', () => {
     renderConsole();
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
-    expect(output()).toMatch(/▸ run 1 · \d{2}:\d{2}:\d{2}/);
+    expect(output()).toMatch(/run 1 · \d{2}:\d{2}:\d{2}/);
 
     deliver({ kind: 'started', executionId: 'x' });
     deliver({
@@ -109,7 +109,63 @@ describe('ScriptConsole', () => {
     expect(output()).toMatch(/— finished in \d+\.\d s —/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
-    expect(output()).toContain('▸ run 2');
+    expect(output()).toContain('run 2');
+    expect(document.querySelectorAll('.console-run')).toHaveLength(2);
+  });
+
+  it('folds a run away from its header, and back', () => {
+    renderConsole();
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    deliver({ kind: 'started', executionId: 'x' });
+    deliver({ kind: 'output', executionId: 'x', stream: 'stdout', text: 'long output\n' });
+    deliver({
+      kind: 'finished',
+      result: { executionId: 'x', stdout: '', stderr: '', truncated: false,
+        cancelled: false, ok: true },
+    });
+
+    const header = screen.getByRole('button', { name: /run 1 · / });
+    // Expanded by default, and the header names what it controls.
+    expect(header).toHaveAttribute('aria-expanded', 'true');
+    const body = document.getElementById(header.getAttribute('aria-controls') ?? '');
+    expect(body).not.toBeNull();
+    expect(body).toBeVisible();
+    expect(body?.textContent).toContain('long output');
+    expect(body?.textContent).toMatch(/— finished in/);
+
+    fireEvent.click(header);
+    expect(header).toHaveAttribute('aria-expanded', 'false');
+    expect(body).not.toBeVisible();
+    expect(header.textContent).toContain('2 blocks hidden');
+
+    fireEvent.click(header);
+    expect(header).toHaveAttribute('aria-expanded', 'true');
+    expect(body).toBeVisible();
+  });
+
+  it('folds one run without touching the next, and files output under its own run', () => {
+    renderConsole();
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    deliver({ kind: 'started', executionId: 'x' });
+    deliver({ kind: 'output', executionId: 'x', stream: 'stdout', text: 'first\n' });
+    deliver({
+      kind: 'finished',
+      result: { executionId: 'x', stdout: '', stderr: '', truncated: false,
+        cancelled: false, ok: true },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    deliver({ kind: 'started', executionId: 'y' });
+    deliver({ kind: 'output', executionId: 'y', stream: 'stdout', text: 'second\n' });
+
+    fireEvent.click(screen.getByRole('button', { name: /run 1 · / }));
+
+    const runs = document.querySelectorAll('.console-run');
+    expect(runs[0].textContent).toContain('first');
+    expect(runs[0].textContent).not.toContain('second');
+    expect(screen.getByText('first')).not.toBeVisible();
+    expect(screen.getByText('second')).toBeVisible();
+    expect(screen.getByRole('button', { name: /run 2 · / }))
+      .toHaveAttribute('aria-expanded', 'true');
   });
 
   it('says stopped, not failed, when the gateway reports a cancellation', () => {

@@ -25,15 +25,25 @@ into the shared copy. A mock reaches the test module's own namespace only —
 production code the test calls has its own module globals and still reaches
 the real gateway.
 
-**An import moves the thread off our system state; the runner puts it back.**
-Ignition resolves a project-library import by running that module through
-`ScriptManager.runCode`, which calls `Py.setSystemState(manager.sys)` on the
-calling thread and never restores it — so `print` and an explicit
-`sys.stdout.write` both leak to the gateway's own console from the first such
-import onward. `PrivateStateRunner.installImportHook` wraps `__import__` for
-the run and restores state in a `finally`. Only an import that executes code
-does this — a stdlib module, or one already in the manager's registry, is
-fine — so the same script can misbehave only on its first run.
+**Loading a library module moves the thread onto the platform's system state.**
+Ignition loads a project-library module lazily, on first attribute access, by
+running it through `ScriptManager.runCode` — which calls
+`Py.setSystemState(manager.sys)` on the calling thread and never restores it.
+The load can happen anywhere, including inside project code the console
+called, so it cannot be intercepted; it happens only on a module's first use
+after the library is (re)built.
+
+- **Output: `RunOutputRouter`.** Each project manager's `sys.stdout` and
+  `sys.stderr` are replaced, once, by an unbuffered `file` over a per-thread
+  switch: a thread inside a Script IDE run writes to that run's capture, every
+  other thread to the manager's original file. It stays a real `PyFile`
+  because Jython's `print` fast path, including its flush after every print,
+  only applies to one; it stays unbuffered so bytes are routed on the thread
+  that produced them. The originals go back on module shutdown.
+- **`sys`: `PrivateStateRunner.installImportHook`.** An import that loads a
+  module itself (`from M import f`, `import P.sub`) is followed by a restore
+  of the run's own state. A load at `M.f` is not, so after it the thread's
+  system state is the platform's until the run ends.
 
 There is no namespace-local builtins table in Jython — never write to
 `__builtins__` in place. Every `PySystemState` shares

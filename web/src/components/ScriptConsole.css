@@ -346,3 +346,48 @@
   background: var(--accent-primary-bg);
   color: var(--accent-primary);
 }
+
+/* ---- a run as a foldable block -------------------------------------------
+ *
+ * The run's opening line is its fold control: a real button, so it takes Tab,
+ * Enter and Space, and it still reads as the quiet note it replaced. */
+.console-run {
+  margin: 0 0 var(--space-2);
+}
+
+.console-run + .console-run,
+.console-run + .console-block,
+.console-block + .console-run {
+  border-top: 1px dashed var(--border-light);
+  padding-top: var(--space-2);
+}
+
+.console-run-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  margin: 0 0 var(--space-1);
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-style: italic;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.console-run-toggle:hover {
+  color: var(--text-primary);
+}
+
+.console-run-chevron {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.console-run-folded {
+  font-style: normal;
+}

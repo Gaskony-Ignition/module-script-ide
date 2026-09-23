@@ -90,12 +90,10 @@ import java.nio.charset.StandardCharsets;
  *       {@code sys.stdout} and then importing a project library module loses the
  *       whole execution's output — not just the buffered write, everything after
  *       it too.</li>
- *   <li><b>The private state is re-asserted after that pass.</b> Resolving an
- *       import of a project library module leaves the THREAD's
- *       {@code PySystemState} pointing at the platform's, so {@code print} — which
- *       resolves stdout through {@code Py.getSystemState()} — goes to the
- *       gateway's own console from then on. Explicit {@code sys.stdout.write} kept
- *       working the whole time, and that asymmetry is what made it visible.</li>
+ *   <li><b>The private state is re-asserted after that pass.</b> Loading a
+ *       project library module leaves the THREAD's {@code PySystemState} pointing
+ *       at the platform's, so the run's {@code sys} would be the platform's from
+ *       then on.</li>
  *   <li><b>The driver flushes its own streams at the end.</b> Jython buffers
  *       {@code sys.stdout}; on this path the runner's tail-flush does not reach
  *       that buffer, and without an explicit flush the capture came back

@@ -2,6 +2,7 @@ package com.gaskony.scriptide.gateway;
 
 import com.gaskony.scriptide.common.ModuleConstants;
 import com.gaskony.scriptide.common.ScriptIdePaths;
+import com.gaskony.scriptide.gateway.exec.RunOutputRouter;
 import com.gaskony.scriptide.gateway.routes.ScriptIdeRouteRegistrar;
 import com.gaskony.scriptide.gateway.ws.ScriptIdeSocketRegistry;
 import com.gaskony.scriptide.gateway.ws.ScriptIdeWebSocketServlet;
@@ -107,6 +108,9 @@ public class ScriptIdeModuleHook extends AbstractGatewayModuleHook {
         }
         // Close every open socket so none outlives the module holding a dead context.
         ScriptIdeSocketRegistry.shutdown();
+        // After the pool has stopped: give every project its own sys.stdout and
+        // sys.stderr back, so none keeps a reference into this unloaded module.
+        RunOutputRouter.restoreAll();
 
         logger.info("Script IDE module shutdown complete");
     }

@@ -2,6 +2,13 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.26.0] — 2026-09-23
+
+fix: console output no longer lost after the first use of a library module; runs fold.
+
+- Fixed: on the first run after a project library was (re)built, everything printed after the first use of a library module went to the gateway log instead of the console. Ignition loads the module on first attribute access and leaves the thread on the platform's system state; each project's platform `sys.stdout`/`sys.stderr` is now wrapped once with a per-thread switch that sends a Script IDE run's writes to its own output and every other thread's to the original stream, unchanged. The originals are restored on module shutdown.
+- Each console run is now a block whose `run N · time` header folds and unfolds its output — a button with `aria-expanded`, operable from the keyboard, expanded by default. Export still writes every run in full.
+
 ## [1.25.0] — 2026-09-07
 
 feat: git status in the tree — which resources differ from the last commit.

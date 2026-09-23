@@ -55,21 +55,21 @@ import java.util.function.Supplier;
  *       thread-local state) while an explicit {@code sys.stderr.write(...)} would
  *       not. So the map is COPIED and the copy's {@code sys} is repointed at our
  *       own state.</li>
- *   <li><b>An import of a project library module moves the thread off our state
- *       entirely</b>, and everything written after it is lost. Ignition resolves
- *       such an import through its own importer, which runs the module's code via
- *       {@code ScriptManager.runCode} — and that calls {@code setState()} →
- *       {@code Py.setSystemState(manager.sys)} on the CALLING thread and never
- *       restores it. From that point {@code print} AND an explicit
- *       {@code sys.stdout.write} both reach the gateway's own console instead of
- *       our capture. So this state gets a PRIVATE builtins table whose
- *       {@code __import__} puts our state back on the way out — see
- *       {@link #installImportHook}.</li>
+ *   <li><b>Loading a project library module moves the thread off our state.</b>
+ *       Ignition runs the module's code via {@code ScriptManager.runCode}, which
+ *       calls {@code Py.setSystemState(manager.sys)} on the CALLING thread and
+ *       never restores it. The load happens on first attribute access, anywhere —
+ *       including inside project code the run called — so it cannot be
+ *       intercepted. Two things cover it: {@link RunOutputRouter} sends whatever
+ *       this thread writes to the manager's streams into our capture, so output
+ *       is never lost; and {@link #installImportHook} puts our state back after
+ *       an import that loads a module itself, so {@code sys} stays private in
+ *       that case too.</li>
  * </ol>
  *
- * <p>All three were found the hard way, and measured rather than reasoned about.
- * Removing any of them breaks isolation silently — and one of the failure modes
- * is cross-user data leakage, not merely lost output.</p>
+ * <p>All three were measured rather than reasoned about. Removing any of them
+ * breaks isolation silently — and one of the failure modes is cross-user data
+ * leakage, not merely lost output.</p>
  *
  * <h2>Output is streamed, and the outcome then carries none of it</h2>
  *
@@ -216,6 +216,7 @@ public final class PrivateStateRunner implements ScriptRunner {
 
         ScriptManager scriptManager = scriptManagerSupplier.get();
         PySystemState mgr = managerState(scriptManager);
+        RunOutputRouter.install(mgr);
         PySystemState state = ScriptManager.createUtf8PySystemState(out, err);
         applyModuleRegistry(state, mgr);
         installImportHook(state, locals);
@@ -228,6 +229,9 @@ public final class PrivateStateRunner implements ScriptRunner {
         try {
             // Thread-local: this is what makes the streams private.
             Py.setSystemState(state);
+            // And this keeps them private after a library load moves the thread
+            // onto the manager's state — see RunOutputRouter.
+            RunOutputRouter.enter(state);
             PyCode code = Py.compile_flags(source, fileName, CompileMode.exec, new CompilerFlags());
             // ONE dict for locals AND globals — see runInOneNamespace below.
             Py.runCode(code, locals, locals);
@@ -244,7 +248,10 @@ public final class PrivateStateRunner implements ScriptRunner {
             cancelled = isCancellation(t);
         } finally {
             before.restore(ts);
+            // Still routed: if a load moved the thread, this flush reaches the
+            // manager's sys, and must land in this run's capture.
             flushQuietly(scriptManager, locals);
+            RunOutputRouter.exit();
             try {
                 Py.setSystemState(previous);
             } catch (RuntimeException e) {
@@ -304,29 +311,16 @@ public final class PrivateStateRunner implements ScriptRunner {
     /**
      * Put our system state back after every import this run performs.
      *
-     * <p><b>Measured on 8.3.8, 07/09/2026</b>, from Nigel's report that a script
-     * ran for 6.5 s, succeeded, and printed nothing — while the same script in the
-     * Designer's console printed what he expected. A fresh project-library module
-     * per case, so every import was a FIRST import:</p>
-     *
-     * <table>
-     *   <caption>What survives an import</caption>
-     *   <tr><td>{@code print}, no import at all</td><td>kept</td></tr>
-     *   <tr><td>{@code print} after a first project import</td><td>LOST</td></tr>
-     *   <tr><td>{@code print} before it, in the same run</td><td>kept</td></tr>
-     *   <tr><td>{@code sys.stdout.write} after it</td><td>LOST</td></tr>
-     *   <tr><td>{@code print} after {@code import json}</td><td>kept</td></tr>
-     *   <tr><td>{@code print} after a CACHED project import</td><td>kept</td></tr>
-     * </table>
-     *
-     * <p>Two things that table settles. It is not the {@code print}-versus-write
-     * asymmetry {@code TestHarness} documents — an explicit write is lost too, so
-     * the whole {@code sys} has moved, not just what {@code print} resolves. And
-     * it only happens when the import EXECUTES code: a standard-library module
-     * uses Jython's own importer, and a module already in the manager's registry
-     * is copied across by {@link #applyModuleRegistry} and never imported at all.
-     * That is why the same script prints on its second run, which is the most
-     * confusing part of the symptom.</p>
+     * <p>An import that loads a project library module there and then —
+     * {@code from M import f}, {@code import P.sub}, {@code from P import sub} —
+     * leaves the thread on the manager's state, like any other load (see the
+     * class Javadoc). Measured on 8.3.9 with a fresh module per case: through the
+     * platform's own {@code __import__} each of those left
+     * {@code Py.getSystemState()} on the manager's state; through this hook it was
+     * ours again. A plain {@code import M} loads nothing yet — the load comes at
+     * {@code M.f}, which no hook here sees; {@link RunOutputRouter} keeps the
+     * output right in that case, and the thread's {@code sys} is then the
+     * manager's until the run ends.</p>
      *
      * <h3>Why a private builtins table, and not a hook in the namespace</h3>
      *
@@ -335,10 +329,7 @@ public final class PrivateStateRunner implements ScriptRunner {
      * {@code getDefaultBuiltins()} map, so assigning
      * {@code __builtins__['__import__']} from a console run replaces
      * {@code __import__} for the whole JVM — every project script and every
-     * gateway event script — with whatever that one session installed. This was
-     * done by accident while diagnosing the bug, confirmed
-     * ({@code __import__ is &lt;function _si_hook&gt;} from an unrelated session)
-     * and repaired with {@code __builtin__.fillWithBuiltins} on the rig.</p>
+     * gateway event script — with whatever that one session installed.</p>
      *
      * <p>So the table is COPIED first and only the copy is touched. The copy is
      * built fresh per run from the state's own builtins, which means the delegate

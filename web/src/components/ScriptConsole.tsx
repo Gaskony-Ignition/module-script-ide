@@ -31,7 +31,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import RunHistoryDialog from './RunHistoryDialog';
 import Resizer from './Resizer';
-import { IconColumns, IconRows } from './Icons';
+import { IconChevronDown, IconChevronRight, IconColumns, IconRows } from './Icons';
 import {
   rememberChoice,
   rememberWidth,
@@ -90,6 +90,10 @@ interface OutputEntry {
   sourcePath?: string;
   /** Whether a further chunk of the same stream may be appended to this block. */
   open?: boolean;
+  /** This entry opens a run: its header, which folds the run's output. */
+  runHeader?: boolean;
+  /** The id of the run header this entry belongs to, or undefined between runs. */
+  run?: string;
   /**
    * When this block STARTED, epoch millis.
    *
@@ -143,9 +147,10 @@ export function transcriptOf(entries: OutputEntry[], project: string): string {
     '',
   ];
   const body = entries.map((entry) => {
-    const text = hasAnsi(entry.text)
-      ? parseAnsi(entry.text).map((span) => span.text).join('')
-      : entry.text;
+    const raw = entry.runHeader ? `▸ ${entry.text}` : entry.text;
+    const text = hasAnsi(raw)
+      ? parseAnsi(raw).map((span) => span.text).join('')
+      : raw;
     const lines = text.split('\n');
     // The stamp goes on the block, and continuation lines are indented to match
     // rather than repeating a time they did not each arrive at.
@@ -253,6 +258,8 @@ export default function ScriptConsole({
     () => storedChoice('console.timestamps', ['on', 'off'] as const, 'off') === 'on'
   );
   const [entries, setEntries] = useState<OutputEntry[]>([]);
+  /** Run headers the user has folded. Every run starts expanded. */
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   // Read by the export through a ref: the callback is memoised on `project`,
   // and closing over `entries` would export whatever was on screen at the last
   // time that identity changed.
@@ -285,6 +292,8 @@ export default function ScriptConsole({
   /** Which run this is, for the divider. Counts from 1 per mounted console. */
   const runNumber = useRef(0);
   const runStartedAt = useRef(0);
+  /** The header id of the run in flight; its output is filed under it. */
+  const currentRun = useRef<string | undefined>(undefined);
   /** The resource the in-flight run submitted, or undefined for the console. */
   const runSourcePath = useRef<string | undefined>(undefined);
 
@@ -321,9 +330,11 @@ export default function ScriptConsole({
     if (!entry.text && !entry.error) {
       return;
     }
+    // Read now, not in the updater: the run may have ended by the time it runs.
+    const run = currentRun.current;
     setEntries((previous) => [
       ...previous,
-      { ...entry, id: `e${(nextId.current += 1)}`, at: Date.now() },
+      { run, ...entry, id: `e${(nextId.current += 1)}`, at: Date.now() },
     ]);
   }, []);
 
@@ -339,6 +350,7 @@ export default function ScriptConsole({
     if (!text) {
       return;
     }
+    const run = currentRun.current;
     setEntries((previous) => {
       const last = previous[previous.length - 1];
       if (last && last.open && last.kind === kind) {
@@ -346,7 +358,7 @@ export default function ScriptConsole({
         return [...previous.slice(0, -1), merged];
       }
       return [...previous,
-        { id: `e${(nextId.current += 1)}`, kind, text, open: true, at: Date.now() }];
+        { id: `e${(nextId.current += 1)}`, kind, text, open: true, at: Date.now(), run }];
     });
   }, []);
 
@@ -371,7 +383,12 @@ export default function ScriptConsole({
       runNumber.current += 1;
       runStartedAt.current = Date.now();
       runSourcePath.current = sourcePath;
-      append({ kind: 'note', text: `▸ run ${runNumber.current} · ${clockTime()}` });
+      const header = `e${(nextId.current += 1)}`;
+      currentRun.current = header;
+      setEntries((previous) => [...previous, {
+        id: header, kind: 'note', text: `run ${runNumber.current} · ${clockTime()}`,
+        runHeader: true, at: Date.now(),
+      }]);
       // Optimistic: the server answers `started` almost immediately, but the
       // button must not stay clickable in the gap.
       setRunning('pending');
@@ -503,6 +520,7 @@ export default function ScriptConsole({
         setRunning(null);
         setStopping(false);
         append({ kind: 'error', text: event.message });
+        currentRun.current = undefined;
         return;
       }
       if (event.kind === 'finished') {
@@ -537,6 +555,7 @@ export default function ScriptConsole({
         });
       }
       append({ kind: 'note', text: closingNote(result) });
+      currentRun.current = undefined;
     }
 
     /**
@@ -773,7 +792,14 @@ export default function ScriptConsole({
         >
           Export
         </button>
-        <button type="button" onClick={() => setEntries([])} disabled={entries.length === 0}>
+        <button
+          type="button"
+          onClick={() => {
+            setEntries([]);
+            setFolded(new Set());
+          }}
+          disabled={entries.length === 0}
+        >
           Clear output
         </button>
         <button
@@ -834,20 +860,79 @@ export default function ScriptConsole({
               Nothing yet. Ctrl+Enter runs the buffer above on the Gateway.
             </p>
           ) : (
-            entries.map((entry) => (
-              <OutputBlock
-                key={entry.id}
-                entry={entry}
-                stamps={stamps}
-                onOpenFrame={openFrame}
-              />
-            ))
+            groupByRun(entries).map(({ header, items }) => {
+              const blocks = items.map((entry) => (
+                <OutputBlock
+                  key={entry.id}
+                  entry={entry}
+                  stamps={stamps}
+                  onOpenFrame={openFrame}
+                />
+              ));
+              if (!header) {
+                return blocks;
+              }
+              const isFolded = folded.has(header.id);
+              return (
+                <div key={header.id} className="console-run">
+                  {stamps && <span className="console-stamp muted">{stampOf(header.at)}</span>}
+                  <button
+                    type="button"
+                    className="console-run-toggle"
+                    aria-expanded={!isFolded}
+                    aria-controls={`${header.id}-output`}
+                    onClick={() => setFolded((previous) => {
+                      const next = new Set(previous);
+                      if (!next.delete(header.id)) next.add(header.id);
+                      return next;
+                    })}
+                  >
+                    <span className="console-run-chevron" aria-hidden="true">
+                      {isFolded ? <IconChevronRight size={14} /> : <IconChevronDown size={14} />}
+                    </span>
+                    {header.text}
+                    {isFolded && items.length > 0 && (
+                      <span className="console-run-folded">
+                        {` · ${items.length} block${items.length === 1 ? '' : 's'} hidden`}
+                      </span>
+                    )}
+                  </button>
+                  <div id={`${header.id}-output`} hidden={isFolded}>
+                    {blocks}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </section>
       </div>
     </section>
   );
+}
+
+/**
+ * The output as runs: each header with the entries filed under it, and anything
+ * between runs (a Reset, "Nothing selected.") on its own.
+ */
+function groupByRun(entries: OutputEntry[]): Array<{ header?: OutputEntry; items: OutputEntry[] }> {
+  const groups: Array<{ header?: OutputEntry; items: OutputEntry[] }> = [];
+  const byHeader = new Map<string, OutputEntry[]>();
+  for (const entry of entries) {
+    if (entry.runHeader) {
+      const items: OutputEntry[] = [];
+      byHeader.set(entry.id, items);
+      groups.push({ header: entry, items });
+      continue;
+    }
+    const items = entry.run === undefined ? undefined : byHeader.get(entry.run);
+    if (items) {
+      items.push(entry);
+    } else {
+      groups.push({ items: [entry] });
+    }
+  }
+  return groups;
 }
 
 function OutputBlock({

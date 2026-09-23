@@ -13,13 +13,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * The import hook, and the two ways it could be worse than the bug it fixes.
  *
- * <p><b>The bug</b> (Nigel, 07/09/2026): a script ran for 6.5 s, succeeded, and
- * printed nothing, while the same script printed in the Designer's console.
- * Importing a project library module runs that module through
- * {@code ScriptManager.runCode}, which calls {@code Py.setSystemState(manager.sys)}
- * on the calling thread and never puts it back — so from the import onwards both
- * {@code print} and an explicit {@code sys.stdout.write} reach the gateway's own
- * console instead of this run's capture.</p>
+ * <p><b>What it is for:</b> an import that loads a project library module runs
+ * that module through {@code ScriptManager.runCode}, which calls
+ * {@code Py.setSystemState(manager.sys)} on the calling thread and never puts it
+ * back. The hook restores the run's own state when {@code __import__} returns, so
+ * the run's {@code sys} stays private. (Output is kept right by
+ * {@link RunOutputRouter} whether or not the hook saw the load.)</p>
  *
  * <p><b>The first way to make it worse</b> is the one that actually happened while
  * diagnosing it. Jython hands every {@code PySystemState} the SAME
