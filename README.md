@@ -59,7 +59,7 @@ apart: an error never got far enough to have an opinion.*
 | Split view | Two scripts side by side, either pane holding any open document |
 | Testing | Jython tests — decorators, twelve assertions, tag/query mocks, isolated per-run namespace — see [docs/TEST-FRAMEWORK.md](docs/TEST-FRAMEWORK.md) |
 | Authoring aids | Eighteen snippets, six new-script templates, organise imports, live tag/schema completion inside strings, seven AST-based style checks |
-| Console | ANSI colour, export to a text file, optional timestamps |
+| Console | ANSI colour, each run folds under its own header, export to a text file, optional timestamps |
 | Collaboration | Presence — who else has a file open, from another browser or the Designer — and read-only git status in the tree |
 | Chrome | A VS Code-shaped shell: activity bar, resizable side bar and outline, a bottom panel holding the console, the problems list and the terminal |
 
