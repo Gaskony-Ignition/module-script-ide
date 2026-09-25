@@ -87,6 +87,14 @@
   overflow: hidden;
 }
 
+/* Same reasoning as .code-editor-host in CodeEditor.css: CodeMirror draws no
+   outline of its own, so the pane that hosts it needs one for keyboard
+   users. */
+.console-editor:focus-within {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -1px;
+}
+
 .console-output {
   flex: 1 1 auto;
   min-height: 0;

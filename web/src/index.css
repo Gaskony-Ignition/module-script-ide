@@ -340,6 +340,16 @@ button.primary:hover:not(:disabled) {
   filter: brightness(1.15);
 }
 
+/* The global focus ring below is --accent-primary, which is this button's own
+   BACKGROUND — an inset ring the same colour as what it sits on measures at
+   ~1:1. --accent-ink is already computed per-theme to read against
+   --accent-primary (it is this button's own text colour), so it reads here
+   too. */
+button.primary:focus-visible,
+.button.primary:focus-visible {
+  outline-color: var(--accent-ink);
+}
+
 /* Native controls take the theme's accent.
    A checkbox and a radio are painted by the browser, not by this stylesheet, so
    without this they render in Chrome's default BLUE in all ten themes — a

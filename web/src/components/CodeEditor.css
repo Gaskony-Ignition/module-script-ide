@@ -43,6 +43,16 @@
   outline: none;
 }
 
+/* CodeMirror manages its own internal focus state (the blinking cursor) and
+   draws no outline of its own — don't fight that, but the pane still needs
+   ONE for a keyboard user tabbing through the shell, so it goes on the host
+   that wraps whichever view is current, the same 1px inset ring as every
+   other control. */
+.code-editor-host:focus-within {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -1px;
+}
+
 .code-editor-empty {
   display: flex;
   flex: 1 1 auto;
