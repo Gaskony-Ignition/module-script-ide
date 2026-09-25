@@ -3562,6 +3562,7 @@ export default function Workspace({ session }: WorkspaceProps) {
         ref={importInputRef}
         type="file"
         accept=".zip,application/zip"
+        aria-label="Choose a resource zip to import"
         className="visually-hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];

@@ -66,6 +66,12 @@ apart: an error never got far enough to have an opinion.*
 Breakpoint debugging is deliberately **not** included: the only serious Ignition
 debugger requires a running Designer, which defeats the point of a browser IDE.
 
+The IDE's own chrome meets WCAG 2.1 AA — keyboard reach, focus rings, labels,
+contrast and text size — except for reflow below laptop width, which this
+full-screen IDE layout does not target. The code editor (CodeMirror) keeps its
+own keyboard model rather than fighting it: press **Escape then Tab** to leave
+it (Escape first closes an open Find/Replace panel, if one is open).
+
 ## How to use it
 
 Download the signed `.modl` from the

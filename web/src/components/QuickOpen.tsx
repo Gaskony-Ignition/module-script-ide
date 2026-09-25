@@ -252,7 +252,13 @@ export default function QuickOpen({
           />
         </div>
 
-        <ul className="quick-open-list" id="quick-open-list" role="listbox" ref={listRef}>
+        <ul
+          className="quick-open-list"
+          id="quick-open-list"
+          role="listbox"
+          aria-label={symbolMode ? 'Symbols' : 'Scripts and named queries'}
+          ref={listRef}
+        >
           {symbolMode
             ? symbolRows.map((hit, index) => (
                 <li

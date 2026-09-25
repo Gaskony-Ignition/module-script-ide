@@ -182,7 +182,6 @@
 }
 
 .config-paths:focus-visible {
-  outline: none;
   border-color: var(--accent-primary);
 }
 

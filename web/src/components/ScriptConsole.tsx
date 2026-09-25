@@ -606,6 +606,10 @@ export default function ScriptConsole({
           ...pythonSurface,
           ...byteFidelity,
           ...findAndReplace,
+          // See CodeEditor.tsx for why: role="textbox" with no name is an axe
+          // aria-input-field-name failure, and the console has exactly one
+          // buffer so its name never needs to change.
+          EditorView.contentAttributes.of({ 'aria-label': 'Script Console input' }),
           keymap.of([
             {
               key: 'Mod-Enter',

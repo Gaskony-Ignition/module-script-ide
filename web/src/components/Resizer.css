@@ -29,7 +29,14 @@
 .resizer:hover,
 .resizer:focus-visible {
   background: var(--accent-primary);
-  outline: none;
+}
+
+/* The element itself is 1px wide, so an inset ring (the global default) has
+   nowhere to sit — draw it outward instead, the same as any other custom
+   control with no native focus indicator (e.g. a slider handle). */
+.resizer:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
 }
 
 /* The horizontal form, for the bottom panel. Same 1px rule and same padded grab

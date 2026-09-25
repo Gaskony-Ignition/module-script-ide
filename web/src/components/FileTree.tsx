@@ -681,8 +681,12 @@ function SingletonRow({
  * not.
  */
 function GitBadge({ mark }: { mark: GitMark }) {
+  // The letter is sighted-only chrome (title gives the same word on hover);
+  // aria-label carries the word itself so the row's accessible name states
+  // git status instead of silently dropping it, the way the disabled and
+  // inherited/override badges beside it already state theirs in text.
   return (
-    <span className={`git-mark git-mark-${mark}`} title={markTitle(mark)} aria-hidden="true">
+    <span className={`git-mark git-mark-${mark}`} title={markTitle(mark)} aria-label={markTitle(mark)}>
       {markLetter(mark)}
     </span>
   );

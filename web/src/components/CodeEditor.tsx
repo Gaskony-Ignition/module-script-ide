@@ -39,8 +39,8 @@ import { lintLineGutter } from './lintLineGutter';
 import { hasSyntaxCheck, syntaxLint } from './syntaxLint';
 import type { DocLanguage } from '../workspace/docLanguage';
 import {
-  byteFidelity, cssSurface, editorTheme, findAndReplace, folding, goToLine, htmlSurface,
-  javascriptSurface, jsonSurface, plainSurface, pythonSurface, sqlSurface,
+  byteFidelity, cssSurface, editorTheme, escapeFocusOut, findAndReplace, folding, goToLine,
+  htmlSurface, javascriptSurface, jsonSurface, plainSurface, pythonSurface, sqlSurface,
 } from './editorCore';
 import './CodeEditor.css';
 
@@ -480,9 +480,17 @@ function baseExtensions(
       },
       // insertTab inserts the indentUnit — a literal tab, per the facet above.
       { key: 'Tab', run: insertTab, shift: indentLess },
+      ...escapeFocusOut,
       ...defaultKeymap,
       ...historyKeymap,
     ]),
+
+    // Accessible name for the contenteditable surface (axe: aria-input-field-name).
+    // CodeMirror sets role="textbox" itself; it does not invent a label, and
+    // guessing one from the surrounding chrome is exactly the kind of thing
+    // that drifts out of sync with a renamed tab. The open document's own path
+    // is the one name that is always current.
+    EditorView.contentAttributes.of({ 'aria-label': `Code editor: ${doc.path}` }),
 
     editorTheme,
     readOnlySwitch.of(readOnlyExtension(readOnly)),

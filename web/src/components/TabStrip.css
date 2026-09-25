@@ -1,9 +1,19 @@
-.tab-strip {
+/* The row holding the tablist plus the split button (a sibling, never a
+   tab) — background and the rule live here now so the two still read as one
+   bar. See TabStrip.tsx for why the button moved out of role="tablist". */
+.tab-strip-row {
   display: flex;
   flex: 0 0 auto;
-  overflow-x: auto;
+  min-width: 0;
   background: var(--bg-secondary);
   border-bottom: var(--rule-width) solid var(--border-light);
+}
+
+.tab-strip {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .tab {
@@ -115,7 +125,7 @@
   opacity: 1;
 }
 
-.tab-strip {
+.tab-strip-row {
   height: var(--tab-height);
   min-height: var(--tab-height);
 }

@@ -49,9 +49,9 @@
   font-size: var(--font-size-base);
 }
 
-.search-panel-input input:focus-visible {
-  outline: none;
-}
+/* No local override: the input takes the global focus ring (index.css) —
+   the wrapper's :focus-within border swap above was the only indicator,
+   and axe/a11y-check.js look for an actual outline, not a border colour. */
 
 .search-panel-case {
   display: flex;
@@ -199,9 +199,7 @@
   font-size: var(--font-size-base);
 }
 
-.search-panel-replace-input input:focus-visible {
-  outline: none;
-}
+/* See .search-panel-input input above: global focus ring applies. */
 
 .search-panel-replace-button {
   flex: 0 0 auto;

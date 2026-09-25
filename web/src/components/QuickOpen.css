@@ -63,9 +63,8 @@
   font-size: 13px;
 }
 
-.quick-open-input input:focus-visible {
-  outline: none;
-}
+/* No local override: unlike the search box, this input had no focus
+   indicator at all — the global ring in index.css now provides one. */
 
 .quick-open-list {
   flex: 1 1 auto;
@@ -99,6 +98,15 @@
 
 .quick-open-row.is-selected {
   background: var(--accent-primary-bg);
+}
+
+/* --text-muted (below) is tuned against the plain row, not this wash — on it,
+   the kind/detail columns fall to 3:1, and --text-secondary measures the same
+   as --text-muted on this theme (Nord — Dark Frost), so it is not a step up
+   here. --text-primary is the next token that actually differs. */
+.quick-open-row.is-selected .quick-open-kind,
+.quick-open-row.is-selected .quick-open-detail {
+  color: var(--text-primary);
 }
 
 .quick-open-name {

@@ -35,6 +35,7 @@ import {
   drawSelection,
   rectangularSelection,
   highlightSpecialChars,
+  type KeyBinding,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentLess, insertTab } from '@codemirror/commands';
 import { gotoLine, highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
@@ -222,6 +223,20 @@ export const jsonSurface: Extension[] = [...commonSurface, json()];
 export const plainSurface: Extension[] = [...commonSurface];
 
 /**
+ * Escape drops focus out of the editor.
+ *
+ * Tab is bound to a literal tab below (byte fidelity), so without this the
+ * editor is a keyboard trap (WCAG 2.1.2) — nothing else on the page claims
+ * Tab back. `findAndReplace`'s own Escape (`closeSearchPanel`) precedes this
+ * in extension order everywhere it is used, so Escape closes an open
+ * find/replace panel first; press it again (or once, with no panel open) to
+ * leave the editor, then Tab moves on normally.
+ */
+export const escapeFocusOut: KeyBinding[] = [
+  { key: 'Escape', run: (view) => { view.contentDOM.blur(); return true; } },
+];
+
+/**
  * The default keymap, with Tab bound to a literal tab.
  *
  * `insertTab` inserts the `indentUnit`, which the facet above pins to a tab, so
@@ -229,6 +244,7 @@ export const plainSurface: Extension[] = [...commonSurface];
  */
 export const pythonKeymap: Extension = keymap.of([
   { key: 'Tab', run: insertTab, shift: indentLess },
+  ...escapeFocusOut,
   ...defaultKeymap,
   ...historyKeymap,
 ]);

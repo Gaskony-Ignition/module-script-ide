@@ -52,7 +52,6 @@
 }
 
 .rename-field input:focus-visible {
-  outline: none;
   border-color: var(--accent-primary);
 }
 

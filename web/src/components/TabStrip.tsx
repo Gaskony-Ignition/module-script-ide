@@ -64,7 +64,17 @@ export default function TabStrip({
   if (docs.length === 0) return empty ? <>{empty}</> : null;
 
   return (
-    <div className="tab-strip" role="tablist" aria-label="Open scripts">
+    <div className="tab-strip-row">
+      {/* Not role="tablist"/"tab": those require every direct (or, through a
+          role="presentation" wrapper, logical) child to be a tab, and each
+          tab here also carries a close button and, sometimes, a stale-pull
+          button — neither is a tab, so there is no legal way to keep both
+          roles and both buttons. It was never a conformant tablist anyway
+          (no roving tabindex, no arrow-key navigation between tabs — every
+          tab sits in the normal Tab sequence, VS Code style), so this names
+          the group instead and marks the open tab with aria-current, the
+          same convention FileTree uses for the selected row. */}
+      <div className="tab-strip" aria-label="Open scripts">
       {docs.map((doc) => {
         const dirty = isDirty(doc);
         const stale = staleUris?.has(doc.uri) ?? false;
@@ -79,8 +89,7 @@ export default function TabStrip({
           <div key={doc.uri} className={`tab${active ? ' is-active' : ''}`}>
             <button
               type="button"
-              role="tab"
-              aria-selected={active}
+              aria-current={active ? 'true' : undefined}
               className="tab-label"
               title={`${doc.project} · ${doc.path}`}
               onClick={() => onSelect(doc.uri)}
@@ -130,6 +139,9 @@ export default function TabStrip({
           </div>
         );
       })}
+      </div>
+      {/* Outside the tablist on purpose — see the role="presentation" note
+          above; this one is never a tab at all, presentational or otherwise. */}
       {onSplit && activeUri && (
         <button
           type="button"
