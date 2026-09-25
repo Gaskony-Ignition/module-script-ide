@@ -2,6 +2,16 @@
 
 All notable changes to this module. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.26.1] — 2026-09-25
+
+fix: WCAG 2.1 AA across the IDE chrome.
+
+- The code editor and Script Console now name themselves to assistive tech, and Escape reliably drops focus out of them so Tab is never trapped — the README says which key.
+- A real focus ring on the pane-resize divider and on five inputs that were missing one.
+- The tab strip no longer claims to be an ARIA tablist it never behaved like; it is a labelled group instead, with the open tab marked by `aria-current`.
+- Quick Open's result columns read at 3:1 on the highlighted row; raised to pass. Its list now has a name of its own.
+- The import file picker and the file tree's git-status badge are readable by assistive tech; the outline panel's smallest text was under 11px.
+
 ## [1.26.0] — 2026-09-23
 
 fix: console output no longer lost after the first use of a library module; runs fold.
